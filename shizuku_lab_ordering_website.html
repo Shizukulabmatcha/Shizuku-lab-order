@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Shizuku Lab — Order</title>
+<style>
+:root{--bg:#f5f1e7;--paper:#fbfaf5;--ink:#3f473c;--muted:#73796d;--line:#d9d8cc;--accent:#68745e;--dark:#353b32}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#deded6;color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif}
+.app{max-width:480px;margin:auto;min-height:100vh;background:var(--bg);position:relative;padding-bottom:105px}
+.hero{text-align:center;padding:32px 26px 25px}
+.logo{width:128px;height:128px;border-radius:50%;margin:0 auto 24px;object-fit:contain;background:#f8f5ec;box-shadow:0 12px 30px #b8b8ab55}
+.handle{font-size:14px;color:#697064;margin-bottom:15px}.intro{font-family:Georgia,serif;font-size:23px;line-height:1.35;margin:0 auto 18px;max-width:370px}.sub{font-size:14px;line-height:1.65;color:var(--muted);max-width:390px;margin:auto;padding:18px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.actions{display:flex;justify-content:space-between;align-items:center;margin-top:18px}.track{border:1px solid #adb2a6;border-radius:30px;padding:11px 19px;background:transparent;color:var(--ink);font-size:14px}.cartmini{font-size:13px}.hours{margin:20px 18px 30px;background:var(--paper);border:1px solid #aeb2a6;border-radius:20px;padding:20px 20px 18px;box-shadow:0 8px 22px #a9aa9b22}.hours-top{display:flex;justify-content:space-between;font-size:12px;letter-spacing:.12em}.status{font-size:12px;letter-spacing:0}.day{font-family:Georgia,serif;font-size:22px;margin:18px 0 10px}.slot{display:inline-block;border:1px solid #d0d0c5;border-radius:18px;padding:7px 13px;font-size:13px}.section{padding:0 20px;margin-top:30px}.section h2{font-family:Georgia,serif;font-weight:400;letter-spacing:.12em;font-size:25px;margin:0 0 18px;text-transform:uppercase}.product{display:flex;gap:16px;padding:16px 0;border-bottom:1px solid var(--line);cursor:pointer}.pic{width:88px;height:88px;border-radius:15px;object-fit:cover;background:#ebe8dd}.pinfo{flex:1}.pname{font-family:Georgia,serif;font-size:18px;margin:2px 0 6px}.desc{font-size:13px;color:var(--muted);line-height:1.45}.price{font-size:15px;font-weight:600;margin-top:8px}.add{border:1px solid #aeb3a7;background:transparent;border-radius:22px;padding:7px 12px;align-self:end;color:var(--ink)}
+.cartbar{position:fixed;bottom:15px;left:50%;transform:translateX(-50%);width:min(440px,calc(100% - 28px));background:#fffdf8;border-radius:24px;padding:13px 17px;box-shadow:0 8px 30px #5c5f5540;display:flex;align-items:center;justify-content:space-between;z-index:20;cursor:pointer}.count{background:#10110f;color:white;border-radius:50%;width:30px;height:30px;display:grid;place-items:center;font-size:13px}.cartleft{display:flex;align-items:center;gap:12px;font-size:16px}.total{font-size:16px}
+.overlay{position:fixed;inset:0;background:#262a2555;display:none;z-index:30;align-items:flex-end}.sheet{background:var(--paper);width:min(480px,100%);margin:auto;border-radius:25px 25px 0 0;max-height:88vh;overflow:auto;padding:24px 20px 30px}.sheethead{display:flex;justify-content:space-between;align-items:center}.sheet h3{font-family:Georgia,serif;font-size:25px;font-weight:400;margin:0}.x{border:0;background:#ecebe2;border-radius:50%;width:34px;height:34px}.option{margin-top:22px}.option label{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}.choices{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}.choice{border:1px solid #c7c9be;background:#fffdf8;border-radius:18px;padding:9px 12px;font-size:13px}.choice.active{background:var(--dark);color:white;border-color:var(--dark)}.field{margin-top:13px}.field input,.field select{width:100%;padding:13px;border:1px solid #d3d3c8;border-radius:12px;background:#fffdf8;font:inherit;color:var(--ink)}.checkout{width:100%;margin-top:18px;padding:15px;border:0;border-radius:14px;background:var(--dark);color:white;font-weight:600;font-size:15px}.line{display:flex;justify-content:space-between;margin:10px 0;font-size:14px}.grand{font-weight:700;font-size:17px;border-top:1px solid var(--line);padding-top:14px;margin-top:14px}
+.toast{position:fixed;inset:0;background:#262a2555;display:none;z-index:40;align-items:center;justify-content:center;padding:20px}.confirm{background:#fffdf8;border-radius:22px;padding:28px;max-width:410px;width:100%;text-align:center}.confirm h2{font-family:Georgia,serif;font-weight:400;font-size:27px}.confirm p{font-size:14px;line-height:1.65;color:var(--muted)}.confirm button{border:0;background:var(--dark);color:white;border-radius:12px;padding:13px 25px}
+</style>
+</head>
+<body>
+<div class="app">
+<header class="hero">
+<img class="logo" src="https://placehold.co/256x256/f8f5ec/68745e?text=SHIZUKU%20LAB" alt="Shizuku Lab logo">
+<div class="handle">@shizukulab.matcha</div>
+<p class="intro">Small-batch matcha and hojicha, freshly whisked to order and crafted drop by drop.</p>
+<p class="sub">Weekend pre-orders with self-collection at Toa Payoh Lorong 1.</p>
+<div class="actions"><button class="track" onclick="alert('Order tracking will be connected in the live version.')">track order</button><span class="cartmini">🛒 <b id="topCount">0</b></span></div>
+</header>
+
+<section class="hours"><div class="hours-top"><span>TODAY'S HOURS</span><span class="status">● OPEN</span></div><div class="day">Saturday</div><span class="slot">◷ 9:00 AM – 11:00 AM</span></section>
+
+<div id="menu"></div>
+
+<div class="cartbar" onclick="openCart()"><div class="cartleft"><span class="count" id="count">0</span><b>view cart</b></div><span class="total" id="barTotal">$0.00</span></div>
+</div>
+
+<div class="overlay" id="productOverlay"><div class="sheet" id="productSheet"></div></div>
+<div class="overlay" id="cartOverlay"><div class="sheet">
+<div class="sheethead"><h3>Your cart</h3><button class="x" onclick="closeCart()">×</button></div>
+<div id="cartItems"></div>
+<div class="grand line"><span>Total</span><span id="cartTotal">$0.00</span></div>
+<div class="option"><label>Collection</label>
+<div class="field"><select id="date"><option>Saturday</option><option>Sunday</option></select></div>
+<div class="field"><select id="time"><option>9:00 AM – 9:30 AM</option><option>9:30 AM – 10:00 AM</option><option>10:00 AM – 10:30 AM</option><option>10:30 AM – 11:00 AM</option></select></div>
+</div>
+<div class="option"><label>Your details</label>
+<div class="field"><input id="name" placeholder="Name"></div>
+<div class="field"><input id="wa" placeholder="WhatsApp number"></div>
+</div>
+<button class="checkout" onclick="placeOrder()">Continue to PayNow · <span id="payAmount">$0.00</span></button>
+</div></div>
+
+<div class="toast" id="confirm"><div class="confirm"><h2>Order received 🤍</h2><p id="confirmText"></p><button onclick="document.getElementById('confirm').style.display='none'">Done</button></div></div>
+
+<script>
+const products=[
+["MATCHA","Signature Matcha Latte",5.90,"Fresh whisked First Harvest Matcha with oatmilk","https://placehold.co/300x300/e9eee2/68745e?text=Matcha"],
+["MATCHA","Ichigo Matcha Latte",6.90,"Freshly whisked Japanese matcha with creamy oatmilk","https://placehold.co/300x300/e9eee2/68745e?text=Ichigo"],
+["MATCHA","Yakult Matcha",6.90,"Yakult meets freshly whisked matcha. Tangy and creamy.","https://placehold.co/300x300/e9eee2/68745e?text=Yakult"],
+["HOJICHA","Signature Hojicha Latte",5.90,"Fresh whisk first harvest Dark Roasted Hojicha with oat milk","https://placehold.co/300x300/ebe7db/68745e?text=Hojicha"],
+["HOJICHA","Ichigo Houjicha Latte",6.90,"Roasted hojicha with creamy oat milk and house strawberry","https://placehold.co/300x300/ebe7db/68745e?text=Ichigo%20Hojicha"],
+["SPECIAL","Lemonade Matcha Soda",6.90,"Sparkling lemonade topped with freshly whisked matcha","https://placehold.co/300x300/e8eee2/68745e?text=Lemonade"],
+["SPECIAL","NDP Special — Singapore Fog",6.90,"A local favourite, topped with our signature whisked matcha","https://placehold.co/300x300/e8eee2/68745e?text=Singapore%20Fog"],
+["SPECIAL","Ma-Hou Latte",7.90,"Matcha latte base with whisked hojicha","https://placehold.co/300x300/e8eee2/68745e?text=Ma-Hou"],
+["MATCHA","Straight Matcha (Usucha)",8.90,"Freshly whisked 9g of ceremonial grade matcha","https://placehold.co/300x300/e8eee2/68745e?text=Usucha"],
+["BUNDLE","Shizuku Duo",10.50,"Signature Matcha Latte + Signature Dark Roasted Hojicha Latte","https://placehold.co/300x300/e8eee2/68745e?text=Shizuku%20Duo"]
+];
+const cart=[];
+function render(){
+const groups={BUNDLE:"BUNDLE OF TWO",MATCHA:"MATCHA",HOJICHA:"HOJICHA",SPECIAL:"SPECIAL"};
+document.getElementById("menu").innerHTML=Object.entries(groups).map(([g,title])=>{
+let ps=products.map((p,i)=>({...p,i})).filter(p=>p[0]===g);
+return `<section class="section"><h2>${title}</h2>${ps.map(p=>`<div class="product" onclick="openProduct(${p.i})"><img class="pic" src="${p[4]}"><div class="pinfo"><div class="pname">${p[1]}</div><div class="desc">${p[3]}</div><div class="price">$${p[2].toFixed(2)}</div></div><button class="add" onclick="event.stopPropagation();addSimple(${p.i})">+</button></div>`).join("")}</section>`
+}).join("");
+updateBar();
+}
+function addSimple(i){cart.push({i,qty:1,opts:{}});updateBar()}
+function openProduct(i){
+let p=products[i];
+document.getElementById("productSheet").innerHTML=`<div class="sheethead"><h3>${p[1]}</h3><button class="x" onclick="closeProduct()">×</button></div><img src="${p[4]}" style="width:100%;height:210px;object-fit:cover;border-radius:18px;margin-top:15px"><p class="desc" style="font-size:14px;margin-top:14px">${p[3]}</p>
+<div class="option"><label>Ice</label><div class="choices"><button class="choice active">Regular</button><button class="choice">Less Ice</button><button class="choice">No Ice</button></div></div>
+<div class="option"><label>Add-ons</label><div class="choices"><button class="choice" onclick="this.classList.toggle('active')">Strawberry +$1</button><button class="choice" onclick="this.classList.toggle('active')">Extra Matcha +$1</button></div></div>
+<button class="checkout" onclick="addFromProduct(${i})">Add to cart · $${p[2].toFixed(2)}</button>`;
+document.getElementById("productOverlay").style.display="flex";
+}
+function addFromProduct(i){cart.push({i,qty:1,opts:{}});closeProduct();updateBar()}
+function closeProduct(){document.getElementById("productOverlay").style.display="none"}
+function openCart(){document.getElementById("cartOverlay").style.display="flex";renderCart()}
+function closeCart(){document.getElementById("cartOverlay").style.display="none"}
+function total(){return cart.reduce((s,x)=>s+products[x.i][2]*x.qty,s)}
+function renderCart(){
+let el=document.getElementById("cartItems");
+el.innerHTML=cart.length?cart.map((x,k)=>`<div class="line"><span>${products[x.i][1]} × ${x.qty}</span><span>$${(products[x.i][2]*x.qty).toFixed(2)}</span></div>`).join(""):`<p class="desc">Your cart is empty.</p>`;
+document.getElementById("cartTotal").textContent="$"+total().toFixed(2);document.getElementById("payAmount").textContent="$"+total().toFixed(2);
+}
+function updateBar(){let n=cart.reduce((s,x)=>s+x.qty,0);document.getElementById("count").textContent=n;document.getElementById("topCount").textContent=n;document.getElementById("barTotal").textContent="$"+total().toFixed(2)}
+function placeOrder(){
+if(!cart.length){alert("Your cart is empty.");return}
+let name=document.getElementById("name").value.trim(),wa=document.getElementById("wa").value.trim();
+if(!name||!wa){alert("Please enter your name and WhatsApp number.");return}
+let no="SL"+Math.floor(1000+Math.random()*9000);
+document.getElementById("confirmText").innerHTML=`Order <b>#${no}</b><br><br>${name}, your order total is <b>$${total().toFixed(2)}</b>.<br>Collection: ${date.value}, ${time.value}<br>Toa Payoh Lorong 1<br><br><b>Next step:</b> PayNow confirmation will be connected here in the live version.`;
+document.getElementById("cartOverlay").style.display="none";document.getElementById("confirm").style.display="flex";
+}
+render();
+</script>
+</body></html>
