@@ -56,7 +56,15 @@ async function init() {
     try {
       const { data, error } = await db.from("products").select("*").eq("is_available", true).order("category");
       if (error) { state.loadError = error.message; state.menu = []; }
-      else { state.menu = data || []; }
+      else {
+        state.menu = (data || []).map((m) => ({
+          ...m,
+          category: m.category || "Other",
+          name: m.name || "Untitled",
+          description: m.description || "",
+          price: m.price ?? 0,
+        }));
+      }
     } catch (e) {
       state.loadError = (e && e.message) || String(e);
       state.menu = [];

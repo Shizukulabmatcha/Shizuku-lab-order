@@ -194,7 +194,7 @@ function renderEditOverlay() {
     <div class="overlay-card" style="max-height:80vh;overflow-y:auto;">
       <div class="display overlay-title" style="font-size:18px;">${astate.menu.some(m => String(m.id) === String(item.id)) ? "Edit item" : "New item"}</div>
       <div class="field"><label>Name</label><input value="${item.name}" oninput="onEditField('name', this.value)"></div>
-      <div class="field"><label>Category</label><input value="${item.category}" oninput="onEditField('category', this.value)"></div>
+      <div class="field"><label>Category</label><input value="${item.category || ''}" oninput="onEditField('category', this.value)"></div>
       <div class="field"><label>Description</label><textarea rows="2" oninput="onEditField('description', this.value)">${item.description || ""}</textarea></div>
       <div class="field"><label>Price (SGD)</label><input type="number" step="0.1" value="${item.price}" oninput="onEditField('price', this.value)"></div>
       <div class="field"><label>Image path or URL</label><input value="${item.image_url || ""}" placeholder="your-photo.jpg" oninput="onEditField('image_url', this.value)"></div>
