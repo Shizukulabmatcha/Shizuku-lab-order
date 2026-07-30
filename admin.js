@@ -78,21 +78,27 @@ async function saveMenuItem() {
 
   if (!IS_CONFIGURED) { alert("Demo mode: connect Supabase to persist menu changes."); astate.editing = null; render(); return; }
 
-  if (item.id) {
-    // existing product — update
-    const { id, ...fields } = item;
-    const { error } = await db.from("products").update(fields).eq("id", id);
-    if (error) { alert("Could not save to Supabase: " + error.message); return; }
-    astate.menu = astate.menu.map((m) => (m.id === id ? item : m));
-  } else {
-    // new product — let Supabase generate the id
-    const { id, ...fields } = item;
-    const { data, error } = await db.from("products").insert(fields).select().single();
-    if (error) { alert("Could not save to Supabase: " + error.message); return; }
-    astate.menu = [...astate.menu, data];
+  const btn = document.getElementById("save-btn");
+  if (btn) { btn.textContent = "Saving…"; btn.disabled = true; }
+
+  try {
+    if (item.id) {
+      const { id, ...fields } = item;
+      const { error } = await db.from("products").update(fields).eq("id", id);
+      if (error) throw error;
+      astate.menu = astate.menu.map((m) => (m.id === id ? item : m));
+    } else {
+      const { id, ...fields } = item;
+      const { data, error } = await db.from("products").insert(fields).select().single();
+      if (error) throw error;
+      astate.menu = [...astate.menu, data];
+    }
+    astate.editing = null;
+    render();
+  } catch (e) {
+    alert("Could not save: " + ((e && e.message) || String(e)));
+    if (btn) { btn.textContent = "Save"; btn.disabled = false; }
   }
-  astate.editing = null;
-  render();
 }
 async function deleteMenuItem(id) {
   if (!confirm("Delete this item?")) return;
@@ -200,7 +206,7 @@ function renderEditOverlay() {
       <div class="hint" style="text-align:left;margin-bottom:0;">To add a new photo: upload the image file to the same GitHub folder as the other photos, then reference it here as <code>filename.jpg</code>.</div>
       <div class="btn-row" style="margin-top:14px;">
         <button class="btn-secondary" onclick="cancelEdit()">Cancel</button>
-        <button class="btn-primary" onclick="saveMenuItem()">Save</button>
+        <button class="btn-primary" id="save-btn" onclick="saveMenuItem()">Save</button>
       </div>
     </div>
   </div>`;
