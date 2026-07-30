@@ -71,7 +71,7 @@ async function init() {
 function cartLines() {
   return Object.entries(state.cart)
     .filter(([, qty]) => qty > 0)
-    .map(([id, qty]) => ({ item: state.menu.find((m) => m.id === id), qty }))
+    .map(([id, qty]) => ({ item: state.menu.find((m) => String(m.id) === String(id)), qty }))
     .filter((l) => l.item);
 }
 function cartCount() { return cartLines().reduce((s, l) => s + l.qty, 0); }

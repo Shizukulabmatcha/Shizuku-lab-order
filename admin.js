@@ -52,7 +52,7 @@ async function loadAll() {
 }
 
 async function updateOrderStatus(id, status) {
-  astate.orders = astate.orders.map((o) => (o.id === id ? { ...o, status } : o));
+  astate.orders = astate.orders.map((o) => (String(o.id) === String(id) ? { ...o, status } : o));
   render();
   if (IS_CONFIGURED) await db.from("orders").update({ status }).eq("id", id);
 }
@@ -62,7 +62,7 @@ function newMenuItem() {
   render();
 }
 function editMenuItem(id) {
-  astate.editing = { ...astate.menu.find((m) => m.id === id) };
+  astate.editing = { ...astate.menu.find((m) => String(m.id) === String(id)) };
   render();
 }
 function cancelEdit() { astate.editing = null; render(); }
@@ -86,7 +86,7 @@ async function saveMenuItem() {
       const { id, ...fields } = item;
       const { error } = await db.from("products").update(fields).eq("id", id);
       if (error) throw error;
-      astate.menu = astate.menu.map((m) => (m.id === id ? item : m));
+      astate.menu = astate.menu.map((m) => (String(m.id) === String(id) ? item : m));
     } else {
       const { id, ...fields } = item;
       const { data, error } = await db.from("products").insert(fields).select().single();
@@ -102,7 +102,7 @@ async function saveMenuItem() {
 }
 async function deleteMenuItem(id) {
   if (!confirm("Delete this item?")) return;
-  astate.menu = astate.menu.filter((m) => m.id !== id);
+  astate.menu = astate.menu.filter((m) => String(m.id) !== String(id));
   render();
   if (IS_CONFIGURED) await db.from("products").delete().eq("id", id);
 }
@@ -192,7 +192,7 @@ function renderEditOverlay() {
   return `
   <div class="overlay">
     <div class="overlay-card" style="max-height:80vh;overflow-y:auto;">
-      <div class="display overlay-title" style="font-size:18px;">${astate.menu.some(m => m.id === item.id) ? "Edit item" : "New item"}</div>
+      <div class="display overlay-title" style="font-size:18px;">${astate.menu.some(m => String(m.id) === String(item.id)) ? "Edit item" : "New item"}</div>
       <div class="field"><label>Name</label><input value="${item.name}" oninput="onEditField('name', this.value)"></div>
       <div class="field"><label>Category</label><input value="${item.category}" oninput="onEditField('category', this.value)"></div>
       <div class="field"><label>Description</label><textarea rows="2" oninput="onEditField('description', this.value)">${item.description || ""}</textarea></div>
