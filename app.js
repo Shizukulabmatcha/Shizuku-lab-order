@@ -22,7 +22,9 @@ const state = {
   screen: "menu",
   activeCategory: "All",
   slots: [],
-  form: { name: "", phone: "", slotId: "", notes: "" },
+  form: { name: "", phone: "", slotId: "", notes: "", promoCode: "" },
+  promo: null, // { code, discount_type, discount_value, amount }
+  promoMsg: "",
   lastOrder: null,
   loading: true,
   loadError: null,
@@ -31,23 +33,47 @@ const state = {
 function money(n) { return `$${Number(n).toFixed(2)}`; }
 function uidCode() { return "SL-" + Math.random().toString(36).slice(2, 8).toUpperCase(); }
 
+function formatTimeRange(open, close) {
+  function fmt(t) {
+    const [hh, mm] = t.split(":").map(Number);
+    const period = hh >= 12 ? "PM" : "AM";
+    let h12 = hh % 12; if (h12 === 0) h12 = 12;
+    return `${h12}:${String(mm).padStart(2, "0")} ${period}`;
+  }
+  return `${fmt(open)} – ${fmt(close)}`;
+}
+function toMinutes(t) { const [hh, mm] = t.split(":").map(Number); return hh * 60 + mm; }
+
 function computeSlots() {
   const now = new Date();
-  const targets = [
-    { dow: 6, label: "Sat", time: "10:00 AM – 12:00 PM" },
-    { dow: 0, label: "Sun", time: "11:00 AM – 1:00 PM" },
-  ];
-  return targets.map((t) => {
+  const nowM = now.getHours() * 60 + now.getMinutes();
+  return STORE_HOURS.map((t) => {
     const d = new Date(now);
-    let diff = (t.dow - now.getDay() + 7) % 7;
-    if (diff === 0) diff = 7;
+    let diff = (t.day - now.getDay() + 7) % 7;
+    if (diff === 0 && nowM >= toMinutes(t.close)) diff = 7; // today's window already passed
     d.setDate(now.getDate() + diff);
     return {
       id: `${t.label}-${d.toISOString().slice(0, 10)}`,
-      label: `${t.label}, ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`,
-      time: t.time,
+      label: `${t.label.slice(0, 3)}, ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`,
+      time: formatTimeRange(t.open, t.close),
     };
   });
+}
+
+function computeStoreStatus() {
+  const now = new Date();
+  const day = now.getDay();
+  const nowM = now.getHours() * 60 + now.getMinutes();
+  const todayHours = STORE_HOURS.find((h) => h.day === day);
+  let isOpen = false;
+  if (todayHours) isOpen = nowM >= toMinutes(todayHours.open) && nowM < toMinutes(todayHours.close);
+  let next = null;
+  for (let i = 1; i <= 7; i++) {
+    const d = (day + i) % 7;
+    const conf = STORE_HOURS.find((h) => h.day === d);
+    if (conf) { next = conf; break; }
+  }
+  return { isOpen, todayHours, next };
 }
 
 async function init() {
@@ -84,6 +110,37 @@ function cartLines() {
 }
 function cartCount() { return cartLines().reduce((s, l) => s + l.qty, 0); }
 function cartTotal() { return cartLines().reduce((s, l) => s + l.qty * l.item.price, 0); }
+function orderTotal() {
+  const t = cartTotal() - (state.promo ? state.promo.amount : 0);
+  return Math.max(0, t);
+}
+
+async function applyPromoCode() {
+  const code = (state.form.promoCode || "").trim().toUpperCase();
+  if (!code) return;
+  if (!state.form.phone.trim()) { state.promoMsg = "Enter your phone number first, then apply the code."; render(); return; }
+  if (!IS_CONFIGURED) { state.promoMsg = "Demo mode: connect Supabase to validate promo codes."; render(); return; }
+
+  const { data: promoRows, error } = await db.from("promo_codes").select("*").ilike("code", code).eq("active", true).limit(1);
+  if (error) { state.promoMsg = "Could not check code: " + error.message; render(); return; }
+  const promo = promoRows && promoRows[0];
+  if (!promo) { state.promoMsg = "That code isn't valid."; state.promo = null; render(); return; }
+  if (promo.expires_at && new Date(promo.expires_at) < new Date()) { state.promoMsg = "That code has expired."; state.promo = null; render(); return; }
+
+  if (promo.usage_limit != null) {
+    const { count } = await db.from("promo_redemptions").select("id", { count: "exact", head: true }).ilike("code", code);
+    if ((count || 0) >= promo.usage_limit) { state.promoMsg = "That code has reached its usage limit."; state.promo = null; render(); return; }
+  }
+  const { count: usedByPhone } = await db.from("promo_redemptions").select("id", { count: "exact", head: true }).ilike("code", code).eq("phone", state.form.phone.trim());
+  if ((usedByPhone || 0) > 0) { state.promoMsg = "You've already used this code."; state.promo = null; render(); return; }
+
+  const rawAmount = promo.discount_type === "percent" ? cartTotal() * (promo.discount_value / 100) : promo.discount_value;
+  const amount = Math.min(cartTotal(), Math.max(0, rawAmount));
+  state.promo = { code: promo.code, discount_type: promo.discount_type, discount_value: promo.discount_value, amount };
+  state.promoMsg = `Applied — ${promo.discount_type === "percent" ? promo.discount_value + "% off" : money(promo.discount_value) + " off"}`;
+  render();
+}
+function removePromoCode() { state.promo = null; state.promoMsg = ""; state.form.promoCode = ""; render(); }
 
 function addToCart(id, delta) {
   state.cart[id] = Math.max(0, (state.cart[id] || 0) + delta);
@@ -103,7 +160,7 @@ async function submitOrder() {
     pickup_time: slot ? slot.time : "",
     notes: state.form.notes,
     items: cartLines().map((l) => ({ name: l.item.name, price: l.item.price, qty: l.qty })),
-    total: cartTotal(),
+    total: orderTotal(),
     status: "awaiting_payment",
   };
 
@@ -119,6 +176,9 @@ async function submitOrder() {
   if (error) {
     alert("Something went wrong submitting your order. Please try again.\n" + error.message);
     return;
+  }
+  if (state.promo) {
+    await db.from("promo_redemptions").insert({ code: state.promo.code, phone: state.form.phone.trim(), order_id: code });
   }
   state.lastOrder = { ...order, slot };
   state.screen = "payment";
@@ -136,6 +196,28 @@ async function markPaid() {
 }
 
 /* ---------- rendering ---------- */
+
+function storeInfoPanel() {
+  const status = computeStoreStatus();
+  const hoursBlock = status.todayHours
+    ? `<div class="hours-day">${status.todayHours.label} (today)</div><div class="hours-time">${formatTimeRange(status.todayHours.open, status.todayHours.close)}</div>`
+    : status.next
+    ? `<div class="hours-day">Next: ${status.next.label}</div><div class="hours-time">${formatTimeRange(status.next.open, status.next.close)}</div>`
+    : `<div class="hours-time">Hours coming soon</div>`;
+  return `
+  <div class="store-panel">
+    <img src="logo.png" class="store-logo" alt="Shizuku Lab logo">
+    <a class="store-insta" href="https://instagram.com/${STORE_INFO.instagram}" target="_blank" rel="noopener">@${STORE_INFO.instagram}</a>
+    <div class="store-dropoff">${STORE_INFO.dropOffPoints.join(" &nbsp;/&nbsp; ")}</div>
+    <div class="hours-card">
+      <div class="hours-row">
+        <span class="hours-label">HOURS</span>
+        <span class="hours-status ${status.isOpen ? "open" : "closed"}">${status.isOpen ? "OPEN NOW" : "CLOSED"}</span>
+      </div>
+      ${hoursBlock}
+    </div>
+  </div>`;
+}
 
 function header({ title = "Shizuku Lab", subtitle = "雫ラボ · crafted drop by drop", showCart = false } = {}) {
   return `
@@ -165,6 +247,7 @@ function renderMenu() {
   const items = state.activeCategory === "All" ? state.menu : state.menu.filter((m) => m.category === state.activeCategory);
   return `
     ${header({ showCart: true })}
+    ${storeInfoPanel()}
     ${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — showing sample items. Connect Supabase in <code>js/config.js</code> to load your real menu and accept orders. See <code>README.md</code>.</div>` : ""}
     ${state.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load products from Supabase: <code>${state.loadError}</code>. Check that the <code>product</code> table exists and its row-level security allows public read.</div>` : ""}
     <div class="cats">
@@ -241,14 +324,26 @@ function renderCheckout() {
         </button>
       `).join("")}
       <div class="field"><label>Notes (optional)</label><textarea id="f-notes" rows="2" placeholder="Less ice, allergies, etc." oninput="onFormInput('notes', this.value)">${f.notes}</textarea></div>
+      <div class="field">
+        <label>Promo code (optional)</label>
+        ${state.promo
+          ? `<div class="slot active" style="justify-content:space-between;"><span><b>${state.promo.code}</b> applied</span><button class="link-btn" style="border:none;background:none;color:#B33;" onclick="removePromoCode()">Remove</button></div>`
+          : `<div style="display:flex;gap:8px;">
+              <input id="f-promo" value="${f.promoCode}" placeholder="e.g. WELCOME10" style="flex:1;" oninput="onFormInput('promoCode', this.value)">
+              <button class="btn-primary" style="flex:none;padding:0 18px;" onclick="applyPromoCode()">Apply</button>
+            </div>`
+        }
+        ${state.promoMsg ? `<div class="ref-note">${state.promoMsg}</div>` : ""}
+      </div>
       <div class="summary-card">
         ${cartLines().map((l) => `<div class="row"><span class="label">${l.item.name} × ${l.qty}</span><span>${money(l.item.price * l.qty)}</span></div>`).join("")}
+        ${state.promo ? `<div class="row"><span class="label">Discount (${state.promo.code})</span><span>-${money(state.promo.amount)}</span></div>` : ""}
         <div class="divider"></div>
-        <div class="row bold"><span class="label">Total</span><span>${money(cartTotal())}</span></div>
+        <div class="row bold"><span class="label">Total</span><span>${money(orderTotal())}</span></div>
       </div>
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
-      <button class="primary-btn" id="checkout-btn" ${canSubmit ? "" : "disabled"} onclick="submitOrder()">Continue to payment · ${money(cartTotal())}</button>
+      <button class="primary-btn" id="checkout-btn" ${canSubmit ? "" : "disabled"} onclick="submitOrder()">Continue to payment · ${money(orderTotal())}</button>
     </div></div>
   `;
 }
@@ -261,7 +356,7 @@ function onFormInput(key, value) {
     const btn = document.getElementById("checkout-btn");
     if (btn) {
       btn.toggleAttribute("disabled", !canSubmit);
-      btn.textContent = `Continue to payment · ${money(cartTotal())}`;
+      btn.textContent = `Continue to payment · ${money(orderTotal())}`;
     }
     if (key === "slotId") render(); // slot selection needs visual update
   }
@@ -274,7 +369,7 @@ function renderPayment() {
     <div class="screen">
       <div class="summary-card">
         <div class="qr-box"><div class="qr-placeholder"></div></div>
-        <div class="hint">Scan with your banking app, or PayNow to <b>+65 8XXX XXXX</b></div>
+        <div class="hint">Scan with your banking app, or PayNow to <b>${STORE_INFO.paynowNumber}</b></div>
         <div class="divider"></div>
         <div class="row"><span class="label">Order</span><span class="mono">${o.id}</span></div>
         <div class="row bold"><span class="label">Amount</span><span>${money(o.total)}</span></div>
