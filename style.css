@@ -110,6 +110,9 @@ img{display:block;max-width:100%;}
 .qr-placeholder{width:168px;height:168px;border-radius:12px;background:repeating-linear-gradient(45deg,#2A2A22 0 6px,#F3EEE3 6px 12px);opacity:.9;}
 .hint{font-size:11.5px;color:var(--muted);text-align:center;margin-bottom:14px;}
 .ref-note{font-size:11.5px;color:var(--gold);margin-top:8px;}
+.payment-proof-card{margin-top:12px;}
+.file-input{display:block;width:100%;font:inherit;font-size:12px;padding:10px;border:1px dashed var(--matcha-lt);border-radius:10px;background:var(--matcha-bg);}
+.file-name{font-size:11.5px;color:var(--muted);margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
 /* confirmation */
 .check-circle{width:56px;height:56px;border-radius:999px;background:var(--matcha);display:flex;align-items:center;justify-content:center;margin:20px auto;}

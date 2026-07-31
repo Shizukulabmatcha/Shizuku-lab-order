@@ -1,66 +1,42 @@
-# Shizuku Lab — ordering site
+# Shizuku Lab ordering website
 
-A plain HTML/CSS/JS site (no build step). `index.html` is the customer ordering
-page, `admin.html` is your shop dashboard. Right now it runs in **demo mode**
-with sample data — follow the steps below to connect it to a real database.
+This is a no-build static website. Upload these files to the same GitHub repository that Vercel already deploys, or deploy this folder as a static site.
 
-## 1. Set up Supabase (free, ~5 minutes)
+## What is included
 
-1. Go to [supabase.com](https://supabase.com) → sign up → **New project** (free tier is enough).
-2. Once it's created, open **SQL Editor** → **New query**, paste the entire contents of `schema.sql` from this folder, and click **Run**. This creates the `menu_items` and `orders` tables and loads your starting menu.
-3. Go to **Project Settings → API**. Copy:
-   - **Project URL**
-   - **anon public** key (do **not** use the `service_role` key — that one must stay secret)
-4. Open `js/config.js` and paste them in:
-   ```js
-   const SUPABASE_URL = "https://xxxxxxxx.supabase.co";
-   const SUPABASE_ANON_KEY = "eyJ....";
-   ```
-5. Save. Reload the site — the "demo mode" banner should disappear.
+- Premium mobile-first Shizuku Lab storefront using the existing drink images
+- Menu from the existing `products` table, including categories and stock
+- Existing `option_groups` / `options` customisation flow (Ice, Sweetness, and future options)
+- Cart, promo code, customer details, pickup date/time and notes
+- PayNow details, official QR image support, transaction reference and private payment-proof upload
+- Confirmation flow and a PIN-gated order dashboard
+- Admin actions: view private proof, confirm payment, confirm order, mark collected; plus menu and store-settings editing
 
-## 2. Put it on the internet
+## Deploy
 
-Any static host works. Easiest options:
+1. Unzip this file.
+2. Replace the files in `shizukulabmatcha/shizuku-lab-order` with this folder's contents, keeping any new files you personally added in GitHub.
+3. Commit and push. Vercel will deploy automatically.
 
-**Netlify (drag and drop):**
-1. Go to [app.netlify.com/drop](https://app.netlify.com/drop)
-2. Drag the whole `shizuku-lab-site` folder onto the page
-3. You'll get a live URL immediately (you can rename it or connect a custom domain later in Netlify settings)
+There is no `npm install` and no build command.
 
-**Vercel:**
-1. Go to [vercel.com/new](https://vercel.com/new) → drag and drop the folder, or connect a GitHub repo containing this folder
-2. Deploy — no build settings needed
+## Supabase setup already used
 
-Either way, share that URL with customers — that's the ordering link.
+This project deliberately keeps the existing table names and connection in `config.js`:
 
-## 3. Change the shop PIN
+`products`, `option_groups`, `options`, `orders`, `order_items`, `order_item_options`, `promo_codes`, `promo_redemptions`, and `store_settings`.
 
-Open `js/config.js` and change `SHOP_PIN` to whatever you like. This PIN only
-gates the admin page UI, not the database (see the note at the bottom of
-`schema.sql`) — fine for now, but worth upgrading to real Supabase Auth
-before you scale up.
+The customer payment-proof process uses the private `payment-proofs` storage bucket. Anonymous visitors need **INSERT** access to this bucket only; do not make it public. The dashboard creates a one-minute signed link when you choose **View proof**.
 
-## 4. Add or swap product photos
+## Add the official PayNow QR
 
-Photos live in `images/`. To add a new one:
-1. Upload the image file into the `images/` folder (via your host's file browser, or by re-deploying the whole folder with the new file added)
-2. In the shop dashboard (`admin.html` → Menu tab → Edit), set **Image path or URL** to `images/your-filename.jpg`
+1. In Supabase Storage, upload the QR image to the public `paynow` bucket.
+2. Copy its public URL.
+3. Open `admin.html`, unlock it with your shop PIN, then Settings.
+4. Paste the URL into **PayNow QR image URL** and save.
 
-You can also point `image_url` at any external image URL instead.
+Until then the checkout will show the PayNow name and number from `store_settings`, so customers can pay manually.
 
-## 5. PayNow payments
+## Important security note
 
-The payment screen currently shows a placeholder QR pattern and asks
-customers to transfer manually with the order code as reference, then tap
-"I've sent payment." You confirm receipt in the shop dashboard. For a real
-scannable PayNow QR, you can generate a static one from your bank's app and
-replace `.qr-placeholder` in `css/style.css` with an `<img>` of that QR code.
-
-## What's already assumed
-
-The starting menu in `schema.sql` was assembled from the photos and
-screenshots you shared — category names, a couple of prices, and which photo
-matches which drink are best guesses (e.g. the Yakult, sakura, and citrus
-photos were mapped to "Special" items I named). Everything is editable from
-the shop dashboard, so feel free to rename, reprice, or delete anything
-that's not right.
+`SHOP_PIN` is a small-shop visual gate only because it is in browser code. It does not replace Supabase Authentication or secure row-level policies. Do not add a service-role key to this website.

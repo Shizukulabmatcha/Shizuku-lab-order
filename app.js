@@ -28,6 +28,7 @@ const state = {
     paynow_name: "",
     paynow_number: "",
     paynow_url: "",
+    paynow_qr_url: "",
     collection_address: "Blk 130A drop off point, Near Creamier TPY, Toa Payoh Lorong 1, Singapore",
     saturday_collection_time: "10:00 AM - 12:00 PM",
     sunday_collection_time: "10:00 AM - 1:00 PM",
@@ -36,6 +37,7 @@ const state = {
   promo: null,
   promoMsg: "",
   lastOrder: null,
+  payment: { reference: "", proofFile: null, proofName: "", submitting: false },
   loading: true,
   loadError: null,
 };
@@ -429,17 +431,47 @@ async function submitOrder() {
 }
 
 /* ---------- mark paid ---------- */
-async function markPaid() {
+async function submitPaymentProof() {
   if (!state.lastOrder) return;
   const order = state.lastOrder;
-  if (IS_CONFIGURED && order.id) {
-    const { error } = await db.from("orders").update({ payment_status: "submitted", order_status: "awaiting_confirmation" }).eq("id", order.id);
-    if (error) { alert("Could not update payment status.\n" + error.message); return; }
-  }
-  state.lastOrder = { ...order, payment_status: "submitted", order_status: "awaiting_confirmation" };
-  state.cart = {};
-  state.screen = "confirmation";
+  const payment = state.payment;
+  if (!payment.reference.trim()) { alert("Please enter your PayNow transaction reference."); return; }
+  if (!payment.proofFile) { alert("Please upload your payment screenshot."); return; }
+  payment.submitting = true;
   render();
+  try {
+    let proofUrl = "";
+    if (IS_CONFIGURED && order.id) {
+      const ext = (payment.proofFile.name.split(".").pop() || "jpg").replace(/[^a-z0-9]/gi, "");
+      const safeOrder = String(order.order_number || order.id).replace(/[^a-z0-9_-]/gi, "");
+      const path = `${safeOrder}-${Date.now()}.${ext}`;
+      const { error: uploadError } = await db.storage.from("payment-proofs").upload(path, payment.proofFile, { upsert: false, contentType: payment.proofFile.type || undefined });
+      if (uploadError) throw uploadError;
+      proofUrl = path;
+      const { error } = await db.from("orders").update({
+        payment_status: "pending_confirmation", order_status: "pending",
+        payment_reference: payment.reference.trim(), payment_proof_url: proofUrl,
+      }).eq("id", order.id);
+      if (error) throw error;
+    }
+    state.lastOrder = { ...order, payment_status: "pending_confirmation", payment_reference: payment.reference.trim(), payment_proof_url: proofUrl };
+    state.cart = {};
+    state.screen = "confirmation";
+  } catch (error) {
+    console.error("Payment proof submission error:", error);
+    alert("Could not submit your payment proof. Please try again.\n\n" + (error?.message || String(error)));
+  } finally {
+    payment.submitting = false;
+    render();
+  }
+}
+
+function onPaymentReference(value) { state.payment.reference = value; }
+function onPaymentProof(file) {
+  state.payment.proofFile = file || null;
+  state.payment.proofName = file ? file.name : "";
+  const label = document.getElementById("proof-file-name");
+  if (label) label.textContent = state.payment.proofName || "No file selected";
 }
 
 /* ---------- PayNow SGQR generation (EMVCo / SGQR spec) ---------- */
@@ -567,11 +599,7 @@ function renderFAQ() {
   return `
     <section class="faq-section">
       <div class="faq-title">FAQ</div>
-      <details class="faq-item"><summary>Where is collection?</summary><div class="faq-answer">Collection is at ${escapeHtml(state.store.collection_address || "Toa Payoh Lorong 1, Singapore")}.</div></details>
-      <details class="faq-item"><summary>When can I collect my drinks?</summary><div class="faq-answer">Saturday: ${escapeHtml(state.store.saturday_collection_time || "10:00 AM - 12:00 PM")}<br><br>Sunday: ${escapeHtml(state.store.sunday_collection_time || "10:00 AM - 1:00 PM")}</div></details>
-      <details class="faq-item"><summary>Can I request less ice or less sweet?</summary><div class="faq-answer">Yes. Please select your preferred option when ordering.</div></details>
-      <details class="faq-item"><summary>How do I pay?</summary><div class="faq-answer">Payment is made via PayNow after submitting your order.</div></details>
-      <details class="faq-item"><summary>Can I change my order after payment?</summary><div class="faq-answer">Please contact us as soon as possible if you need to make a change.</div></details>
+      ${(STORE_FAQ || []).map((item) => `<details class="faq-item"><summary>${escapeHtml(item.q)}</summary><div class="faq-answer">${escapeHtml(item.a).replace(/\n/g, "<br>")}</div></details>`).join("")}
     </section>
   `;
 }
@@ -799,13 +827,11 @@ function renderPayment() {
   if (!order) return renderMenu();
   const paynowName = state.store.paynow_name || state.store.store_name || "Shizuku Lab";
   const paynowNumber = state.store.paynow_number || "";
+  const staticQrUrl = state.store.paynow_qr_url || state.store.paynow_url;
   let qrHtml;
-  try {
-    qrHtml = paynowNumber ? `<div class="qr-box">${payNowQrSvg(order.total, order.order_number)}</div>` : null;
-  } catch (e) { qrHtml = null; }
   if (!qrHtml) {
-    qrHtml = state.store.paynow_url
-      ? `<div class="qr-box"><img src="${escapeHtml(state.store.paynow_url)}" alt="PayNow QR" style="max-width:220px;width:100%;height:auto;"></div>`
+    qrHtml = staticQrUrl
+      ? `<div class="qr-box"><img src="${escapeHtml(staticQrUrl)}" alt="PayNow QR" style="max-width:220px;width:100%;height:auto;"></div>`
       : `<div class="qr-box"><div class="qr-placeholder"></div></div>`;
   }
   return `
@@ -814,15 +840,20 @@ function renderPayment() {
       <div class="summary-card">
         ${qrHtml}
         <div class="hint">Scan with your banking app, or PayNow to <b>${escapeHtml(paynowName)}</b>${paynowNumber ? `<br>${escapeHtml(paynowNumber)}` : ""}</div>
-        <div class="hint" style="color:#B78A2E;">This QR code is valid for 15 minutes — please pay promptly.</div>
+        ${staticQrUrl ? `<div class="hint" style="color:#B78A2E;">Scan the official PayNow QR above, then upload your proof below.</div>` : `<div class="hint" style="color:#B78A2E;">PayNow using the name and number above. Add your official QR in Settings whenever you are ready.</div>`}
         <div class="divider"></div>
         <div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(order.order_number || order.id || "")}</span></div>
         <div class="row bold"><span class="label">Amount</span><span>${money(order.total)}</span></div>
         <div class="ref-note">Enter <b>${escapeHtml(order.order_number || order.id || "")}</b> as the payment reference.</div>
       </div>
+      <div class="summary-card payment-proof-card">
+        <div class="field"><label>PayNow transaction reference *</label><input value="${escapeHtml(state.payment.reference)}" placeholder="e.g. 123456789" oninput="onPaymentReference(this.value)"></div>
+        <div class="field"><label>Payment screenshot *</label><input class="file-input" type="file" accept="image/png,image/jpeg,image/webp" onchange="onPaymentProof(this.files[0])"><div class="file-name" id="proof-file-name">${escapeHtml(state.payment.proofName || "No file selected")}</div></div>
+        <div class="hint">Your screenshot is private and only used to verify this order.</div>
+      </div>
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
-      <button class="primary-btn" onclick="markPaid()">I've sent payment</button>
+      <button class="primary-btn" ${state.payment.submitting ? "disabled" : ""} onclick="submitPaymentProof()">${state.payment.submitting ? "Submitting proof…" : "Submit payment proof"}</button>
       <div class="hint" style="margin-top:8px;margin-bottom:0;">We'll confirm your order once payment is verified.</div>
     </div></div>
   `;
