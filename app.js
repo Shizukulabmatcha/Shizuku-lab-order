@@ -136,7 +136,7 @@ const state = {
 
   form: {
     name: "",
-    phone: "",
+    customer_phone: "",
     instagram: "",
     slotId: "",
     notes: "",
