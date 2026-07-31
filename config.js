@@ -31,7 +31,7 @@ Today, Shizuku is still a small home-based matcha studio, where every cup is fre
     a: "Payment is via PayNow. After submitting your order, simply scan the QR code or PayNow us using the details shown, then upload your payment screenshot. We’ll confirm your order once payment is verified. ✅"
   },
   {
-    q: "🏃 What happens if I'm late for pickup?",
+    q: "🏃 What happens if I'm late?",
     a: "Do message us on Instagram if you're late — we'll do our best to hold your order, but freshly whisked matcha is best collected on time."
   },
   {

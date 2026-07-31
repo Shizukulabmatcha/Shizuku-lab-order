@@ -32,10 +32,12 @@ const state = {
     collection_address: "Blk 130A drop off point, Near Creamier TPY, Toa Payoh Lorong 1, Singapore",
     saturday_collection_time: "10:00 AM - 12:00 PM",
     sunday_collection_time: "10:00 AM - 1:00 PM",
+    order_ahead_days: 14,
   },
   form: { name: "", phone: "", instagram: "", slotId: "", notes: "", promoCode: "" },
   promo: null,
   promoMsg: "",
+  checkoutErrors: {},
   lastOrder: null,
   payment: { reference: "", proofFile: null, proofName: "", submitting: false },
   loading: true,
@@ -86,9 +88,16 @@ function getWeekendConfig() {
 }
 function computeSlots() {
   const now = new Date();
-  return getWeekendConfig().map((config) => {
-    let diff = (config.day - now.getDay() + 7) % 7;
-    if (diff === 0) {
+  const aheadDays = Math.max(1, Math.min(90, Number(state.store.order_ahead_days) || 14));
+  const schedule = new Map(getWeekendConfig().map((config) => [config.day, config]));
+  const slots = [];
+  for (let offset = 0; offset <= aheadDays; offset += 1) {
+    const date = new Date(now);
+    date.setHours(0, 0, 0, 0);
+    date.setDate(now.getDate() + offset);
+    const config = schedule.get(date.getDay());
+    if (!config || !config.time) continue;
+    if (offset === 0) {
       const match = config.time.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
       if (match) {
         let hour = Number(match[1]);
@@ -96,15 +105,12 @@ function computeSlots() {
         const period = match[3].toUpperCase();
         if (period === "PM" && hour !== 12) hour += 12;
         if (period === "AM" && hour === 12) hour = 0;
-        const currentMinutes = now.getHours() * 60 + now.getMinutes();
-        const closeMinutes = hour * 60 + minute;
-        if (currentMinutes >= closeMinutes) diff = 7;
+        if (now.getHours() * 60 + now.getMinutes() >= hour * 60 + minute) continue;
       }
     }
-    const date = new Date(now);
-    date.setDate(now.getDate() + diff);
-    return { id: `${config.label}-${formatDateForDatabase(date)}`, label: formatDateLabel(date), date: formatDateForDatabase(date), time: config.time };
-  });
+    slots.push({ id: `${config.label}-${formatDateForDatabase(date)}`, label: `${config.label} · ${formatDateLabel(date)}`, date: formatDateForDatabase(date), time: config.time });
+  }
+  return slots;
 }
 
 /* ---------- load products / options ---------- */
@@ -345,9 +351,8 @@ function removePromoCode() { state.promo = null; state.promoMsg = ""; state.form
 /* ---------- submit order ---------- */
 async function submitOrder() {
   const f = state.form;
-  if (!f.name.trim()) { alert("Please enter your name."); return; }
-  if (!f.phone.trim()) { alert("Please enter your phone number."); return; }
-  if (!f.slotId) { alert("Please select a pickup slot."); return; }
+  const checkoutErrors = getCheckoutErrors();
+  if (Object.keys(checkoutErrors).length) { state.checkoutErrors = checkoutErrors; render(); return; }
   if (cartLines().length === 0) { alert("Your cart is empty."); setScreen("menu"); return; }
   const slot = state.slots.find((item) => item.id === f.slotId);
   if (!slot) { alert("Please select a valid pickup slot."); return; }
@@ -362,7 +367,9 @@ async function submitOrder() {
     customer_phone: f.phone.trim(),
     collection_date: slot.date,
     collection_time: slot.time,
-    instagram: f.instagram ? f.instagram.trim().replace(/^@/, "") : null,
+    // Existing Supabase schema requires this column to be non-null.
+    // An empty string keeps Instagram optional for customers.
+    instagram: f.instagram.trim().replace(/^@/, ""),
     total,
     payment_status: "awaiting_payment",
     order_status: "pending",
@@ -437,8 +444,7 @@ async function submitPaymentProof() {
   const payment = state.payment;
   if (!payment.reference.trim()) { alert("Please enter your PayNow transaction reference."); return; }
   if (!payment.proofFile) { alert("Please upload your payment screenshot."); return; }
-  payment.submitting = true;
-  render();
+  payment.submitting = true; render();
   try {
     let proofUrl = "";
     if (IS_CONFIGURED && order.id) {
@@ -448,31 +454,18 @@ async function submitPaymentProof() {
       const { error: uploadError } = await db.storage.from("payment-proofs").upload(path, payment.proofFile, { upsert: false, contentType: payment.proofFile.type || undefined });
       if (uploadError) throw uploadError;
       proofUrl = path;
-      const { error } = await db.from("orders").update({
-        payment_status: "pending_confirmation", order_status: "pending",
-        payment_reference: payment.reference.trim(), payment_proof_url: proofUrl,
-      }).eq("id", order.id);
+      const { error } = await db.from("orders").update({ payment_status: "pending_confirmation", order_status: "pending", payment_reference: payment.reference.trim(), payment_proof_url: proofUrl }).eq("id", order.id);
       if (error) throw error;
     }
     state.lastOrder = { ...order, payment_status: "pending_confirmation", payment_reference: payment.reference.trim(), payment_proof_url: proofUrl };
-    state.cart = {};
-    state.screen = "confirmation";
+    state.cart = {}; state.screen = "confirmation";
   } catch (error) {
-    console.error("Payment proof submission error:", error);
     alert("Could not submit your payment proof. Please try again.\n\n" + (error?.message || String(error)));
-  } finally {
-    payment.submitting = false;
-    render();
-  }
+  } finally { payment.submitting = false; render(); }
 }
 
 function onPaymentReference(value) { state.payment.reference = value; }
-function onPaymentProof(file) {
-  state.payment.proofFile = file || null;
-  state.payment.proofName = file ? file.name : "";
-  const label = document.getElementById("proof-file-name");
-  if (label) label.textContent = state.payment.proofName || "No file selected";
-}
+function onPaymentProof(file) { state.payment.proofFile = file || null; state.payment.proofName = file ? file.name : ""; const label = document.getElementById("proof-file-name"); if (label) label.textContent = state.payment.proofName || "No file selected"; }
 
 /* ---------- PayNow SGQR generation (EMVCo / SGQR spec) ---------- */
 const CRC_TABLE = [0x0000,0x1021,0x2042,0x3063,0x4084,0x50a5,0x60c6,0x70e7,0x8108,0x9129,0xa14a,0xb16b,0xc18c,0xd1ad,0xe1ce,0xf1ef,0x1231,0x0210,0x3273,0x2252,0x52b5,0x4294,0x72f7,0x62d6,0x9339,0x8318,0xb37b,0xa35a,0xd3bd,0xc39c,0xf3ff,0xe3de,0x2462,0x3443,0x0420,0x1401,0x64e6,0x74c7,0x44a4,0x5485,0xa56a,0xb54b,0x8528,0x9509,0xe5ee,0xf5cf,0xc5ac,0xd58d,0x3653,0x2672,0x1611,0x0630,0x76d7,0x66f6,0x5695,0x46b4,0xb75b,0xa77a,0x9719,0x8738,0xf7df,0xe7fe,0xd79d,0xc7bc,0x48c4,0x58e5,0x6886,0x78a7,0x0840,0x1861,0x2802,0x3823,0xc9cc,0xd9ed,0xe98e,0xf9af,0x8948,0x9969,0xa90a,0xb92b,0x5af5,0x4ad4,0x7ab7,0x6a96,0x1a71,0x0a50,0x3a33,0x2a12,0xdbfd,0xcbdc,0xfbbf,0xeb9e,0x9b79,0x8b58,0xbb3b,0xab1a,0x6ca6,0x7c87,0x4ce4,0x5cc5,0x2c22,0x3c03,0x0c60,0x1c41,0xedae,0xfd8f,0xcdec,0xddcd,0xad2a,0xbd0b,0x8d68,0x9d49,0x7e97,0x6eb6,0x5ed5,0x4ef4,0x3e13,0x2e32,0x1e51,0x0e70,0xff9f,0xefbe,0xdfdd,0xcffc,0xbf1b,0xaf3a,0x9f59,0x8f78,0x9188,0x81a9,0xb1ca,0xa1eb,0xd10c,0xc12d,0xf14e,0xe16f,0x1080,0x00a1,0x30c2,0x20e3,0x5004,0x4025,0x7046,0x6067,0x83b9,0x9398,0xa3fb,0xb3da,0xc33d,0xd31c,0xe37f,0xf35e,0x02b1,0x1290,0x22f3,0x32d2,0x4235,0x5214,0x6277,0x7256,0xb5ea,0xa5cb,0x95a8,0x8589,0xf56e,0xe54f,0xd52c,0xc50d,0x34e2,0x24c3,0x14a0,0x0481,0x7466,0x6447,0x5424,0x4405,0xa7db,0xb7fa,0x8799,0x97b8,0xe75f,0xf77e,0xc71d,0xd73c,0x26d3,0x36f2,0x0691,0x16b0,0x6657,0x7676,0x4615,0x5634,0xd94c,0xc96d,0xf90e,0xe92f,0x99c8,0x89e9,0xb98a,0xa9ab,0x5844,0x4865,0x7806,0x6827,0x18c0,0x08e1,0x3882,0x28a3,0xcb7d,0xdb5c,0xeb3f,0xfb1e,0x8bf9,0x9bd8,0xabbb,0xbb9a,0x4a75,0x5a54,0x6a37,0x7a16,0x0af1,0x1ad0,0x2ab3,0x3a92,0xfd2e,0xed0f,0xdd6c,0xcd4d,0xbdaa,0xad8b,0x9de8,0x8dc9,0x7c26,0x6c07,0x5c64,0x4c45,0x3ca2,0x2c83,0x1ce0,0x0cc1,0xef1f,0xff3e,0xcf5d,0xdf7c,0xaf9b,0xbfba,0x8fd9,0x9ff8,0x6e17,0x7e36,0x4e55,0x5e74,0x2e93,0x3eb2,0x0ed1,0x1ef0];
@@ -516,26 +509,17 @@ function storeInfoPanel() {
   const igHandle = String(state.store.instagram || "shizukulab.matcha").replace(/^@/, "");
   const bannerImage = state.menu.find((item) => item.image_url)?.image_url || "matcha-latte.jpg";
   return `
-    <div class="promo-ticker" aria-label="Shizuku Lab announcement">
-      <div class="promo-ticker-track"><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span></div>
-    </div>
+    <div class="promo-ticker"><div class="promo-ticker-track"><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span></div></div>
     <div class="store-panel">
-      <div class="store-banner" style="background-image:linear-gradient(90deg,rgba(52,69,39,.14),rgba(52,69,39,.05)),url('${escapeHtml(bannerImage)}');">
-        <img src="logo.png" class="store-logo-overlap" alt="${escapeHtml(state.store.store_name)} logo">
-      </div>
+      <div class="store-banner" style="background-image:linear-gradient(90deg,rgba(52,69,39,.14),rgba(52,69,39,.05)),url('${escapeHtml(bannerImage)}');"><img src="logo.png" class="store-logo-overlap" alt="${escapeHtml(state.store.store_name)} logo"></div>
       <div class="store-panel-body">
         <a class="store-insta" href="https://instagram.com/${encodeURIComponent(igHandle)}" target="_blank" rel="noopener">@${escapeHtml(igHandle)}</a>
         <div class="store-dropoff">${escapeHtml(state.store.collection_address || "")}</div>
         <p class="store-desc">Little cups, big comfort. Freshly whisked matcha made with care — one cup at a time.</p>
         <div class="hours-card-dark">
-          <div class="hours-row">
-            <span class="hours-label">NEXT COLLECTION</span>
-            <span class="hours-status-dark open">PRE-ORDER</span>
-          </div>
-          <div class="hours-day">Saturday</div>
-          <div class="hours-time">${escapeHtml(state.store.saturday_collection_time || "10:00 AM - 12:00 PM")}</div>
-          <div class="hours-day" style="margin-top:8px;">Sunday</div>
-          <div class="hours-time">${escapeHtml(state.store.sunday_collection_time || "10:00 AM - 1:00 PM")}</div>
+          <div class="hours-row"><span class="hours-label">NEXT COLLECTION</span><span class="hours-status-dark open">PRE-ORDER</span></div>
+          <div class="hours-day">Saturday</div><div class="hours-time">${escapeHtml(state.store.saturday_collection_time || "10:00 AM - 12:00 PM")}</div>
+          <div class="hours-day" style="margin-top:8px;">Sunday</div><div class="hours-time">${escapeHtml(state.store.sunday_collection_time || "10:00 AM - 1:00 PM")}</div>
         </div>
       </div>
     </div>
@@ -774,14 +758,14 @@ function renderCart() {
 /* ---------- checkout ---------- */
 function renderCheckout() {
   const f = state.form;
-  const canSubmit = f.name.trim() && f.phone.trim() && f.slotId;
+  const canSubmit = f.name.trim() && f.phone.trim() && f.instagram.trim() && f.slotId;
   return `
     ${header()}
     <div class="screen">
       <button class="back-link" onclick="setScreen('cart')">${ICONS.back} Back to cart</button>
-      <div class="field"><label>Name</label><input id="f-name" value="${escapeHtml(f.name)}" placeholder="Your name" oninput="onFormInput('name', this.value)"></div>
-      <div class="field"><label>Phone</label><input id="f-phone" value="${escapeHtml(f.phone)}" placeholder="For pickup updates" inputmode="tel" oninput="onFormInput('phone', this.value)"></div>
-      <div class="field"><label>Instagram (optional)</label><input id="f-instagram" value="${escapeHtml(f.instagram)}" placeholder="@yourhandle" oninput="onFormInput('instagram', this.value)"></div>
+      <div class="field"><label>Name *</label><input id="f-name" value="${escapeHtml(f.name)}" placeholder="Your name" oninput="onFormInput('name', this.value)" onblur="validateCheckoutField('name')">${checkoutError('name')}</div>
+      <div class="field"><label>Phone number *</label><input id="f-phone" value="${escapeHtml(f.phone)}" placeholder="For pickup updates" inputmode="tel" oninput="onFormInput('phone', this.value)" onblur="validateCheckoutField('phone')">${checkoutError('phone')}</div>
+      <div class="field"><label>Instagram name *</label><input id="f-instagram" value="${escapeHtml(f.instagram)}" placeholder="@yourhandle" oninput="onFormInput('instagram', this.value)" onblur="validateCheckoutField('instagram')">${checkoutError('instagram')}</div>
       <div class="field"><label>Pickup slot</label></div>
       ${state.slots.map((slot) => `
         <button class="slot ${f.slotId === slot.id ? "active" : ""}" onclick="onFormInput('slotId','${escapeHtml(slot.id)}')">
@@ -823,11 +807,29 @@ function renderCheckout() {
 /* ---------- form input ---------- */
 function onFormInput(key, value) {
   state.form[key] = value;
+  if (state.checkoutErrors[key]) { delete state.checkoutErrors[key]; }
   if (state.screen !== "checkout") return;
-  const canSubmit = state.form.name.trim() && state.form.phone.trim() && state.form.slotId;
+  const canSubmit = state.form.name.trim() && state.form.phone.trim() && state.form.instagram.trim() && state.form.slotId;
   const button = document.getElementById("checkout-btn");
   if (button) { button.toggleAttribute("disabled", !canSubmit); button.textContent = `Continue to payment · ${money(orderTotal())}`; }
   if (key === "slotId") render();
+}
+
+function getCheckoutErrors() {
+  const f = state.form;
+  const errors = {};
+  if (!f.name.trim()) errors.name = "Please enter your name so we know who to prepare this order for.";
+  if (!f.phone.trim()) errors.phone = "Please enter your phone number so we can contact you about collection.";
+  if (!f.instagram.trim()) errors.instagram = "Please enter your Instagram name so we can contact you if needed.";
+  if (!f.slotId) errors.slotId = "Please choose a collection date and time.";
+  return errors;
+}
+function checkoutError(key) { return state.checkoutErrors[key] ? `<div class="field-error">${escapeHtml(state.checkoutErrors[key])}</div>` : ""; }
+function validateCheckoutField(key) {
+  const errors = getCheckoutErrors();
+  if (errors[key]) state.checkoutErrors[key] = errors[key];
+  else delete state.checkoutErrors[key];
+  render();
 }
 
 /* ---------- payment ---------- */
@@ -849,7 +851,7 @@ function renderPayment() {
       <div class="summary-card">
         ${qrHtml}
         <div class="hint">Scan with your banking app, or PayNow to <b>${escapeHtml(paynowName)}</b>${paynowNumber ? `<br>${escapeHtml(paynowNumber)}` : ""}</div>
-        ${staticQrUrl ? `<div class="hint" style="color:#B78A2E;">Scan the official PayNow QR above, then upload your proof below.</div>` : `<div class="hint" style="color:#B78A2E;">PayNow using the name and number above. Add your official QR in Settings whenever you are ready.</div>`}
+        <div class="hint" style="color:#B78A2E;">${staticQrUrl ? "Scan the official PayNow QR above, then upload your proof below." : "PayNow using the name and number above. The official QR will be added soon."}</div>
         <div class="divider"></div>
         <div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(order.order_number || order.id || "")}</span></div>
         <div class="row bold"><span class="label">Amount</span><span>${money(order.total)}</span></div>

@@ -16,9 +16,9 @@ const astate = {
 
 function money(n) { return `$${Number(n).toFixed(2)}`; }
 
-const PAY_LABEL = { awaiting_payment: "Awaiting payment", unpaid: "Awaiting payment", submitted: "Payment sent", pending_confirmation: "Proof received", paid: "Paid" };
-const PAY_COLOR = { awaiting_payment: "#B78A2E", unpaid: "#B78A2E", submitted: "#B78A2E", pending_confirmation: "#B78A2E", paid: "#4B5D3A" };
-const ORDER_LABEL = { pending: "New", awaiting_confirmation: "Checking payment", confirmed: "Confirmed", collected: "Collected" };
+const PAY_LABEL = { unpaid: "Awaiting payment", pending_confirmation: "Payment sent — pending confirmation", paid: "Paid" };
+const PAY_COLOR = { unpaid: "#B78A2E", pending_confirmation: "#B78A2E", paid: "#4B5D3A" };
+const ORDER_LABEL = { pending: "Pending", confirmed: "Confirmed", collected: "Collected" };
 
 async function loadAll() {
   astate.loading = true; astate.loadError = null; render();
@@ -76,14 +76,6 @@ async function updateOrderStatus(id, order_status) {
   if (IS_CONFIGURED) await db.from("orders").update({ order_status }).eq("id", id);
 }
 
-async function viewPaymentProof(path) {
-  if (!path) return;
-  if (!IS_CONFIGURED) { alert("Payment proof is available after connecting Supabase."); return; }
-  const { data, error } = await db.storage.from("payment-proofs").createSignedUrl(path, 60);
-  if (error) { alert("Could not open payment proof: " + error.message); return; }
-  window.open(data.signedUrl, "_blank", "noopener");
-}
-
 /* ---- menu (products) CRUD — unchanged from before ---- */
 function newMenuItem() {
   astate.editing = { id: null, category: "Signature", name: "", description: "", price: 0, image_url: "", is_available: true, stock: 0 };
@@ -131,7 +123,9 @@ async function deleteMenuItem(id) {
 }
 
 /* ---- store settings ---- */
-function onSettingsField(key, value) { astate.settingsDraft[key] = value; }
+function onSettingsField(key, value) {
+  astate.settingsDraft[key] = key === "order_ahead_days" ? Math.max(1, Math.min(90, Number(value) || 14)) : value;
+}
 async function saveSettings() {
   if (!astate.settings) { alert("No store_settings row found — add one in Supabase first."); return; }
   const btn = document.getElementById("settings-save-btn");
@@ -187,7 +181,7 @@ function renderOrders() {
         <div class="mono">${o.order_number || o.id}</div>
         <div class="status-tag" style="color:${PAY_COLOR[o.payment_status] || "#8A8478"}">${PAY_LABEL[o.payment_status] || o.payment_status || "—"}</div>
       </div>
-      <div class="order-meta">${o.customer_name || ""} · ${o.customer_phone || o.customer_contact || ""}${o.instagram ? " · @" + o.instagram : ""}</div>
+      <div class="order-meta">${o.customer_name || ""} · ${o.customer_contact || ""}${o.instagram ? " · @" + o.instagram : ""}</div>
       <div class="order-meta">Pickup: ${o.collection_date || ""} ${o.collection_time || ""}</div>
       <div class="order-meta">Order status: <b>${ORDER_LABEL[o.order_status] || o.order_status || "—"}</b></div>
       <div style="margin-top:8px;">
@@ -197,15 +191,12 @@ function renderOrders() {
         `).join("")}
       </div>
       ${o.notes ? `<div class="ref-note">Note: ${o.notes}</div>` : ""}
-      ${o.payment_reference ? `<div class="ref-note">PayNow ref: ${o.payment_reference}</div>` : ""}
       <div class="divider"></div>
       <div class="row bold"><span class="label">Total</span><span>${money(o.total)}</span></div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-        ${o.payment_proof_url ? `<button class="small-btn" onclick="viewPaymentProof('${o.payment_proof_url}')">View proof</button>` : ""}
-        ${["pending_confirmation", "submitted"].includes(o.payment_status) ? `<button class="small-btn" onclick="updatePaymentStatus('${o.id}','paid')">Confirm payment</button>` : ""}
-        ${["awaiting_payment", "unpaid"].includes(o.payment_status) ? `<span class="hint" style="margin:0;">Waiting on customer to pay</span>` : ""}
-        ${o.payment_status === "paid" && o.order_status === "pending" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','confirmed')">Confirm order</button>` : ""}
-        ${o.payment_status === "paid" && o.order_status === "confirmed" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','collected')">Mark collected</button>` : ""}
+        ${o.payment_status === "pending_confirmation" ? `<button class="small-btn" onclick="updatePaymentStatus('${o.id}','paid')">Confirm payment</button>` : ""}
+        ${o.payment_status === "unpaid" ? `<span class="hint" style="margin:0;">Waiting on customer to pay</span>` : ""}
+        ${o.payment_status === "paid" && o.order_status !== "collected" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','collected')">Mark collected</button>` : ""}
       </div>
     </div>
   `).join("");
@@ -241,10 +232,11 @@ function renderSettingsTab() {
     ${field("Instagram (without @)", "instagram")}
     ${field("PayNow name", "paynow_name")}
     ${field("PayNow number", "paynow_number", "+65 9XXX XXXX")}
-    ${field("PayNow QR image URL (optional)", "paynow_qr_url", "Public URL from the paynow bucket")}
+    ${field("PayNow URL (optional)", "paynow_url")}
     ${field("Collection address", "collection_address")}
     ${field("Saturday collection time", "saturday_collection_time", "10:00 AM - 12:00 PM")}
     ${field("Sunday collection time", "sunday_collection_time", "10:00 AM - 1:00 PM")}
+    <div class="field"><label>How far in advance can customers order? (days)</label><input type="number" min="1" max="90" value="${Number(s.order_ahead_days) || 14}" oninput="onSettingsField('order_ahead_days', this.value)"><div class="hint" style="text-align:left;margin:6px 0 0;">For example, 14 shows collection dates up to two weeks from today.</div></div>
     <button class="btn-primary" id="settings-save-btn" style="width:100%;margin-top:8px;" onclick="saveSettings()">Save settings</button>
   `;
 }
