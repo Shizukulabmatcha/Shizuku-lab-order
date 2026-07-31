@@ -66,3 +66,11 @@ If you need to change your collection time, please contact us at least 24 hours 
     a: "No, our lattes are made with oat milk by default."
   }
 ];
+
+const IS_CONFIGURED =
+  SUPABASE_URL !== "YOUR_SUPABASE_URL" &&
+  SUPABASE_ANON_KEY !== "YOUR_SUPABASE_ANON_KEY";
+
+const db = IS_CONFIGURED
+  ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
