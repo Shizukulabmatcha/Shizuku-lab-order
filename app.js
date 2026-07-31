@@ -257,26 +257,32 @@ async function applyPromoCode() {
   if (!state.form.phone.trim()) { state.promoMsg = "Enter your phone number first, then apply the code."; render(); return; }
   if (!IS_CONFIGURED) { state.promoMsg = "Demo mode: connect Supabase to validate promo codes."; render(); return; }
 
-  const { data: rows, error } = await db.from("promo_codes").select("*").ilike("text", code).eq("is_active", true).limit(1);
-  if (error) { state.promoMsg = "Could not check code: " + error.message; render(); return; }
-  const promo = rows && rows[0];
-  if (!promo) { state.promoMsg = "That code isn't valid."; state.promo = null; render(); return; }
-  const now = new Date();
-  if (promo.valid_from && new Date(promo.valid_from) > now) { state.promoMsg = "That code isn't active yet."; state.promo = null; render(); return; }
-  if (promo.valid_until && new Date(promo.valid_until) < now) { state.promoMsg = "That code has expired."; state.promo = null; render(); return; }
-  if (promo.min_spend && cartTotal() < promo.min_spend) { state.promoMsg = `Minimum spend for this code is ${money(promo.min_spend)}.`; state.promo = null; render(); return; }
-  if (promo.usage_limit != null && (promo.used_account || 0) >= promo.usage_limit) { state.promoMsg = "That code has reached its usage limit."; state.promo = null; render(); return; }
-
   try {
-    const { count: usedByPhone } = await db.from("promo_redemptions").select("id", { count: "exact", head: true }).ilike("code", code).eq("phone", state.form.phone.trim());
-    if ((usedByPhone || 0) > 0) { state.promoMsg = "You've already used this code."; state.promo = null; render(); return; }
-  } catch (e) { /* redemptions table may not exist yet — skip this check */ }
+    const { data: rows, error } = await db.from("promo_codes").select("*").ilike("code", code).eq("is_active", true).limit(1);
+    if (error) throw error;
+    const promo = rows && rows[0];
+    if (!promo) { state.promoMsg = "That code isn't valid."; state.promo = null; render(); return; }
+    const now = new Date();
+    if (promo.valid_from && new Date(promo.valid_from) > now) { state.promoMsg = "That code isn't active yet."; state.promo = null; render(); return; }
+    if (promo.valid_until && new Date(promo.valid_until) < now) { state.promoMsg = "That code has expired."; state.promo = null; render(); return; }
+    if (promo.minimum_spend && cartTotal() < promo.minimum_spend) { state.promoMsg = `Minimum spend for this code is ${money(promo.minimum_spend)}.`; state.promo = null; render(); return; }
+    if (promo.usage_limit != null && (promo.used_count || 0) >= promo.usage_limit) { state.promoMsg = "That code has reached its usage limit."; state.promo = null; render(); return; }
 
-  const rawAmount = promo.discount_type === "percent" ? cartTotal() * (Number(promo.discount_value) / 100) : Number(promo.discount_value);
-  const amount = Math.min(cartTotal(), Math.max(0, rawAmount));
-  state.promo = { id: promo.id, text: promo.text, discount_type: promo.discount_type, discount_value: promo.discount_value, used_account: promo.used_account, amount };
-  state.promoMsg = `Applied — ${promo.discount_type === "percent" ? promo.discount_value + "% off" : money(promo.discount_value) + " off"}`;
-  render();
+    try {
+      const { count: usedByPhone } = await db.from("promo_redemptions").select("id", { count: "exact", head: true }).ilike("code", code).eq("phone", state.form.phone.trim());
+      if ((usedByPhone || 0) > 0) { state.promoMsg = "You've already used this code."; state.promo = null; render(); return; }
+    } catch (e) { /* redemptions table check is best-effort */ }
+
+    const rawAmount = promo.discount_type === "percent" ? cartTotal() * (Number(promo.discount_value) / 100) : Number(promo.discount_value);
+    const amount = Math.min(cartTotal(), Math.max(0, rawAmount));
+    state.promo = { id: promo.id, code: promo.code, discount_type: promo.discount_type, discount_value: promo.discount_value, used_count: promo.used_count, amount };
+    state.promoMsg = `Applied — ${promo.discount_type === "percent" ? promo.discount_value + "% off" : money(promo.discount_value) + " off"}`;
+    render();
+  } catch (e) {
+    state.promoMsg = "Could not check code: " + ((e && e.message) || String(e));
+    state.promo = null;
+    render();
+  }
 }
 function removePromoCode() { state.promo = null; state.promoMsg = ""; state.form.promoCode = ""; render(); }
 
@@ -299,7 +305,7 @@ async function submitOrder() {
   const orderRow = {
     order_number: orderNumber,
     customer_name: state.form.name,
-    customer_contact: state.form.phone,
+    customer_phone: state.form.phone,
     collection_date: slot ? slot.date : null,
     collection_time: slot ? slot.timeText : null,
     instagram: state.form.instagram || null,
@@ -335,8 +341,8 @@ async function submitOrder() {
 
   if (state.promo) {
     try {
-      await db.from("promo_redemptions").insert({ code: state.promo.text, phone: state.form.phone.trim(), order_id: orderData.id });
-      await db.from("promo_codes").update({ used_account: (state.promo.used_account || 0) + 1 }).eq("id", state.promo.id);
+      await db.from("promo_redemptions").insert({ code: state.promo.code, phone: state.form.phone.trim(), order_id: orderData.id });
+      await db.from("promo_codes").update({ used_count: (state.promo.used_count || 0) + 1 }).eq("id", state.promo.id);
     } catch (e) { /* non-fatal */ }
   }
 
@@ -366,10 +372,8 @@ function storeInfoPanel() {
     : `<div class="hours-time">Hours coming soon</div>`;
   return `
   <div class="store-panel">
-    <div class="store-banner" style="background-image:url('matcha-latte.jpg')">
-      <img src="logo.png" class="store-logo-overlap" alt="${store.store_name || "Shizuku Lab"} logo">
-    </div>
-    <div class="store-panel-body">
+    <div class="store-panel-body store-panel-body-plain">
+      <img src="logo.png" class="store-logo-plain" alt="${store.store_name || "Shizuku Lab"} logo">
       ${store.instagram ? `<a class="store-insta" href="https://instagram.com/${store.instagram}" target="_blank" rel="noopener">@${store.instagram}</a>` : ""}
       ${store.collection_address ? `<div class="store-dropoff">${store.collection_address}</div>` : ""}
       <div class="hours-card-dark">
@@ -545,7 +549,7 @@ function renderCheckout() {
       <div class="field">
         <label>Promo code (optional)</label>
         ${state.promo
-          ? `<div class="slot active" style="justify-content:space-between;"><span><b>${state.promo.text}</b> applied</span><button class="link-btn" style="border:none;background:none;color:#B33;" onclick="removePromoCode()">Remove</button></div>`
+          ? `<div class="slot active" style="justify-content:space-between;"><span><b>${state.promo.code}</b> applied</span><button class="link-btn" style="border:none;background:none;color:#B33;" onclick="removePromoCode()">Remove</button></div>`
           : `<div style="display:flex;gap:8px;">
               <input id="f-promo" value="${f.promoCode}" placeholder="e.g. WELCOME10" style="flex:1;" oninput="onFormInput('promoCode', this.value)">
               <button class="btn-primary" style="flex:none;padding:0 18px;" onclick="applyPromoCode()">Apply</button>
@@ -555,7 +559,7 @@ function renderCheckout() {
       </div>
       <div class="summary-card">
         ${state.cart.map((l) => `<div class="row"><span class="label">${l.name}${l.options.length ? " (" + l.options.map((o) => o.name).join(", ") + ")" : ""} × ${l.qty}</span><span>${money(l.unitPrice * l.qty)}</span></div>`).join("")}
-        ${state.promo ? `<div class="row"><span class="label">Discount (${state.promo.text})</span><span>-${money(state.promo.amount)}</span></div>` : ""}
+        ${state.promo ? `<div class="row"><span class="label">Discount (${state.promo.code})</span><span>-${money(state.promo.amount)}</span></div>` : ""}
         <div class="divider"></div>
         <div class="row bold"><span class="label">Total</span><span>${money(orderTotal())}</span></div>
       </div>
@@ -611,7 +615,7 @@ function renderConfirmation() {
 function promoTicker() {
   if (!state.activePromos || state.activePromos.length === 0) return "";
   const parts = state.activePromos.map((p) =>
-    p.discount_type === "percent" ? `${p.text} — ${p.discount_value}% OFF` : `${p.text} — ${money(p.discount_value)} OFF`
+    p.discount_type === "percent" ? `${p.code} — ${p.discount_value}% OFF` : `${p.code} — ${money(p.discount_value)} OFF`
   );
   const text = parts.join("   ·   ");
   return `<div class="promo-ticker"><div class="promo-ticker-track"><span>${text}</span><span>${text}</span></div></div>`;
