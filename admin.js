@@ -1,4 +1,4 @@
-/* Shizuku Lab — shop dashboard */
+/* Shizuku Lab — shop dashboard (wired to real Supabase schema) */
 
 const astate = {
   unlocked: false,
@@ -7,6 +7,8 @@ const astate = {
   tab: "orders",
   orders: [],
   menu: [],
+  settings: null,
+  settingsDraft: null,
   loading: true,
   loadError: null,
   editing: null,
@@ -14,49 +16,67 @@ const astate = {
 
 function money(n) { return `$${Number(n).toFixed(2)}`; }
 
-const STATUS_LABEL = {
-  awaiting_payment: "Awaiting payment",
-  awaiting_confirmation: "Payment sent — pending confirmation",
-  confirmed: "Confirmed",
-  fulfilled: "Collected",
-};
-const STATUS_COLOR = {
-  awaiting_payment: "#B78A2E",
-  awaiting_confirmation: "#B78A2E",
-  confirmed: "#4B5D3A",
-  fulfilled: "#8A8478",
-};
+const PAY_LABEL = { unpaid: "Awaiting payment", pending_confirmation: "Payment sent — pending confirmation", paid: "Paid" };
+const PAY_COLOR = { unpaid: "#B78A2E", pending_confirmation: "#B78A2E", paid: "#4B5D3A" };
+const ORDER_LABEL = { pending: "Pending", confirmed: "Confirmed", collected: "Collected" };
 
 async function loadAll() {
   astate.loading = true; astate.loadError = null; render();
   if (IS_CONFIGURED) {
     try {
-      const [{ data: orders, error: oErr }, { data: menu, error: mErr }] = await Promise.all([
-        db.from("orders").select("*").order("created_at", { ascending: false }),
-        db.from("products").select("*").order("category"),
-      ]);
-      if (oErr || mErr) astate.loadError = (oErr && oErr.message) || (mErr && mErr.message);
-      astate.orders = orders || [];
+      // try the nested query first (needs FKs orders<-order_items<-order_item_options)
+      let orders;
+      const nested = await db.from("orders").select("*, order_items(*, order_item_options(*))").order("created_at", { ascending: false });
+      if (nested.error) {
+        // fall back to flat queries and stitch client-side
+        const [{ data: oRows, error: oErr }, { data: iRows }, { data: optRows }] = await Promise.all([
+          db.from("orders").select("*").order("created_at", { ascending: false }),
+          db.from("order_items").select("*"),
+          db.from("order_item_options").select("*"),
+        ]);
+        if (oErr) throw oErr;
+        orders = (oRows || []).map((o) => ({
+          ...o,
+          order_items: (iRows || []).filter((it) => String(it.order_id) === String(o.id)).map((it) => ({
+            ...it,
+            order_item_options: (optRows || []).filter((op) => String(op.order_item_id) === String(it.id)),
+          })),
+        }));
+      } else {
+        orders = nested.data || [];
+      }
+      astate.orders = orders;
+
+      const { data: menu, error: mErr } = await db.from("products").select("*").order("category");
+      if (mErr) astate.loadError = mErr.message;
       astate.menu = menu || [];
+
+      const { data: settingsRows } = await db.from("store_settings").select("*").limit(1);
+      astate.settings = (settingsRows && settingsRows[0]) || null;
+      astate.settingsDraft = astate.settings ? { ...astate.settings } : null;
     } catch (e) {
       astate.loadError = (e && e.message) || String(e);
-      astate.orders = [];
-      astate.menu = [];
+      astate.orders = []; astate.menu = [];
     }
   } else {
-    astate.orders = [];
-    astate.menu = [];
+    astate.orders = []; astate.menu = [];
   }
   astate.loading = false;
   render();
 }
 
-async function updateOrderStatus(id, status) {
-  astate.orders = astate.orders.map((o) => (String(o.id) === String(id) ? { ...o, status } : o));
+async function updatePaymentStatus(id, payment_status) {
+  astate.orders = astate.orders.map((o) => (String(o.id) === String(id) ? { ...o, payment_status } : o));
   render();
-  if (IS_CONFIGURED) await db.from("orders").update({ status }).eq("id", id);
+  if (IS_CONFIGURED) await db.from("orders").update({ payment_status }).eq("id", id);
+}
+async function updateOrderStatus(id, order_status) {
+  astate.orders = astate.orders.map((o) => (String(o.id) === String(id) ? { ...o, order_status } : o));
+  render();
+  if (IS_CONFIGURED) await db.from("orders").update({ order_status }).eq("id", id);
 }
 
+/* ---- menu (products) CRUD — unchanged from before ---- */
 function newMenuItem() {
   astate.editing = { id: null, category: "Signature", name: "", description: "", price: 0, image_url: "", is_available: true, stock: 0 };
   render();
@@ -68,19 +88,14 @@ function editMenuItem(id) {
 function cancelEdit() { astate.editing = null; render(); }
 function onEditField(key, value) {
   if (key === "price" || key === "stock") astate.editing[key] = parseFloat(value) || 0;
-  else if (key === "is_available") astate.editing[key] = value;
   else astate.editing[key] = value;
 }
-
 async function saveMenuItem() {
   const item = astate.editing;
   if (!item.name.trim()) { alert("Name is required."); return; }
-
   if (!IS_CONFIGURED) { alert("Demo mode: connect Supabase to persist menu changes."); astate.editing = null; render(); return; }
-
   const btn = document.getElementById("save-btn");
   if (btn) { btn.textContent = "Saving…"; btn.disabled = true; }
-
   try {
     if (item.id) {
       const { id, ...fields } = item;
@@ -107,6 +122,20 @@ async function deleteMenuItem(id) {
   if (IS_CONFIGURED) await db.from("products").delete().eq("id", id);
 }
 
+/* ---- store settings ---- */
+function onSettingsField(key, value) { astate.settingsDraft[key] = value; }
+async function saveSettings() {
+  if (!astate.settings) { alert("No store_settings row found — add one in Supabase first."); return; }
+  const btn = document.getElementById("settings-save-btn");
+  if (btn) { btn.textContent = "Saving…"; btn.disabled = true; }
+  const { id, created_at, updated_at, ...fields } = astate.settingsDraft;
+  const { error } = await db.from("store_settings").update(fields).eq("id", astate.settings.id);
+  if (btn) { btn.textContent = "Save settings"; btn.disabled = false; }
+  if (error) { alert("Could not save: " + error.message); return; }
+  astate.settings = { ...astate.settingsDraft };
+  alert("Saved.");
+}
+
 function tryUnlock() {
   if (astate.pin === SHOP_PIN) { astate.unlocked = true; astate.pinError = false; loadAll(); }
   else { astate.pinError = true; render(); }
@@ -117,7 +146,7 @@ function header(subtitle) {
   <div class="header">
     <div class="header-row">
       <div>
-        <div class="display brand-title">Shizuku Lab — Shop</div>
+        <div class="display brand-title">${(astate.settings && astate.settings.store_name) || "Shizuku Lab"} — Shop</div>
         <div class="brand-sub">${subtitle}</div>
       </div>
     </div>
@@ -147,20 +176,25 @@ function renderOrders() {
   return astate.orders.map((o) => `
     <div class="order-card">
       <div class="order-top">
-        <div class="mono">${o.id}</div>
-        <div class="status-tag" style="color:${STATUS_COLOR[o.status]}">${STATUS_LABEL[o.status] || o.status}</div>
+        <div class="mono">${o.order_number || o.id}</div>
+        <div class="status-tag" style="color:${PAY_COLOR[o.payment_status] || "#8A8478"}">${PAY_LABEL[o.payment_status] || o.payment_status || "—"}</div>
       </div>
-      <div class="order-meta">${o.customer_name} · ${o.phone} · ${o.pickup_label || ""} ${o.pickup_time || ""}</div>
+      <div class="order-meta">${o.customer_name || ""} · ${o.customer_contact || ""}${o.instagram ? " · @" + o.instagram : ""}</div>
+      <div class="order-meta">Pickup: ${o.collection_date || ""} ${o.collection_time || ""}</div>
+      <div class="order-meta">Order status: <b>${ORDER_LABEL[o.order_status] || o.order_status || "—"}</b></div>
       <div style="margin-top:8px;">
-        ${(o.items || []).map((it) => `<div class="row"><span>${it.name} × ${it.qty}</span><span>${money(it.price * it.qty)}</span></div>`).join("")}
+        ${(o.order_items || []).map((it) => `
+          <div class="row"><span>${it.product_name} × ${it.quantity}</span><span>${money(it.subtotal)}</span></div>
+          ${(it.order_item_options || []).length ? `<div class="hint" style="margin:0 0 4px;text-align:left;">${it.order_item_options.map((op) => op.option_name).join(", ")}</div>` : ""}
+        `).join("")}
       </div>
       ${o.notes ? `<div class="ref-note">Note: ${o.notes}</div>` : ""}
       <div class="divider"></div>
       <div class="row bold"><span class="label">Total</span><span>${money(o.total)}</span></div>
-      <div style="display:flex;gap:8px;margin-top:10px;">
-        ${o.status === "awaiting_confirmation" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','confirmed')">Confirm payment</button>` : ""}
-        ${o.status === "confirmed" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','fulfilled')">Mark collected</button>` : ""}
-        ${o.status === "awaiting_payment" ? `<span class="hint" style="margin:0;">Waiting on customer to pay</span>` : ""}
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+        ${o.payment_status === "pending_confirmation" ? `<button class="small-btn" onclick="updatePaymentStatus('${o.id}','paid')">Confirm payment</button>` : ""}
+        ${o.payment_status === "unpaid" ? `<span class="hint" style="margin:0;">Waiting on customer to pay</span>` : ""}
+        ${o.payment_status === "paid" && o.order_status !== "collected" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','collected')">Mark collected</button>` : ""}
       </div>
     </div>
   `).join("");
@@ -183,6 +217,24 @@ function renderMenuTab() {
       </div>
     `).join("")}
     <button class="small-btn" style="width:100%;margin-top:4px;" onclick="newMenuItem()">+ Add menu item</button>
+  `;
+}
+
+function renderSettingsTab() {
+  if (!astate.settingsDraft) return `<div class="empty">No store_settings row found. Add one in Supabase, then refresh.</div>`;
+  const s = astate.settingsDraft;
+  const field = (label, key, placeholder = "") => `
+    <div class="field"><label>${label}</label><input value="${s[key] || ""}" placeholder="${placeholder}" oninput="onSettingsField('${key}', this.value)"></div>`;
+  return `
+    ${field("Store name", "store_name")}
+    ${field("Instagram (without @)", "instagram")}
+    ${field("PayNow name", "paynow_name")}
+    ${field("PayNow number", "paynow_number", "+65 9XXX XXXX")}
+    ${field("PayNow URL (optional)", "paynow_url")}
+    ${field("Collection address", "collection_address")}
+    ${field("Saturday collection time", "saturday_collection_time", "10:00 AM - 12:00 PM")}
+    ${field("Sunday collection time", "sunday_collection_time", "10:00 AM - 1:00 PM")}
+    <button class="btn-primary" id="settings-save-btn" style="width:100%;margin-top:8px;" onclick="saveSettings()">Save settings</button>
   `;
 }
 
@@ -218,15 +270,16 @@ function render() {
   if (astate.loading) { app.innerHTML = header("") + `<div class="loading">Loading…</div>`; return; }
   app.innerHTML = `
     ${header(`${astate.orders.length} order${astate.orders.length === 1 ? "" : "s"} total`)}
-    ${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>js/config.js</code> to see real orders and save menu changes. See <code>README.md</code>.</div>` : ""}
+    ${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}
     ${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}
     <div class="tabs">
       <button class="pill ${astate.tab === "orders" ? "active" : ""}" onclick="astate.tab='orders'; render();">Orders</button>
       <button class="pill ${astate.tab === "menu" ? "active" : ""}" onclick="astate.tab='menu'; render();">Menu</button>
+      <button class="pill ${astate.tab === "settings" ? "active" : ""}" onclick="astate.tab='settings'; render();">Settings</button>
       <button class="link-btn" style="margin-left:auto;" onclick="loadAll()">Refresh</button>
     </div>
     <div class="screen">
-      ${astate.tab === "orders" ? renderOrders() : renderMenuTab()}
+      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : renderSettingsTab()}
     </div>
     ${renderEditOverlay()}
     <div class="footer-link"><a href="index.html"><button>Exit shop view</button></a></div>
