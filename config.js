@@ -40,7 +40,7 @@ Today, Shizuku is still a small home-based matcha studio, where every cup is fre
 If you need to change your collection time, please contact us at least 24 hours in advance. We'll do our best to accommodate your request.`
   },
   {
-    q: "🧊 Can I customise the sweetness?",
+    q: "🧊 Can I customise the sweetness and ice level?",
     a: "Yes, you may choose from the available options before your drink is added to your cart."
   },
   {
