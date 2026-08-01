@@ -567,14 +567,12 @@ function renderFAQ() {
   return `
     <section class="faq-section">
       <div class="faq-title">FAQ</div>
-      <details class="faq-item"><summary>📍 Where is collection?</summary><div class="faq-answer">Collection is at ${escapeHtml(state.store.collection_address || "Toa Payoh Lorong 1, Singapore")}.</div></details>
-      <details class="faq-item"><summary>📝 When can I collect my drinks?</summary><div class="faq-answer">Saturday: ${escapeHtml(state.store.saturday_collection_time || "10:00 AM - 12:00 PM")}<br><br>Sunday: ${escapeHtml(state.store.sunday_collection_time || "10:00 AM - 1:00 PM")}</div></details>
-      <details class="faq-item"><summary>🧊 Can I request less ice or less sweet?</summary><div class="faq-answer">Yes. Please select your preferred option when ordering.</div></details>
-      <details class="faq-item"><summary>💳 How do I pay?</summary><div class="faq-answer">Payment is made via PayNow after submitting your order.</div></details>
-      <details class="faq-item"><summary>✏️ Can I change my order after payment?</summary><div class="faq-answer">Please contact us as soon as possible if you need to make a change.</div></details>
-      <details class="faq-item"><summary>🍵 Are your drinks made fresh?</summary><div class="faq-answer">Yes — every cup is whisked to order in small batches, not pre-made in bulk.</div></details>
-      <details class="faq-item"><summary>🥛 Do your drinks contain dairy?</summary><div class="faq-answer">Our lattes are made with oat milk by default.</div></details>
-      <details class="faq-item"><summary>💬 How can I contact Shizuku Lab?</summary><div class="faq-answer">DM us on Instagram @${escapeHtml(String(state.store.instagram || "shizukulab.matcha").replace(/^@/, ""))}.</div></details>
+      ${STORE_FAQ.map((item) => `
+        <details class="faq-item">
+          <summary>${item.q}</summary>
+          <div class="faq-answer">${String(item.a || "").replace(/\n/g, "<br>")}</div>
+        </details>
+      `).join("")}
     </section>
   `;
 }

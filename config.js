@@ -14,38 +14,38 @@ const SHOP_PIN = "0130";
 // Edit freely — question, then answer.
 const STORE_FAQ = [
   {
-    q: "🍵 How did Shizuku Lab begin?",
+    q: "🤍 How did Shizuku Lab begin?",
     a: `Shizuku started with a little love for matcha shared between me and my family. What began as making matcha at home soon became something I wanted to share with more people — good matcha that feels affordable, approachable, and genuinely enjoyable.
 Today, Shizuku is still a small home-based matcha studio, where every cup is freshly whisked with the hope of making a good cup of matcha a little easier to enjoy — crafted one cup at a time.`
   },
   {
     q: "📍 Where do I collect my order?",
-    a: "Self-collection is at Blk 130A drop off point, near Creamier TPY, Toa Payoh Lorong 1, Singapore."
+    a: "Self-collection is at Toa Payoh Lorong 1, Singapore. Our exact collection address will be shared after your order has been confirmed."
   },
   {
-    q: "⏰ When can I place an order?",
+    q: "🗓️ When can I place an order?",
     a: "Shizuku Lab is available by pre-order only. New slots will open every Sunday at 6pm, and orders close on Friday at 4pm."
   },
   {
-    q: "💸 How do I pay?",
-    a: "Payment is via PayNow. After submitting your order, simply scan the QR code or PayNow us using the details shown, then upload your payment screenshot. We’ll confirm your order once payment is verified. ✅"
+    q: "💳 How do I pay?",
+    a: "PayNow is available during checkout. The amount and payment reference are shown for you."
   },
   {
-    q: "🏃 What happens if I'm late?",
+    q: "⏰ What happens if I'm late?",
     a: "Do message us on Instagram if you're late — we'll do our best to hold your order, but freshly whisked matcha is best collected on time."
   },
   {
-    q: "🫶 Can I cancel or amend my order?",
+    q: "✏️ Can I cancel or amend my order?",
     a: `As each drink is prepared in limited quantities and made specifically for your order, cancellations, refunds and exchanges are not available once payment has been made.
 If you need to change your collection time, please contact us at least 24 hours in advance. We'll do our best to accommodate your request.`
   },
   {
-    q: "🧊 Can I customise the sweetness?",
+    q: "🍃 Can I customise the sweetness?",
     a: "Yes, you may choose from the available options before your drink is added to your cart."
   },
   {
     q: "🥛 Do your drinks contain dairy?",
-    a: "Our lattes are made with oat milk by default, so they are dairy-free."
+    a: "No, our lattes are made with oat milk by default."
   }
 ];
 const IS_CONFIGURED =
