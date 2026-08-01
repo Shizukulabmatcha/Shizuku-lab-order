@@ -52,6 +52,7 @@ const state = {
   promo: null,
   promoMsg: "",
   payment: { transactionReference: "", proofFile: null },
+  tracking: { orderNumber: "", phone: "", order: null, message: "", loading: false },
   lastOrder: null,
   loading: true,
   loadError: null,
@@ -631,11 +632,14 @@ function header({ showCart = false } = {}) {
           <div class="display brand-title">Shizuku Lab</div>
           <div class="brand-sub">雫ラボ · crafted drop by drop</div>
         </div>
-        ${showCart ? `
-          <button class="cart-btn" onclick="setScreen('cart')" aria-label="Cart">
-            ${ICONS.bag}
-            ${cartCount() > 0 ? `<span class="cart-badge">${cartCount()}</span>` : ""}
-          </button>` : ""}
+        <div style="display:flex;align-items:center;gap:9px;">
+          <button onclick="setScreen('track')" style="border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--matcha);font:500 11px 'Work Sans',sans-serif;padding:8px 10px;white-space:nowrap;">Track order</button>
+          ${showCart ? `
+            <button class="cart-btn" onclick="setScreen('cart')" aria-label="Cart">
+              ${ICONS.bag}
+              ${cartCount() > 0 ? `<span class="cart-badge">${cartCount()}</span>` : ""}
+            </button>` : ""}
+        </div>
       </div>
       <svg class="drip-row" viewBox="0 0 300 30" aria-hidden="true">
         <g><circle class="drip" cx="40" cy="4" r="2.4" fill="#4B5D3A"/><ellipse class="ripple" cx="40" cy="26" rx="7" ry="2.4" fill="none" stroke="#8C9B6E" stroke-width="1"/></g>
@@ -996,6 +1000,50 @@ function renderConfirmation() {
   `;
 }
 
+/* ---------- order tracking ---------- */
+function trackingStatus(order) {
+  if (!order) return { title: "", note: "", step: 0 };
+  if (order.order_status === "cancelled") return { title: "Order cancelled", note: "Please contact us if you have any questions.", step: 0 };
+  if (order.order_status === "collected") return { title: "Collected", note: "Thank you for collecting your Shizuku order. ✨", step: 4 };
+  if (order.order_status === "ready") return { title: "Ready for collection", note: "Your order is ready — see you at your pickup time!", step: 3 };
+  if (order.order_status === "preparing") return { title: "Preparing your order", note: "We’re freshly preparing your drinks now.", step: 2 };
+  if (order.payment_status === "submitted" || order.order_status === "awaiting_confirmation") return { title: "Payment under review", note: "We’ll confirm your order once your payment proof is verified.", step: 0 };
+  if (order.payment_status === "paid" || order.order_status === "confirmed") return { title: "Order confirmed", note: "Payment verified — we’ll prepare your order closer to pickup.", step: 1 };
+  return { title: "Awaiting payment", note: "Please complete payment and submit your payment screenshot.", step: 0 };
+}
+async function findOrder() {
+  const t = state.tracking;
+  const number = String(t.orderNumber || "").trim().toUpperCase();
+  const phone = String(t.phone || "").trim();
+  if (!number || !phone) { t.message = "Enter both your order number and phone number."; t.order = null; render(); return; }
+  t.loading = true; t.message = ""; t.order = null; render();
+  const { data, error } = await db.from("orders").select("order_number,customer_name,customer_phone,collection_date,collection_time,total,payment_status,order_status").eq("order_number", number).eq("customer_phone", phone).maybeSingle();
+  t.loading = false;
+  if (error) t.message = "We couldn’t check this order right now. Please try again shortly.";
+  else if (!data) t.message = "We couldn’t find an order with those details. Please check and try again.";
+  else t.order = data;
+  render();
+}
+function renderTrackOrder() {
+  const t = state.tracking;
+  const status = trackingStatus(t.order);
+  const stages = ["Payment review", "Confirmed", "Preparing", "Ready"];
+  return `
+    ${header()}
+    <div class="screen">
+      <button class="back-link" onclick="setScreen('menu')">${ICONS.back} Back to menu</button>
+      <div class="display" style="font-size:23px;margin:4px 0 6px;">Track my order</div>
+      <div class="hint" style="text-align:left;line-height:1.5;">Enter the order number and phone number you used at checkout.</div>
+      <div class="summary-card" style="margin-top:16px;">
+        <div class="field"><label>Order number</label><input value="${escapeHtml(t.orderNumber)}" placeholder="e.g. SL-ABC123" style="text-transform:uppercase;" oninput="state.tracking.orderNumber=this.value.toUpperCase()"></div>
+        <div class="field" style="margin-bottom:0;"><label>Phone number</label><input value="${escapeHtml(t.phone)}" placeholder="The number used at checkout" inputmode="tel" oninput="state.tracking.phone=this.value"></div>
+        <button class="primary-btn" style="margin-top:16px;" ${t.loading ? "disabled" : ""} onclick="findOrder()">${t.loading ? "Checking…" : "Track order"}</button>
+        ${t.message ? `<div class="ref-note" style="color:#B33333;">${escapeHtml(t.message)}</div>` : ""}
+      </div>
+      ${t.order ? `<div class="summary-card" style="margin-top:16px;"><div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(t.order.order_number)}</span></div><div class="row"><span class="label">Pickup</span><span>${escapeHtml(t.order.collection_date || "")} · ${escapeHtml(t.order.collection_time || "")}</span></div><div class="divider"></div><div class="center" style="padding:12px 0 8px;"><div style="display:inline-flex;width:54px;height:54px;align-items:center;justify-content:center;background:var(--matcha);color:var(--cream);border-radius:999px;font-size:24px;">✓</div><div class="display" style="font-size:20px;margin-top:12px;">${escapeHtml(status.title)}</div><div class="hint" style="margin:8px 0 14px;line-height:1.5;">${escapeHtml(status.note)}</div></div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:4px 0 2px;">${stages.map((stage, index) => `<div style="text-align:center;"><div style="height:6px;border-radius:99px;background:${index <= status.step ? "var(--matcha)" : "var(--line)"};"></div><div style="font-size:9px;color:var(--muted);line-height:1.25;margin-top:6px;">${stage}</div></div>`).join("")}</div></div>` : ""}
+    </div>`;
+}
+
 /* ---------- main render ---------- */
 function render() {
   const app = document.getElementById("app");
@@ -1009,6 +1057,7 @@ function render() {
   else if (state.screen === "checkout") html = renderCheckout();
   else if (state.screen === "payment") html = renderPayment();
   else if (state.screen === "confirmation") html = renderConfirmation();
+  else if (state.screen === "track") html = renderTrackOrder();
   else html = renderMenu();
   html += `<div class="footer-link"><a href="admin.html"><button>Shop login</button></a></div>`;
   app.innerHTML = html;
