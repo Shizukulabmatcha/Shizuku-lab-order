@@ -16,9 +16,10 @@ const astate = {
 
 function money(n) { return `$${Number(n).toFixed(2)}`; }
 
-const PAY_LABEL = { unpaid: "Awaiting payment", pending_confirmation: "Payment sent — pending confirmation", paid: "Paid" };
-const PAY_COLOR = { unpaid: "#B78A2E", pending_confirmation: "#B78A2E", paid: "#4B5D3A" };
-const ORDER_LABEL = { pending: "Pending", confirmed: "Confirmed", collected: "Collected" };
+const PAY_LABEL = { awaiting_payment: "Awaiting payment", submitted: "Payment sent — pending confirmation", paid: "Paid" };
+const PAY_COLOR = { awaiting_payment: "#B78A2E", submitted: "#B78A2E", paid: "#4B5D3A" };
+const ORDER_LABEL = { pending: "Pending", awaiting_confirmation: "Awaiting confirmation", confirmed: "Confirmed", collected: "Collected", cancelled: "Cancelled" };
+const ORDER_COLOR = { cancelled: "#B33333" };
 
 async function loadAll() {
   astate.loading = true; astate.loadError = null; render();
@@ -65,15 +66,24 @@ async function loadAll() {
   render();
 }
 
-async function updatePaymentStatus(id, payment_status) {
-  astate.orders = astate.orders.map((o) => (String(o.id) === String(id) ? { ...o, payment_status } : o));
+async function confirmPayment(id) {
+  astate.orders = astate.orders.map((o) => (String(o.id) === String(id) ? { ...o, payment_status: "paid", order_status: "confirmed" } : o));
   render();
-  if (IS_CONFIGURED) await db.from("orders").update({ payment_status }).eq("id", id);
+  if (IS_CONFIGURED) await db.from("orders").update({ payment_status: "paid", order_status: "confirmed" }).eq("id", id);
 }
 async function updateOrderStatus(id, order_status) {
   astate.orders = astate.orders.map((o) => (String(o.id) === String(id) ? { ...o, order_status } : o));
   render();
   if (IS_CONFIGURED) await db.from("orders").update({ order_status }).eq("id", id);
+}
+async function cancelOrder(id) {
+  if (!confirm("Cancel this order? This can't be undone from here.")) return;
+  astate.orders = astate.orders.map((o) => (String(o.id) === String(id) ? { ...o, order_status: "cancelled" } : o));
+  render();
+  if (IS_CONFIGURED) {
+    const { error } = await db.from("orders").update({ order_status: "cancelled" }).eq("id", id);
+    if (error) alert("Could not cancel order: " + error.message);
+  }
 }
 
 /* ---- menu (products) CRUD — unchanged from before ---- */
@@ -123,9 +133,7 @@ async function deleteMenuItem(id) {
 }
 
 /* ---- store settings ---- */
-function onSettingsField(key, value) {
-  astate.settingsDraft[key] = key === "order_ahead_days" ? Math.max(1, Math.min(90, Number(value) || 14)) : value;
-}
+function onSettingsField(key, value) { astate.settingsDraft[key] = value; }
 async function saveSettings() {
   if (!astate.settings) { alert("No store_settings row found — add one in Supabase first."); return; }
   const btn = document.getElementById("settings-save-btn");
@@ -181,9 +189,9 @@ function renderOrders() {
         <div class="mono">${o.order_number || o.id}</div>
         <div class="status-tag" style="color:${PAY_COLOR[o.payment_status] || "#8A8478"}">${PAY_LABEL[o.payment_status] || o.payment_status || "—"}</div>
       </div>
-      <div class="order-meta">${o.customer_name || ""} · ${o.customer_contact || ""}${o.instagram ? " · @" + o.instagram : ""}</div>
+      <div class="order-meta">${o.customer_name || ""} · ${o.customer_phone || ""}${o.instagram ? " · @" + o.instagram : ""}</div>
       <div class="order-meta">Pickup: ${o.collection_date || ""} ${o.collection_time || ""}</div>
-      <div class="order-meta">Order status: <b>${ORDER_LABEL[o.order_status] || o.order_status || "—"}</b></div>
+      <div class="order-meta">Order status: <b style="color:${ORDER_COLOR[o.order_status] || "inherit"}">${ORDER_LABEL[o.order_status] || o.order_status || "—"}</b></div>
       <div style="margin-top:8px;">
         ${(o.order_items || []).map((it) => `
           <div class="row"><span>${it.product_name} × ${it.quantity}</span><span>${money(it.subtotal)}</span></div>
@@ -193,10 +201,11 @@ function renderOrders() {
       ${o.notes ? `<div class="ref-note">Note: ${o.notes}</div>` : ""}
       <div class="divider"></div>
       <div class="row bold"><span class="label">Total</span><span>${money(o.total)}</span></div>
-      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-        ${o.payment_status === "pending_confirmation" ? `<button class="small-btn" onclick="updatePaymentStatus('${o.id}','paid')">Confirm payment</button>` : ""}
-        ${o.payment_status === "unpaid" ? `<span class="hint" style="margin:0;">Waiting on customer to pay</span>` : ""}
-        ${o.payment_status === "paid" && o.order_status !== "collected" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','collected')">Mark collected</button>` : ""}
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center;">
+        ${o.payment_status === "submitted" ? `<button class="small-btn" onclick="confirmPayment('${o.id}')">Confirm payment</button>` : ""}
+        ${o.payment_status === "awaiting_payment" ? `<span class="hint" style="margin:0;">Waiting on customer to pay</span>` : ""}
+        ${o.payment_status === "paid" && o.order_status !== "collected" && o.order_status !== "cancelled" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','collected')">Mark collected</button>` : ""}
+        ${o.order_status !== "cancelled" && o.order_status !== "collected" ? `<button class="link-danger" onclick="cancelOrder('${o.id}')">Cancel order</button>` : ""}
       </div>
     </div>
   `).join("");
@@ -236,7 +245,6 @@ function renderSettingsTab() {
     ${field("Collection address", "collection_address")}
     ${field("Saturday collection time", "saturday_collection_time", "10:00 AM - 12:00 PM")}
     ${field("Sunday collection time", "sunday_collection_time", "10:00 AM - 1:00 PM")}
-    <div class="field"><label>How far in advance can customers order? (days)</label><input type="number" min="1" max="90" value="${Number(s.order_ahead_days) || 14}" oninput="onSettingsField('order_ahead_days', this.value)"><div class="hint" style="text-align:left;margin:6px 0 0;">For example, 14 shows collection dates up to two weeks from today.</div></div>
     <button class="btn-primary" id="settings-save-btn" style="width:100%;margin-top:8px;" onclick="saveSettings()">Save settings</button>
   `;
 }
