@@ -672,7 +672,7 @@ function renderMenu() {
         <div class="item-card">
           <img class="item-thumb" src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(item.name)}">
           <div class="item-info">
-            <div class="item-name">${escapeHtml(item.name)}</div>
+            <button class="item-name" type="button" style="cursor:pointer;border:0;background:none;padding:0;text-align:left;font:inherit;width:100%;" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} <span style="color:var(--matcha);">→</span></button>
             <div class="item-desc">${escapeHtml(item.description)}</div>
             <div class="item-row">
               <div class="item-price">${money(item.price)}</div>
@@ -686,7 +686,7 @@ function renderMenu() {
         <div style="background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;min-width:0;">
           <img src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(item.name)}" style="width:100%;aspect-ratio:1/1;object-fit:cover;background:var(--matcha-bg);">
           <div style="padding:11px 11px 12px;display:flex;flex:1;flex-direction:column;">
-            <div style="font-size:13px;font-weight:600;line-height:1.25;">${escapeHtml(item.name)}</div>
+            <button type="button" style="font:600 13px/1.25 'Work Sans',sans-serif;cursor:pointer;border:0;background:none;padding:0;text-align:left;color:var(--ink);" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} <span style="color:var(--matcha);">→</span></button>
             <div style="font-size:10.5px;color:var(--muted);line-height:1.4;margin:5px 0 10px;">${escapeHtml(item.description)}</div>
             <div style="display:flex;align-items:center;justify-content:space-between;gap:7px;margin-top:auto;"><span style="font-size:12.5px;color:var(--matcha);font-weight:600;">${money(item.price)}</span>${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : `<button class="add-btn" style="padding:6px 10px;font-size:11px;" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}</div>
           </div>
