@@ -30,6 +30,7 @@ const state = {
   cart: loadSavedCart(),
   screen: "menu",
   activeCategory: "All",
+  menuView: "list",
   optionGroups: [],
   options: [],
   selectedProduct: null,
@@ -662,8 +663,12 @@ function renderMenu() {
     <div class="cats">
       ${categories.map((category) => `<button class="pill ${category === state.activeCategory ? "active" : ""}" onclick="setCategory('${escapeHtml(category)}')">${escapeHtml(category)}</button>`).join("")}
     </div>
-    <div class="menu-list">
-      ${items.length === 0 ? `<div class="empty">No items available yet.</div>` : items.map((item) => `
+    <div style="display:flex;justify-content:flex-end;gap:7px;padding:2px 20px 3px;">
+      <button class="pill ${state.menuView === "list" ? "active" : ""}" style="padding:6px 11px;font-size:11px;" onclick="state.menuView='list';render();">☷ List</button>
+      <button class="pill ${state.menuView === "gallery" ? "active" : ""}" style="padding:6px 11px;font-size:11px;" onclick="state.menuView='gallery';render();">▦ Gallery</button>
+    </div>
+    <div class="menu-list" style="${state.menuView === "gallery" ? "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding-top:10px;" : ""}">
+      ${items.length === 0 ? `<div class="empty">No items available yet.</div>` : state.menuView === "list" ? items.map((item) => `
         <div class="item-card">
           <img class="item-thumb" src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(item.name)}">
           <div class="item-info">
@@ -675,6 +680,15 @@ function renderMenu() {
                 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty)
                 : `<button class="add-btn" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}
             </div>
+          </div>
+        </div>
+      `).join("") : items.map((item) => `
+        <div style="background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;min-width:0;">
+          <img src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(item.name)}" style="width:100%;aspect-ratio:1/1;object-fit:cover;background:var(--matcha-bg);">
+          <div style="padding:11px 11px 12px;display:flex;flex:1;flex-direction:column;">
+            <div style="font-size:13px;font-weight:600;line-height:1.25;">${escapeHtml(item.name)}</div>
+            <div style="font-size:10.5px;color:var(--muted);line-height:1.4;margin:5px 0 10px;">${escapeHtml(item.description)}</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:7px;margin-top:auto;"><span style="font-size:12.5px;color:var(--matcha);font-weight:600;">${money(item.price)}</span>${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : `<button class="add-btn" style="padding:6px 10px;font-size:11px;" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}</div>
           </div>
         </div>
       `).join("")}
