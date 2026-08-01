@@ -482,20 +482,20 @@ function payNowQrSvg(amount, refNumber) {
 /* ---------- store info ---------- */
 function storeInfoPanel() {
   const igHandle = String(state.store.instagram || "shizukulab.matcha").replace(/^@/, "");
+  const bannerImage = state.menu.find((item) => item.image_url)?.image_url || "matcha-latte.jpg";
   return `
+    <div class="promo-ticker"><div class="promo-ticker-track"><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span></div></div>
     <div class="store-panel">
-      <img src="logo.png" class="store-logo" alt="${escapeHtml(state.store.store_name)} logo">
-      <a class="store-insta" href="https://instagram.com/${encodeURIComponent(igHandle)}" target="_blank" rel="noopener">@${escapeHtml(igHandle)}</a>
-      <div class="store-dropoff">${escapeHtml(state.store.collection_address || "")}</div>
-      <div class="hours-card">
-        <div class="hours-row">
-          <span class="hours-label">COLLECTION</span>
-          <span class="hours-status open">PRE-ORDER</span>
+      <div class="store-banner" style="background-image:linear-gradient(90deg,rgba(52,69,39,.14),rgba(52,69,39,.05)),url('${escapeHtml(bannerImage)}');"><img src="logo.png" class="store-logo-overlap" alt="${escapeHtml(state.store.store_name)} logo"></div>
+      <div class="store-panel-body">
+        <a class="store-insta" href="https://instagram.com/${encodeURIComponent(igHandle)}" target="_blank" rel="noopener">@${escapeHtml(igHandle)}</a>
+        <div class="store-dropoff">${escapeHtml(state.store.collection_address || "")}</div>
+        <p class="store-desc">Little cups, big comfort. Freshly whisked matcha made with care — one cup at a time.</p>
+        <div class="hours-card-dark">
+          <div class="hours-row"><span class="hours-label">NEXT COLLECTION</span><span class="hours-status-dark open">PRE-ORDER</span></div>
+          <div class="hours-day">Saturday</div><div class="hours-time">${escapeHtml(state.store.saturday_collection_time || "10:00 AM - 12:00 PM")}</div>
+          <div class="hours-day" style="margin-top:8px;">Sunday</div><div class="hours-time">${escapeHtml(state.store.sunday_collection_time || "10:00 AM - 1:00 PM")}</div>
         </div>
-        <div class="hours-day">Saturday</div>
-        <div class="hours-time">${escapeHtml(state.store.saturday_collection_time || "10:00 AM - 12:00 PM")}</div>
-        <div class="hours-day" style="margin-top:8px;">Sunday</div>
-        <div class="hours-time">${escapeHtml(state.store.sunday_collection_time || "10:00 AM - 1:00 PM")}</div>
       </div>
     </div>
   `;
@@ -567,12 +567,7 @@ function renderFAQ() {
   return `
     <section class="faq-section">
       <div class="faq-title">FAQ</div>
-      ${STORE_FAQ.map((item) => `
-        <details class="faq-item">
-          <summary onclick="openFaq(this.parentElement); return false;">${item.q}</summary>
-          <div class="faq-answer">${String(item.a || "").replace(/\n/g, "<br>")}</div>
-        </details>
-      `).join("")}
+      ${(STORE_FAQ || []).map((item) => `<details class="faq-item"><summary onclick="openFaq(this.parentElement); return false;">${escapeHtml(item.q)}</summary><div class="faq-answer">${escapeHtml(item.a).replace(/\n/g, "<br>")}</div></details>`).join("")}
     </section>
   `;
 }
