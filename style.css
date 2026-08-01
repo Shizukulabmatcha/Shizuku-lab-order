@@ -142,7 +142,7 @@ img{display:block;max-width:100%;}
 
 /* store info panel */
 .store-panel{padding:0 20px 16px;}
-.store-banner{position:relative;height:164px;background-size:cover;background-position:center;border-radius:0;}
+.store-banner{position:relative;height:238px;background-size:cover;background-position:center 62%;border-radius:0;}
 .store-logo-overlap{position:absolute;left:50%;bottom:-38px;transform:translateX(-50%);width:82px;height:82px;object-fit:cover;background:#fff;border-radius:999px;padding:7px;border:4px solid var(--cream);box-shadow:0 4px 16px rgba(42,42,34,.18);}
 .store-panel-body{background:var(--card);border:1px solid var(--line);border-top:none;border-radius:0 0 18px 18px;padding:42px 18px 16px;text-align:center;}
 .store-insta{display:inline-block;font-size:12.5px;color:var(--matcha);text-decoration:none;margin-bottom:4px;font-weight:600;}
