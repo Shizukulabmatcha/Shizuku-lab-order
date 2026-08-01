@@ -9,6 +9,9 @@ const astate = {
   menu: [],
   promos: [],
   customerNotes: {},
+  loyaltySettings: null,
+  loyaltyDraft: null,
+  customerLoyalty: {},
   promoDraft: { code: "", discount_type: "fixed", discount_value: "", minimum_spend: "", usage_limit: "", valid_until: "" },
   selectedCustomerKey: null,
   settings: null,
@@ -125,14 +128,21 @@ async function loadAll() {
       const { data: overrides, error: availabilityError } = await db.from("store_opening_overrides").select("*").order("collection_date");
       if (availabilityError) console.warn("Could not load store availability:", availabilityError.message);
       astate.openingOverrides = overrides || [];
-      const [{ data: promos, error: promoError }, { data: notes, error: notesError }] = await Promise.all([
+      const [{ data: promos, error: promoError }, { data: notes, error: notesError }, { data: loyaltySettings, error: loyaltySettingsError }, { data: loyaltyRows, error: loyaltyRowsError }] = await Promise.all([
         db.from("promo_codes").select("*").order("created_at", { ascending: false }),
         db.from("customer_notes").select("*"),
+        db.from("loyalty_settings").select("*").eq("id", 1).maybeSingle(),
+        db.from("customer_loyalty").select("*"),
       ]);
       if (promoError) console.warn("Could not load promo codes:", promoError.message);
       if (notesError) console.warn("Could not load customer notes:", notesError.message);
+      if (loyaltySettingsError) console.warn("Could not load loyalty settings:", loyaltySettingsError.message);
+      if (loyaltyRowsError) console.warn("Could not load loyalty balances:", loyaltyRowsError.message);
       astate.promos = promos || [];
       astate.customerNotes = Object.fromEntries((notes || []).map((note) => [note.customer_key, note.note || ""]));
+      astate.loyaltySettings = loyaltySettings || { id: 1, enabled: false, stamps_required: 10, minimum_spend: 5, reward_description: "A free drink is on us." };
+      astate.loyaltyDraft = { ...astate.loyaltySettings };
+      astate.customerLoyalty = Object.fromEntries((loyaltyRows || []).map((row) => [row.customer_key, row]));
       if (!astate.selectedAvailabilityDate) astate.selectedAvailabilityDate = localDateText(new Date());
       if (!astate.calendarMonth) astate.calendarMonth = astate.selectedAvailabilityDate.slice(0, 7) + "-01";
       setAvailabilityDraft(astate.selectedAvailabilityDate);
@@ -409,7 +419,52 @@ function customers() { const result = new Map(); astate.orders.forEach((order) =
 function chooseCustomer(key) { astate.selectedCustomerKey = key; render(); }
 function setCustomerNote(value) { if (astate.selectedCustomerKey) astate.customerNotes[astate.selectedCustomerKey] = value; }
 async function saveCustomerNote() { const key = astate.selectedCustomerKey; if (!key) return; const button = document.getElementById("save-customer-note"); if (button) { button.textContent = "Saving…"; button.disabled = true; } const { error } = await db.from("customer_notes").upsert({ customer_key: key, note: String(astate.customerNotes[key] || "").trim() }, { onConflict: "customer_key" }); if (button) { button.textContent = "Save remark"; button.disabled = false; } if (error) return alert("Could not save remark: " + error.message); alert("Remark saved."); }
-function renderCustomersTab() { const list = customers(); const selected = list.find((item) => item.key === astate.selectedCustomerKey) || list[0]; if (selected && !astate.selectedCustomerKey) astate.selectedCustomerKey = selected.key; return `<div class="dashboard-grid" style="grid-template-columns:minmax(400px,1.1fr) minmax(300px,.9fr);align-items:start;"><section class="dashboard-card"><div class="dashboard-card-head"><h2>Customers</h2><span>${list.length} total</span></div>${list.length ? list.map((customer) => `<div class="queue-row" data-key="${escapeHtml(customer.key)}" onclick="chooseCustomer(this.dataset.key)" style="${customer.key === astate.selectedCustomerKey ? "background:#fffaf6;box-shadow:inset 4px 0 #ef7138;" : ""}"><div class="queue-top"><div><b>${escapeHtml(customer.name)}</b><div class="queue-name">${escapeHtml(customer.phone || (customer.instagram ? `@${customer.instagram}` : "No contact detail"))}</div></div><div style="text-align:right"><b>${money(customer.spent)}</b><div class="queue-name">${customer.orders.length} order${customer.orders.length === 1 ? "" : "s"}</div></div></div>${astate.customerNotes[customer.key] ? `<div class="queue-name" style="margin-top:7px;color:#9a5b35">📝 ${escapeHtml(astate.customerNotes[customer.key])}</div>` : ""}</div>`).join("") : `<div class="dashboard-empty">Customers appear after their first order.</div>`}</section><section class="dashboard-card">${selected ? `<div class="dashboard-card-head"><h2>${escapeHtml(selected.name)}</h2><span>${selected.orders.length} order${selected.orders.length === 1 ? "" : "s"}</span></div><div style="padding:20px"><div class="field"><label>Phone</label><input value="${escapeHtml(selected.phone)}" readonly></div>${selected.instagram ? `<div class="field"><label>Instagram</label><input value="@${escapeHtml(selected.instagram)}" readonly></div>` : ""}<div class="field"><label>Private remark</label><textarea rows="5" placeholder="e.g. Prefers less sweet…" oninput="setCustomerNote(this.value)">${escapeHtml(astate.customerNotes[selected.key] || "")}</textarea><div class="hint" style="text-align:left;margin-top:6px">Only you can see this.</div></div><button class="btn-primary" id="save-customer-note" style="width:100%" onclick="saveCustomerNote()">Save remark</button><div class="divider" style="margin:20px 0 12px"></div><b>Order history</b>${selected.orders.map((order) => `<div class="row" style="padding:10px 0;border-bottom:1px solid #f0e7de"><span>${escapeHtml(order.order_number || order.id)}<br><span class="hint" style="margin:0">${escapeHtml(order.collection_date || "")}</span></span><span>${money(order.total)}</span></div>`).join("")}</div>` : `<div class="dashboard-empty">Choose a customer.</div>`}</section></div>`; }
+function renderCustomersTab() { const list = customers(); const selected = list.find((item) => item.key === astate.selectedCustomerKey) || list[0]; if (selected && !astate.selectedCustomerKey) astate.selectedCustomerKey = selected.key; const loyalty = selected ? (astate.customerLoyalty[selected.key] || { stamps: 0, rewards_available: 0 }) : null; const goal = Math.max(1, Number(astate.loyaltySettings?.stamps_required || 10)); return `<div class="dashboard-grid" style="grid-template-columns:minmax(400px,1.1fr) minmax(300px,.9fr);align-items:start;"><section class="dashboard-card"><div class="dashboard-card-head"><h2>Customers</h2><span>${list.length} total</span></div>${list.length ? list.map((customer) => `<div class="queue-row" data-key="${escapeHtml(customer.key)}" onclick="chooseCustomer(this.dataset.key)" style="${customer.key === astate.selectedCustomerKey ? "background:#fffaf6;box-shadow:inset 4px 0 #ef7138;" : ""}"><div class="queue-top"><div><b>${escapeHtml(customer.name)}</b><div class="queue-name">${escapeHtml(customer.phone || (customer.instagram ? `@${customer.instagram}` : "No contact detail"))}</div></div><div style="text-align:right"><b>${money(customer.spent)}</b><div class="queue-name">${customer.orders.length} order${customer.orders.length === 1 ? "" : "s"}</div></div></div>${astate.customerNotes[customer.key] ? `<div class="queue-name" style="margin-top:7px;color:#9a5b35">📝 ${escapeHtml(astate.customerNotes[customer.key])}</div>` : ""}</div>`).join("") : `<div class="dashboard-empty">Customers appear after their first order.</div>`}</section><section class="dashboard-card">${selected ? `<div class="dashboard-card-head"><h2>${escapeHtml(selected.name)}</h2><span>${selected.orders.length} order${selected.orders.length === 1 ? "" : "s"}</span></div><div style="padding:20px"><div class="field"><label>Phone</label><input value="${escapeHtml(selected.phone)}" readonly></div>${selected.instagram ? `<div class="field"><label>Instagram</label><input value="@${escapeHtml(selected.instagram)}" readonly></div>` : ""}<div style="border:1px solid #d7e8c8;background:#f0f7e8;border-radius:14px;padding:14px;margin:16px 0;"><b>Stamp card</b><div class="hint" style="text-align:left;margin:5px 0 10px;">${Number(loyalty.stamps || 0)} / ${goal} stamps · ${Number(loyalty.rewards_available || 0)} reward${Number(loyalty.rewards_available || 0) === 1 ? "" : "s"} available</div><div style="display:flex;gap:8px;"><button class="btn-secondary" data-key="${escapeHtml(selected.key)}" onclick="adjustCustomerStamps(this.dataset.key,-1)">− Remove stamp</button><button class="btn-primary" data-key="${escapeHtml(selected.key)}" onclick="adjustCustomerStamps(this.dataset.key,1)">+ Add stamp</button></div></div><div class="field"><label>Private remark</label><textarea rows="5" placeholder="e.g. Prefers less sweet…" oninput="setCustomerNote(this.value)">${escapeHtml(astate.customerNotes[selected.key] || "")}</textarea><div class="hint" style="text-align:left;margin-top:6px">Only you can see this.</div></div><button class="btn-primary" id="save-customer-note" style="width:100%" onclick="saveCustomerNote()">Save remark</button><div class="divider" style="margin:20px 0 12px"></div><b>Order history</b>${selected.orders.map((order) => `<div class="row" style="padding:10px 0;border-bottom:1px solid #f0e7de"><span>${escapeHtml(order.order_number || order.id)}<br><span class="hint" style="margin:0">${escapeHtml(order.collection_date || "")}</span></span><span>${money(order.total)}</span></div>`).join("")}</div>` : `<div class="dashboard-empty">Choose a customer.</div>`}</section></div>`; }
+
+/* ---- rewards / stamp card ---- */
+function onLoyaltyField(key, value) { astate.loyaltyDraft[key] = value; }
+async function saveLoyaltySettings() {
+  const draft = astate.loyaltyDraft;
+  const payload = {
+    id: 1,
+    enabled: !!draft.enabled,
+    stamps_required: Math.max(1, Number(draft.stamps_required || 10)),
+    minimum_spend: Math.max(0, Number(draft.minimum_spend || 0)),
+    reward_description: String(draft.reward_description || "A free drink is on us.").trim(),
+  };
+  const button = document.getElementById("save-loyalty-settings");
+  if (button) { button.textContent = "Saving…"; button.disabled = true; }
+  const { data, error } = await db.from("loyalty_settings").upsert(payload, { onConflict: "id" }).select().single();
+  if (button) { button.textContent = "Save rewards"; button.disabled = false; }
+  if (error) return alert("Could not save rewards: " + error.message);
+  astate.loyaltySettings = data; astate.loyaltyDraft = { ...data }; alert("Rewards saved."); render();
+}
+async function adjustCustomerStamps(customerKey, amount) {
+  if (!customerKey) return;
+  const current = astate.customerLoyalty[customerKey] || { customer_key: customerKey, stamps: 0, rewards_available: 0 };
+  const goal = Math.max(1, Number(astate.loyaltySettings?.stamps_required || 10));
+  let stamps = Math.max(0, Number(current.stamps || 0) + Number(amount || 0));
+  let rewards = Math.max(0, Number(current.rewards_available || 0));
+  if (amount > 0 && stamps >= goal) { rewards += Math.floor(stamps / goal); stamps %= goal; }
+  const payload = { customer_key: customerKey, stamps, rewards_available: rewards };
+  const { data, error } = await db.from("customer_loyalty").upsert(payload, { onConflict: "customer_key" }).select().single();
+  if (error) return alert("Could not update stamps: " + error.message);
+  astate.customerLoyalty[customerKey] = data; render();
+}
+function renderRewardsTab() {
+  const d = astate.loyaltyDraft || { enabled: false, stamps_required: 10, minimum_spend: 5, reward_description: "A free drink is on us." };
+  const goal = Math.max(1, Number(d.stamps_required || 10));
+  return `<div class="dashboard-grid" style="grid-template-columns:minmax(310px,.9fr) minmax(330px,1.1fr);align-items:start;">
+    <section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Stamp card</h2><span>${d.enabled ? "LIVE" : "OFF"}</span></div>
+      <label class="slot" style="cursor:pointer;gap:10px;margin:0 0 16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${d.enabled ? "checked" : ""} onchange="onLoyaltyField('enabled',this.checked)"><span><b>Enable rewards</b><br><span class="hint">Turn this on only when you are ready to give stamps.</span></span></label>
+      <div class="field"><label>Stamps to complete a card</label><input type="number" min="1" max="30" value="${escapeHtml(d.stamps_required)}" oninput="onLoyaltyField('stamps_required',this.value)"></div>
+      <div class="field"><label>Minimum spend per stamp ($)</label><input type="number" min="0" step="0.10" value="${escapeHtml(d.minimum_spend)}" oninput="onLoyaltyField('minimum_spend',this.value)"></div>
+      <div class="field"><label>Reward message</label><textarea rows="3" oninput="onLoyaltyField('reward_description',this.value)">${escapeHtml(d.reward_description)}</textarea></div>
+      <button class="btn-primary" id="save-loyalty-settings" style="width:100%" onclick="saveLoyaltySettings()">Save rewards</button>
+    </section>
+    <section class="dashboard-card" style="padding:26px;background:linear-gradient(135deg,#1e473e,#294c44 55%,#19362f);color:#f9f4e8;"><div style="font-size:11px;font-weight:800;letter-spacing:.15em;color:#b7d2bb;">SHIZUKU LAB · MEMBER</div><div style="font:700 28px/1.1 Georgia,serif;margin-top:11px;">Shizuku Club</div><div style="margin:26px 0 22px;display:grid;grid-template-columns:repeat(5,1fr);gap:11px;">${Array.from({ length: goal }, (_, i) => `<div style="aspect-ratio:1;border:2px solid rgba(241,247,234,.55);border-radius:50%;display:grid;place-items:center;color:#dcebd8;font-size:14px;">☆</div>`).join("")}</div><div style="font-size:11px;font-weight:800;letter-spacing:.12em;color:#b7d2bb;">NEXT REWARD</div><div style="font-size:16px;font-weight:700;margin-top:5px;">${escapeHtml(d.reward_description || "A free drink is on us.")}</div><div style="font-size:13px;color:#d6e4d4;margin-top:14px;">${goal} stamps · one stamp for every ${money(d.minimum_spend || 0)} spent</div></section>
+  </div>`;
+}
 
 function addFaq() {
   astate.faq.push({ id: null, question: "", answer: "", sort_order: astate.faq.length, is_active: true });
@@ -554,16 +609,17 @@ function render() {
     ["orders", "▣", "Orders"],
     ["menu", "◇", "Products"],
     ["promos", "✦", "Promos"],
+    ["rewards", "♧", "Rewards"],
     ["customers", "◉", "Customers"],
     ["availability", "◷", "Availability"],
     ["settings", "⚙", "Store settings"],
   ];
-  const tabTitle = { orders: "Orders", menu: "Products", promos: "Promos", customers: "Customers", availability: "Availability", settings: "Store settings" };
-  const tabSubtitle = { orders: "Review payments and manage every customer order.", menu: "Keep your drinks, prices and availability up to date.", promos: "Create discounts customers can use at checkout.", customers: "See every customer and save private remarks.", availability: "Choose your pickup window and collection calendar.", settings: "Manage your store details, contact information and FAQ." };
+  const tabTitle = { orders: "Orders", menu: "Products", promos: "Promos", rewards: "Rewards", customers: "Customers", availability: "Availability", settings: "Store settings" };
+  const tabSubtitle = { orders: "Review payments and manage every customer order.", menu: "Keep your drinks, prices and availability up to date.", promos: "Create discounts customers can use at checkout.", rewards: "Set up your stamp card and reward repeat customers.", customers: "See every customer and save private remarks.", availability: "Choose your pickup window and collection calendar.", settings: "Manage your store details, contact information and FAQ." };
   const page = astate.tab === "dashboard" ? renderDashboardTab() : `
     <div class="admin-top"><div><div class="admin-eyebrow">Shizuku Lab admin</div><h1 class="tab-page-title">${tabTitle[astate.tab] || "Dashboard"}</h1><p class="tab-page-subtitle">${tabSubtitle[astate.tab] || ""}</p></div><a class="open-shop" href="index.html">Open customer shop ↗</a></div>
     <div class="admin-content">
-      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "availability" ? renderAvailabilityTab() : renderSettingsTab()}
+      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "availability" ? renderAvailabilityTab() : renderSettingsTab()}
     </div>`;
   app.innerHTML = `
     ${dashboardStyles()}
