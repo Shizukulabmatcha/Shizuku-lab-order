@@ -602,14 +602,16 @@ function storeInfoPanel() {
     ? `<a class="store-insta" style="display:inline-block;margin-left:10px;" href="https://wa.me/${encodeURIComponent(whatsappNumber)}" target="_blank" rel="noopener">WhatsApp us</a>`
     : "";
   const bannerImage = state.menu.find((item) => item.image_url)?.image_url || "matcha-latte.jpg";
+  const tickerText = escapeHtml(state.store.ticker_text || "PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB");
+  const storeDescription = escapeHtml(state.store.store_description || "Little cups, big comfort. Freshly whisked matcha made with care — one cup at a time.");
   return `
-    <div class="promo-ticker"><div class="promo-ticker-track"><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span></div></div>
+    <div class="promo-ticker"><div class="promo-ticker-track"><span>${tickerText}</span><span>${tickerText}</span><span>${tickerText}</span></div></div>
     <div class="store-panel">
       <div class="store-banner" style="background-image:linear-gradient(90deg,rgba(52,69,39,.14),rgba(52,69,39,.05)),url('${escapeHtml(bannerImage)}');"><img src="logo.png" class="store-logo-overlap" alt="${escapeHtml(state.store.store_name)} logo"></div>
       <div class="store-panel-body">
         <a class="store-insta" href="https://instagram.com/${encodeURIComponent(igHandle)}" target="_blank" rel="noopener">@${escapeHtml(igHandle)}</a>${whatsappLink}
         <div class="store-dropoff">${escapeHtml(state.store.collection_address || "")}</div>
-        <p class="store-desc">Little cups, big comfort. Freshly whisked matcha made with care — one cup at a time.</p>
+        <p class="store-desc">${storeDescription}</p>
         <div class="hours-card-dark">
           <div class="hours-row"><span class="hours-label">NEXT COLLECTION</span><span class="hours-status-dark open">PRE-ORDER</span></div>
           <div class="hours-day">Saturday</div><div class="hours-time">${escapeHtml(state.store.saturday_collection_time || "10:00 AM - 12:00 PM")}</div>
@@ -869,13 +871,13 @@ function renderCheckout() {
       <div class="field"><label>Phone</label><input id="f-phone" value="${escapeHtml(f.phone)}" placeholder="For pickup updates" inputmode="tel" oninput="onFormInput('phone', this.value)"></div>
       <div class="field"><label>Instagram (optional)</label><input id="f-instagram" value="${escapeHtml(f.instagram)}" placeholder="@yourhandle" oninput="onFormInput('instagram', this.value)"></div>
       <div class="field"><label>Collection date</label>
-        <select style="width:100%;height:44px;min-height:44px;padding:6px 12px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--ink);font-family:'Work Sans',sans-serif;font-size:13.5px;font-weight:400;letter-spacing:normal;" onchange="onPickupDateChange(this.value)">
+        <select style="width:100%;min-height:74px;padding:14px 18px;border-radius:14px;border:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-size:18px;" onchange="onPickupDateChange(this.value)">
           <option value="">Select a date</option>
           ${pickupDates.map(([date, label]) => `<option value="${escapeHtml(date)}" ${f.pickupDate === date ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
         </select>
       </div>
       <div class="field"><label>Collection time</label>
-        <select style="width:100%;height:44px;min-height:44px;padding:6px 12px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--ink);font-family:'Work Sans',sans-serif;font-size:13.5px;font-weight:400;letter-spacing:normal;" ${f.pickupDate ? "" : "disabled"} onchange="onFormInput('slotId', this.value)">
+        <select style="width:100%;min-height:74px;padding:14px 18px;border-radius:14px;border:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-size:18px;" ${f.pickupDate ? "" : "disabled"} onchange="onFormInput('slotId', this.value)">
           <option value="">${f.pickupDate ? "Select a time" : "Select a date first"}</option>
           ${availableTimes.map((slot) => `<option value="${escapeHtml(slot.id)}" ${f.slotId === slot.id ? "selected" : ""}>${escapeHtml(slot.time)}</option>`).join("")}
         </select>

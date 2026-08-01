@@ -9,7 +9,7 @@ const astate = {
   menu: [],
   promos: [],
   customerNotes: {},
-  promoDraft: { code: "", discount_type: "fixed", discount_value: "", minimum_spend: "", usage_limit: "", valid_until: "", is_active: true },
+  promoDraft: { code: "", discount_type: "fixed", discount_value: "", minimum_spend: "", usage_limit: "", valid_until: "" },
   selectedCustomerKey: null,
   settings: null,
   settingsDraft: null,
@@ -125,14 +125,14 @@ async function loadAll() {
       const { data: overrides, error: availabilityError } = await db.from("store_opening_overrides").select("*").order("collection_date");
       if (availabilityError) console.warn("Could not load store availability:", availabilityError.message);
       astate.openingOverrides = overrides || [];
-      const [{ data: promos, error: promoError }, { data: customerNotes, error: notesError }] = await Promise.all([
+      const [{ data: promos, error: promoError }, { data: notes, error: notesError }] = await Promise.all([
         db.from("promo_codes").select("*").order("created_at", { ascending: false }),
         db.from("customer_notes").select("*"),
       ]);
       if (promoError) console.warn("Could not load promo codes:", promoError.message);
       if (notesError) console.warn("Could not load customer notes:", notesError.message);
       astate.promos = promos || [];
-      astate.customerNotes = Object.fromEntries((customerNotes || []).map((note) => [note.customer_key, note.note || ""]));
+      astate.customerNotes = Object.fromEntries((notes || []).map((note) => [note.customer_key, note.note || ""]));
       if (!astate.selectedAvailabilityDate) astate.selectedAvailabilityDate = localDateText(new Date());
       if (!astate.calendarMonth) astate.calendarMonth = astate.selectedAvailabilityDate.slice(0, 7) + "-01";
       setAvailabilityDraft(astate.selectedAvailabilityDate);
@@ -370,103 +370,44 @@ function renderMenuTab() {
   `;
 }
 
-/* ---- promo codes ---- */
-function onPromoField(key, value) {
-  if (key === "code") astate.promoDraft[key] = String(value || "").toUpperCase().replace(/\s+/g, "");
-  else if (["discount_value", "minimum_spend", "usage_limit"].includes(key)) astate.promoDraft[key] = value;
-  else astate.promoDraft[key] = value;
-}
-function resetPromoDraft() { astate.promoDraft = { code: "", discount_type: "fixed", discount_value: "", minimum_spend: "", usage_limit: "", valid_until: "", is_active: true }; render(); }
-async function savePromo() {
+/* ---- promos ---- */
+function onPromoField(key, value) { astate.promoDraft[key] = key === "code" ? String(value || "").toUpperCase().replace(/\s+/g, "") : value; }
+function clearPromoDraft() { astate.promoDraft = { code: "", discount_type: "fixed", discount_value: "", minimum_spend: "", usage_limit: "", valid_until: "" }; render(); }
+async function createPromo() {
   const draft = astate.promoDraft;
   const code = String(draft.code || "").trim().toUpperCase();
-  const amount = Number(draft.discount_value);
-  if (!code) { alert("Please enter a promo code."); return; }
-  if (!Number.isFinite(amount) || amount <= 0) { alert("Enter a discount amount greater than $0."); return; }
-  const button = document.getElementById("promo-save-btn");
-  if (button) { button.textContent = "Saving…"; button.disabled = true; }
-  const payload = {
-    code,
-    discount_type: draft.discount_type === "percent" ? "percent" : "fixed",
-    discount_value: amount,
-    minimum_spend: Number(draft.minimum_spend || 0),
-    usage_limit: draft.usage_limit === "" ? null : Math.max(1, Number(draft.usage_limit)),
-    valid_until: draft.valid_until || null,
-    is_active: draft.is_active !== false,
-  };
-  const { data, error } = await db.from("promo_codes").insert(payload).select().single();
+  const value = Number(draft.discount_value);
+  if (!code) return alert("Enter a promo code.");
+  if (!Number.isFinite(value) || value <= 0) return alert("Enter a valid discount amount.");
+  const button = document.getElementById("create-promo-btn"); if (button) { button.textContent = "Saving…"; button.disabled = true; }
+  const { data, error } = await db.from("promo_codes").insert({ code, discount_type: draft.discount_type === "percent" ? "percent" : "fixed", discount_value: value, minimum_spend: Number(draft.minimum_spend || 0), usage_limit: draft.usage_limit === "" ? null : Math.max(1, Number(draft.usage_limit)), valid_until: draft.valid_until || null, is_active: true }).select().single();
   if (button) { button.textContent = "Create promo"; button.disabled = false; }
-  if (error) { alert("Could not create promo: " + error.message); return; }
-  astate.promos = [data, ...astate.promos];
-  resetPromoDraft();
-  alert("Promo code created.");
+  if (error) return alert("Could not create promo: " + error.message);
+  astate.promos = [data, ...astate.promos]; clearPromoDraft(); alert("Promo created.");
 }
-async function togglePromo(id, active) {
-  const { error } = await db.from("promo_codes").update({ is_active: active }).eq("id", id);
-  if (error) { alert("Could not update promo: " + error.message); return; }
-  astate.promos = astate.promos.map((promo) => String(promo.id) === String(id) ? { ...promo, is_active: active } : promo);
-  render();
+async function setPromoActive(id, is_active) {
+  const { error } = await db.from("promo_codes").update({ is_active }).eq("id", id);
+  if (error) return alert("Could not update promo: " + error.message);
+  astate.promos = astate.promos.map((promo) => String(promo.id) === String(id) ? { ...promo, is_active } : promo); render();
 }
-async function deletePromo(id) {
-  if (!confirm("Delete this promo code? Existing orders will not be affected.")) return;
+async function removePromo(id) {
+  if (!confirm("Delete this promo code?")) return;
   const { error } = await db.from("promo_codes").delete().eq("id", id);
-  if (error) { alert("Could not delete promo: " + error.message); return; }
-  astate.promos = astate.promos.filter((promo) => String(promo.id) !== String(id));
-  render();
+  if (error) return alert("Could not delete promo: " + error.message);
+  astate.promos = astate.promos.filter((promo) => String(promo.id) !== String(id)); render();
 }
 function renderPromosTab() {
-  const draft = astate.promoDraft;
-  const field = (label, control) => `<div class="field" style="margin-bottom:12px;"><label>${label}</label>${control}</div>`;
-  return `
-    <div class="dashboard-grid" style="grid-template-columns:minmax(300px,.75fr) minmax(420px,1.25fr);align-items:start;">
-      <section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>New promo code</h2></div>
-        ${field("Code", `<input value="${escapeHtml(draft.code)}" placeholder="e.g. WELCOME10" style="text-transform:uppercase;" oninput="onPromoField('code',this.value);this.value=this.value.toUpperCase()">`)}
-        ${field("Discount type", `<select onchange="onPromoField('discount_type',this.value)"><option value="fixed" ${draft.discount_type === "fixed" ? "selected" : ""}>Dollar off ($)</option><option value="percent" ${draft.discount_type === "percent" ? "selected" : ""}>Percent off (%)</option></select>`)}
-        ${field("Discount value", `<input type="number" min="0.01" step="0.01" value="${escapeHtml(draft.discount_value)}" placeholder="e.g. 1.00" oninput="onPromoField('discount_value',this.value)">`)}
-        ${field("Minimum spend (optional)", `<input type="number" min="0" step="0.01" value="${escapeHtml(draft.minimum_spend)}" placeholder="0.00" oninput="onPromoField('minimum_spend',this.value)">`)}
-        ${field("Total usage limit (optional)", `<input type="number" min="1" step="1" value="${escapeHtml(draft.usage_limit)}" placeholder="No limit" oninput="onPromoField('usage_limit',this.value)">`)}
-        ${field("End date (optional)", `<input type="date" value="${escapeHtml(draft.valid_until)}" oninput="onPromoField('valid_until',this.value)">`)}
-        <label class="slot" style="cursor:pointer;gap:10px;margin:2px 0 14px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${draft.is_active !== false ? "checked" : ""} onchange="onPromoField('is_active',this.checked)"><span><b>Make this code live immediately</b></span></label>
-        <div class="btn-row"><button class="btn-secondary" onclick="resetPromoDraft()">Clear</button><button class="btn-primary" id="promo-save-btn" onclick="savePromo()">Create promo</button></div>
-      </section>
-      <section class="dashboard-card"><div class="dashboard-card-head"><h2>Promo codes</h2><span>${astate.promos.length} total</span></div>
-        ${astate.promos.length ? astate.promos.map((promo) => { const exhausted = promo.usage_limit != null && Number(promo.used_count || 0) >= Number(promo.usage_limit); const live = promo.is_active && !exhausted; return `<div class="queue-row"><div class="queue-top"><div><div class="queue-number">${escapeHtml(promo.code)}</div><div class="queue-name">${promo.discount_type === "percent" ? `${escapeHtml(promo.discount_value)}% off` : `${money(promo.discount_value)} off`} · min. ${money(promo.minimum_spend || 0)}</div></div><div class="queue-status" style="background:${live ? "#e6f5df" : "#f5e8e4"};color:${live ? "#28753a" : "#a33c28"};">${live ? "LIVE" : exhausted ? "USED UP" : "PAUSED"}</div></div><div style="display:flex;gap:12px;align-items:center;margin-top:12px;"><span class="hint" style="margin:0;text-align:left;">${Number(promo.used_count || 0)} redemption${Number(promo.used_count || 0) === 1 ? "" : "s"}${promo.usage_limit != null ? ` / ${promo.usage_limit}` : ""}${promo.valid_until ? ` · ends ${escapeHtml(promo.valid_until)}` : ""}</span><span style="margin-left:auto;display:flex;gap:8px;"><button class="link-btn" onclick="togglePromo('${promo.id}',${!promo.is_active})">${promo.is_active ? "Pause" : "Make live"}</button><button class="link-danger" onclick="deletePromo('${promo.id}')">Delete</button></span></div></div>`; }).join("") : `<div class="dashboard-empty">No promo codes yet. Create your first one on the left.</div>`}
-      </section>
-    </div>`;
+  const d = astate.promoDraft;
+  return `<div class="dashboard-grid" style="grid-template-columns:minmax(290px,.72fr) minmax(400px,1.28fr);align-items:start;"><section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>New promo code</h2></div><div class="field"><label>Code</label><input value="${escapeHtml(d.code)}" placeholder="WELCOME10" style="text-transform:uppercase" oninput="onPromoField('code',this.value);this.value=this.value.toUpperCase()"></div><div class="field"><label>Discount type</label><select onchange="onPromoField('discount_type',this.value)"><option value="fixed" ${d.discount_type === "fixed" ? "selected" : ""}>Dollar off ($)</option><option value="percent" ${d.discount_type === "percent" ? "selected" : ""}>Percent off (%)</option></select></div><div class="field"><label>Discount value</label><input type="number" min="0.01" step="0.01" value="${escapeHtml(d.discount_value)}" placeholder="1.00" oninput="onPromoField('discount_value',this.value)"></div><div class="field"><label>Minimum spend (optional)</label><input type="number" min="0" step="0.01" value="${escapeHtml(d.minimum_spend)}" placeholder="0.00" oninput="onPromoField('minimum_spend',this.value)"></div><div class="field"><label>Usage limit (optional)</label><input type="number" min="1" value="${escapeHtml(d.usage_limit)}" placeholder="No limit" oninput="onPromoField('usage_limit',this.value)"></div><div class="field"><label>End date (optional)</label><input type="date" value="${escapeHtml(d.valid_until)}" oninput="onPromoField('valid_until',this.value)"></div><div class="btn-row"><button class="btn-secondary" onclick="clearPromoDraft()">Clear</button><button class="btn-primary" id="create-promo-btn" onclick="createPromo()">Create promo</button></div></section><section class="dashboard-card"><div class="dashboard-card-head"><h2>Promo codes</h2><span>${astate.promos.length} total</span></div>${astate.promos.length ? astate.promos.map((promo) => { const exhausted = promo.usage_limit != null && Number(promo.used_count || 0) >= Number(promo.usage_limit); const active = promo.is_active && !exhausted; return `<div class="queue-row"><div class="queue-top"><div><div class="queue-number">${escapeHtml(promo.code)}</div><div class="queue-name">${promo.discount_type === "percent" ? `${escapeHtml(promo.discount_value)}% off` : `${money(promo.discount_value)} off`} · min. ${money(promo.minimum_spend || 0)}</div></div><div class="queue-status" style="background:${active ? "#e6f5df" : "#f5e8e4"};color:${active ? "#28753a" : "#a33c28"};">${active ? "LIVE" : exhausted ? "USED UP" : "PAUSED"}</div></div><div style="display:flex;gap:12px;align-items:center;margin-top:12px;"><span class="hint" style="margin:0;text-align:left;">${Number(promo.used_count || 0)} used${promo.usage_limit != null ? ` / ${promo.usage_limit}` : ""}${promo.valid_until ? ` · ends ${escapeHtml(promo.valid_until)}` : ""}</span><span style="margin-left:auto;display:flex;gap:8px;"><button class="link-btn" onclick="setPromoActive('${promo.id}',${!promo.is_active})">${promo.is_active ? "Pause" : "Make live"}</button><button class="link-danger" onclick="removePromo('${promo.id}')">Delete</button></span></div></div>`; }).join("") : `<div class="dashboard-empty">No promo codes yet.</div>`}</section></div>`;
 }
 
-/* ---- customers and private notes ---- */
+/* ---- customers ---- */
 function customerKey(order) { return String(order.customer_phone || order.instagram || order.customer_name || "Unknown customer").trim(); }
-function customerList() {
-  const entries = new Map();
-  astate.orders.forEach((order) => {
-    const key = customerKey(order);
-    const existing = entries.get(key) || { key, name: order.customer_name || "Customer", phone: order.customer_phone || "", instagram: order.instagram || "", orders: [], spent: 0 };
-    existing.orders.push(order);
-    if (order.payment_status === "paid" && order.order_status !== "cancelled") existing.spent += Number(order.total || 0);
-    entries.set(key, existing);
-  });
-  return [...entries.values()].sort((a, b) => new Date(b.orders[0]?.created_at || 0) - new Date(a.orders[0]?.created_at || 0));
-}
-function selectCustomer(key) { astate.selectedCustomerKey = key; render(); }
-function onCustomerNote(value) { if (astate.selectedCustomerKey) astate.customerNotes[astate.selectedCustomerKey] = value; }
-async function saveCustomerNote() {
-  const key = astate.selectedCustomerKey;
-  if (!key) return;
-  const note = String(astate.customerNotes[key] || "").trim();
-  const button = document.getElementById("customer-note-save");
-  if (button) { button.textContent = "Saving…"; button.disabled = true; }
-  const { error } = await db.from("customer_notes").upsert({ customer_key: key, note }, { onConflict: "customer_key" });
-  if (button) { button.textContent = "Save remark"; button.disabled = false; }
-  if (error) { alert("Could not save remark: " + error.message); return; }
-  alert("Remark saved.");
-}
-function renderCustomersTab() {
-  const customers = customerList();
-  const selected = customers.find((customer) => customer.key === astate.selectedCustomerKey) || customers[0];
-  if (selected && !astate.selectedCustomerKey) astate.selectedCustomerKey = selected.key;
-  return `<div class="dashboard-grid" style="grid-template-columns:minmax(400px,1.1fr) minmax(300px,.9fr);align-items:start;"><section class="dashboard-card"><div class="dashboard-card-head"><h2>Customers</h2><span>${customers.length} total</span></div>${customers.length ? customers.map((customer) => `<div class="queue-row" data-customer-key="${escapeHtml(customer.key)}" onclick="selectCustomer(this.dataset.customerKey)" style="${customer.key === astate.selectedCustomerKey ? "background:#fffaf6;box-shadow:inset 4px 0 #ef7138;" : ""}"><div class="queue-top"><div><div style="font-weight:800;">${escapeHtml(customer.name)}</div><div class="queue-name">${escapeHtml(customer.phone || (customer.instagram ? `@${customer.instagram}` : "No contact detail"))}</div></div><div style="text-align:right;"><div class="queue-amount">${money(customer.spent)}</div><div class="queue-name">${customer.orders.length} order${customer.orders.length === 1 ? "" : "s"}</div></div></div>${astate.customerNotes[customer.key] ? `<div class="queue-name" style="margin-top:7px;color:#9a5b35;">📝 ${escapeHtml(astate.customerNotes[customer.key])}</div>` : ""}</div>`).join("") : `<div class="dashboard-empty">Customers will appear here after their first order.</div>`}</section><section class="dashboard-card">${selected ? `<div class="dashboard-card-head"><h2>${escapeHtml(selected.name)}</h2><span>${selected.orders.length} order${selected.orders.length === 1 ? "" : "s"}</span></div><div style="padding:20px;"><div class="field"><label>Phone</label><input value="${escapeHtml(selected.phone)}" readonly></div>${selected.instagram ? `<div class="field"><label>Instagram</label><input value="@${escapeHtml(selected.instagram)}" readonly></div>` : ""}<div class="field"><label>Private remark</label><textarea rows="5" placeholder="e.g. Prefers less sweet, regular customer…" oninput="onCustomerNote(this.value)">${escapeHtml(astate.customerNotes[selected.key] || "")}</textarea><div class="hint" style="text-align:left;margin-top:6px;">Only you can see this. Customers will never see it.</div></div><button class="btn-primary" id="customer-note-save" style="width:100%;" onclick="saveCustomerNote()">Save remark</button><div class="divider" style="margin:20px 0 12px;"></div><b>Order history</b>${selected.orders.map((order) => `<div class="row" style="padding:10px 0;border-bottom:1px solid #f0e7de;"><span>${escapeHtml(order.order_number || order.id)}<br><span class="hint" style="margin:0;">${escapeHtml(order.collection_date || "")}</span></span><span>${money(order.total)}</span></div>`).join("")}</div>` : `<div class="dashboard-empty">Choose a customer to see their details.</div>`}</section></div>`;
-}
+function customers() { const result = new Map(); astate.orders.forEach((order) => { const key = customerKey(order); const customer = result.get(key) || { key, name: order.customer_name || "Customer", phone: order.customer_phone || "", instagram: order.instagram || "", orders: [], spent: 0 }; customer.orders.push(order); if (order.payment_status === "paid" && order.order_status !== "cancelled") customer.spent += Number(order.total || 0); result.set(key, customer); }); return [...result.values()].sort((a,b) => new Date(b.orders[0]?.created_at || 0) - new Date(a.orders[0]?.created_at || 0)); }
+function chooseCustomer(key) { astate.selectedCustomerKey = key; render(); }
+function setCustomerNote(value) { if (astate.selectedCustomerKey) astate.customerNotes[astate.selectedCustomerKey] = value; }
+async function saveCustomerNote() { const key = astate.selectedCustomerKey; if (!key) return; const button = document.getElementById("save-customer-note"); if (button) { button.textContent = "Saving…"; button.disabled = true; } const { error } = await db.from("customer_notes").upsert({ customer_key: key, note: String(astate.customerNotes[key] || "").trim() }, { onConflict: "customer_key" }); if (button) { button.textContent = "Save remark"; button.disabled = false; } if (error) return alert("Could not save remark: " + error.message); alert("Remark saved."); }
+function renderCustomersTab() { const list = customers(); const selected = list.find((item) => item.key === astate.selectedCustomerKey) || list[0]; if (selected && !astate.selectedCustomerKey) astate.selectedCustomerKey = selected.key; return `<div class="dashboard-grid" style="grid-template-columns:minmax(400px,1.1fr) minmax(300px,.9fr);align-items:start;"><section class="dashboard-card"><div class="dashboard-card-head"><h2>Customers</h2><span>${list.length} total</span></div>${list.length ? list.map((customer) => `<div class="queue-row" data-key="${escapeHtml(customer.key)}" onclick="chooseCustomer(this.dataset.key)" style="${customer.key === astate.selectedCustomerKey ? "background:#fffaf6;box-shadow:inset 4px 0 #ef7138;" : ""}"><div class="queue-top"><div><b>${escapeHtml(customer.name)}</b><div class="queue-name">${escapeHtml(customer.phone || (customer.instagram ? `@${customer.instagram}` : "No contact detail"))}</div></div><div style="text-align:right"><b>${money(customer.spent)}</b><div class="queue-name">${customer.orders.length} order${customer.orders.length === 1 ? "" : "s"}</div></div></div>${astate.customerNotes[customer.key] ? `<div class="queue-name" style="margin-top:7px;color:#9a5b35">📝 ${escapeHtml(astate.customerNotes[customer.key])}</div>` : ""}</div>`).join("") : `<div class="dashboard-empty">Customers appear after their first order.</div>`}</section><section class="dashboard-card">${selected ? `<div class="dashboard-card-head"><h2>${escapeHtml(selected.name)}</h2><span>${selected.orders.length} order${selected.orders.length === 1 ? "" : "s"}</span></div><div style="padding:20px"><div class="field"><label>Phone</label><input value="${escapeHtml(selected.phone)}" readonly></div>${selected.instagram ? `<div class="field"><label>Instagram</label><input value="@${escapeHtml(selected.instagram)}" readonly></div>` : ""}<div class="field"><label>Private remark</label><textarea rows="5" placeholder="e.g. Prefers less sweet…" oninput="setCustomerNote(this.value)">${escapeHtml(astate.customerNotes[selected.key] || "")}</textarea><div class="hint" style="text-align:left;margin-top:6px">Only you can see this.</div></div><button class="btn-primary" id="save-customer-note" style="width:100%" onclick="saveCustomerNote()">Save remark</button><div class="divider" style="margin:20px 0 12px"></div><b>Order history</b>${selected.orders.map((order) => `<div class="row" style="padding:10px 0;border-bottom:1px solid #f0e7de"><span>${escapeHtml(order.order_number || order.id)}<br><span class="hint" style="margin:0">${escapeHtml(order.collection_date || "")}</span></span><span>${money(order.total)}</span></div>`).join("")}</div>` : `<div class="dashboard-empty">Choose a customer.</div>`}</section></div>`; }
 
 function addFaq() {
   astate.faq.push({ id: null, question: "", answer: "", sort_order: astate.faq.length, is_active: true });
@@ -507,6 +448,8 @@ function renderSettingsTab() {
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Store details</div>
     ${field("Store name", "store_name")}
     ${field("Instagram (without @)", "instagram")}
+    <div class="field"><label>Store introduction</label><textarea rows="4" placeholder="A short introduction customers see below your collection address." oninput="onSettingsField('store_description', this.value)">${escapeHtml(s.store_description || "")}</textarea><div class="hint" style="text-align:left;margin-top:5px;">Shown on the customer ordering page.</div></div>
+    ${field("Top rolling message", "ticker_text", "e.g. PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB")}
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Contact</div>
     ${field("WhatsApp number", "whatsapp_number", "+65 9XXX XXXX")}
