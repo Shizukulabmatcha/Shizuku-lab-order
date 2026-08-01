@@ -869,13 +869,13 @@ function renderCheckout() {
       <div class="field"><label>Phone</label><input id="f-phone" value="${escapeHtml(f.phone)}" placeholder="For pickup updates" inputmode="tel" oninput="onFormInput('phone', this.value)"></div>
       <div class="field"><label>Instagram (optional)</label><input id="f-instagram" value="${escapeHtml(f.instagram)}" placeholder="@yourhandle" oninput="onFormInput('instagram', this.value)"></div>
       <div class="field"><label>Collection date</label>
-        <select style="width:100%;min-height:74px;padding:14px 18px;border-radius:14px;border:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-size:18px;" onchange="onPickupDateChange(this.value)">
+        <select style="width:100%;min-height:56px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-size:16px;" onchange="onPickupDateChange(this.value)">
           <option value="">Select a date</option>
           ${pickupDates.map(([date, label]) => `<option value="${escapeHtml(date)}" ${f.pickupDate === date ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
         </select>
       </div>
       <div class="field"><label>Collection time</label>
-        <select style="width:100%;min-height:74px;padding:14px 18px;border-radius:14px;border:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-size:18px;" ${f.pickupDate ? "" : "disabled"} onchange="onFormInput('slotId', this.value)">
+        <select style="width:100%;min-height:56px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-size:16px;" ${f.pickupDate ? "" : "disabled"} onchange="onFormInput('slotId', this.value)">
           <option value="">${f.pickupDate ? "Select a time" : "Select a date first"}</option>
           ${availableTimes.map((slot) => `<option value="${escapeHtml(slot.id)}" ${f.slotId === slot.id ? "selected" : ""}>${escapeHtml(slot.time)}</option>`).join("")}
         </select>
