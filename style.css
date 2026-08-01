@@ -89,7 +89,9 @@ img{display:block;max-width:100%;}
 .screen{padding:0 20px 120px;}
 .field{margin-bottom:12px;}
 .field label{font-size:12px;color:var(--muted);margin-bottom:5px;font-weight:500;display:block;}
-.field input,.field textarea{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);font-size:13.5px;background:#fff;font-family:inherit;}
+.field input,.field textarea,.field select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);font-size:13.5px;background:#fff;font-family:inherit;color:var(--ink);}
+.field select{min-height:42px;}
+.field select:disabled{background:#f4f0e7;color:var(--faint);}
 .field textarea{resize:none;}
 .slot{width:100%;text-align:left;padding:12px 14px;border-radius:12px;margin-bottom:8px;border:1px solid var(--line);background:#fff;display:flex;align-items:center;gap:10px;}
 .slot.active{border:1.5px solid var(--matcha);background:var(--matcha-bg);}
