@@ -249,6 +249,8 @@ function header(subtitle) {
 
 function dashboardStyles() {
   return `<style>
+    /* The ordering page uses a narrow .wrap. The admin needs the full browser width. */
+    #app.wrap{width:100%;max-width:none!important;margin:0!important;padding:0!important}
     .shop-admin{min-height:100vh;background:#fffaf5;color:#292720;font-family:inherit;display:flex}
     .shop-admin *{box-sizing:border-box}.shop-admin .admin-side{width:248px;flex:0 0 248px;min-height:100vh;padding:28px 16px;border-right:1px solid #eadfd2;background:#fffdf9;position:sticky;top:0;height:100vh}
     .shop-admin .admin-logo{font-family:Georgia,serif;font-size:27px;font-weight:700;line-height:1.05}.shop-admin .admin-caption{margin:6px 8px 32px;color:#75845d;font-size:13px;letter-spacing:.06em}
