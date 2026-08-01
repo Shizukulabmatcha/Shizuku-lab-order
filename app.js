@@ -36,8 +36,6 @@ const state = {
   promo: null,
   promoMsg: "",
   lastOrder: null,
-  paynowExpiresAt: null,
-  paymentExpired: false,
   loading: true,
   loadError: null,
 };
@@ -373,7 +371,6 @@ async function submitOrder() {
 
   if (!IS_CONFIGURED) {
     state.lastOrder = { ...orderPayload, id: null, items: cartLines().map((line) => ({ ...line })), slot };
-    beginPaymentWindow();
     state.screen = "payment";
     render();
     return;
@@ -423,7 +420,6 @@ async function submitOrder() {
     }
 
     state.lastOrder = { ...order, items: cartLines().map((line) => ({ ...line })), slot };
-    beginPaymentWindow();
     state.screen = "payment";
     render();
   } catch (error) {
@@ -441,7 +437,6 @@ async function markPaid() {
     if (error) { alert("Could not update payment status.\n" + error.message); return; }
   }
   state.lastOrder = { ...order, payment_status: "submitted", order_status: "awaiting_confirmation" };
-  stopPaymentCountdown();
   state.cart = {};
   state.screen = "confirmation";
   render();
@@ -459,13 +454,12 @@ function crc16(s) {
   return (crc & 0xFFFF).toString(16).toUpperCase().padStart(4, "0");
 }
 function tlv(id, value) { return id + String(value.length).padStart(2, "0") + value; }
-function payNowExpiryString(timestamp) {
-  const d = new Date(timestamp);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-}
-function buildPayNowPayload({ mobile, amount, refNumber, merchantName, expiresAt }) {
-  const expiry = payNowExpiryString(expiresAt || Date.now() + 15 * 60 * 1000);
+function buildPayNowPayload({ mobile, amount, refNumber, merchantName }) {
+  const expiry = (() => {
+    const d = new Date(Date.now() + 15 * 60 * 1000);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  })();
   const merchantInfo = tlv("00", "SG.PAYNOW") + tlv("01", "0") + tlv("02", mobile) + tlv("03", "0") + tlv("04", expiry);
   const additional = tlv("01", (refNumber || "").slice(0, 25));
   let str = tlv("00", "01") + tlv("01", "12") + tlv("26", merchantInfo) + tlv("52", "0000") + tlv("53", "702") +
@@ -478,60 +472,30 @@ function payNowQrSvg(amount, refNumber) {
   const mobile = (state.store.paynow_number || "").replace(/\s+/g, "");
   if (!mobile) throw new Error("no paynow number configured");
   const merchantName = state.store.paynow_name || state.store.store_name || "SHIZUKU LAB";
-  const payload = buildPayNowPayload({ mobile, amount, refNumber, merchantName, expiresAt: state.paynowExpiresAt });
+  const payload = buildPayNowPayload({ mobile, amount, refNumber, merchantName });
   const qr = qrcode(0, "M");
   qr.addData(payload);
   qr.make();
   return qr.createSvgTag({ cellSize: 5, margin: 2 });
 }
 
-let paynowCountdownTimer = null;
-function beginPaymentWindow() {
-  state.paynowExpiresAt = Date.now() + 15 * 60 * 1000;
-  state.paymentExpired = false;
-}
-function stopPaymentCountdown() {
-  if (paynowCountdownTimer) clearInterval(paynowCountdownTimer);
-  paynowCountdownTimer = null;
-}
-function countdownLabel() {
-  const seconds = Math.max(0, Math.ceil(((state.paynowExpiresAt || 0) - Date.now()) / 1000));
-  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-}
-function startPaymentCountdown() {
-  stopPaymentCountdown();
-  const update = () => {
-    const remaining = (state.paynowExpiresAt || 0) - Date.now();
-    if (remaining <= 0) {
-      state.paymentExpired = true;
-      stopPaymentCountdown();
-      render();
-      return;
-    }
-    const element = document.getElementById("paynow-countdown");
-    if (element) element.textContent = countdownLabel();
-  };
-  update();
-  paynowCountdownTimer = setInterval(update, 1000);
-}
-
 /* ---------- store info ---------- */
 function storeInfoPanel() {
   const igHandle = String(state.store.instagram || "shizukulab.matcha").replace(/^@/, "");
-  const bannerImage = state.menu.find((item) => item.image_url)?.image_url || "matcha-latte.jpg";
   return `
-    <div class="promo-ticker"><div class="promo-ticker-track"><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span><span>PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB</span></div></div>
     <div class="store-panel">
-      <div class="store-banner" style="background-image:linear-gradient(90deg,rgba(52,69,39,.14),rgba(52,69,39,.05)),url('${escapeHtml(bannerImage)}');"><img src="logo.png" class="store-logo-overlap" alt="${escapeHtml(state.store.store_name)} logo"></div>
-      <div class="store-panel-body">
-        <a class="store-insta" href="https://instagram.com/${encodeURIComponent(igHandle)}" target="_blank" rel="noopener">@${escapeHtml(igHandle)}</a>
-        <div class="store-dropoff">${escapeHtml(state.store.collection_address || "")}</div>
-        <p class="store-desc">Little cups, big comfort. Freshly whisked matcha made with care — one cup at a time.</p>
-        <div class="hours-card-dark">
-          <div class="hours-row"><span class="hours-label">NEXT COLLECTION</span><span class="hours-status-dark open">PRE-ORDER</span></div>
-          <div class="hours-day">Saturday</div><div class="hours-time">${escapeHtml(state.store.saturday_collection_time || "10:00 AM - 12:00 PM")}</div>
-          <div class="hours-day" style="margin-top:8px;">Sunday</div><div class="hours-time">${escapeHtml(state.store.sunday_collection_time || "10:00 AM - 1:00 PM")}</div>
+      <img src="logo.png" class="store-logo" alt="${escapeHtml(state.store.store_name)} logo">
+      <a class="store-insta" href="https://instagram.com/${encodeURIComponent(igHandle)}" target="_blank" rel="noopener">@${escapeHtml(igHandle)}</a>
+      <div class="store-dropoff">${escapeHtml(state.store.collection_address || "")}</div>
+      <div class="hours-card">
+        <div class="hours-row">
+          <span class="hours-label">COLLECTION</span>
+          <span class="hours-status open">PRE-ORDER</span>
         </div>
+        <div class="hours-day">Saturday</div>
+        <div class="hours-time">${escapeHtml(state.store.saturday_collection_time || "10:00 AM - 12:00 PM")}</div>
+        <div class="hours-day" style="margin-top:8px;">Sunday</div>
+        <div class="hours-time">${escapeHtml(state.store.sunday_collection_time || "10:00 AM - 1:00 PM")}</div>
       </div>
     </div>
   `;
@@ -603,7 +567,11 @@ function renderFAQ() {
   return `
     <section class="faq-section">
       <div class="faq-title">FAQ</div>
-      ${(STORE_FAQ || []).map((item) => `<details class="faq-item"><summary>${escapeHtml(item.q)}</summary><div class="faq-answer">${escapeHtml(item.a).replace(/\n/g, "<br>")}</div></details>`).join("")}
+      <details class="faq-item"><summary>Where is collection?</summary><div class="faq-answer">Collection is at ${escapeHtml(state.store.collection_address || "Toa Payoh Lorong 1, Singapore")}.</div></details>
+      <details class="faq-item"><summary>When can I collect my drinks?</summary><div class="faq-answer">Saturday: ${escapeHtml(state.store.saturday_collection_time || "10:00 AM - 12:00 PM")}<br><br>Sunday: ${escapeHtml(state.store.sunday_collection_time || "10:00 AM - 1:00 PM")}</div></details>
+      <details class="faq-item"><summary>Can I request less ice or less sweet?</summary><div class="faq-answer">Yes. Please select your preferred option when ordering.</div></details>
+      <details class="faq-item"><summary>How do I pay?</summary><div class="faq-answer">Payment is made via PayNow after submitting your order.</div></details>
+      <details class="faq-item"><summary>Can I change my order after payment?</summary><div class="faq-answer">Please contact us as soon as possible if you need to make a change.</div></details>
     </section>
   `;
 }
@@ -846,9 +814,7 @@ function renderPayment() {
       <div class="summary-card">
         ${qrHtml}
         <div class="hint">Scan with your banking app, or PayNow to <b>${escapeHtml(paynowName)}</b>${paynowNumber ? `<br>${escapeHtml(paynowNumber)}` : ""}</div>
-        ${state.paymentExpired
-          ? `<div class="payment-expired">This payment QR has expired. Please return to the menu and place your order again.</div>`
-          : `<div class="payment-timer">Please complete payment within <b id="paynow-countdown">${countdownLabel()}</b></div>`}
+        <div class="hint" style="color:#B78A2E;">This QR code is valid for 15 minutes — please pay promptly.</div>
         <div class="divider"></div>
         <div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(order.order_number || order.id || "")}</span></div>
         <div class="row bold"><span class="label">Amount</span><span>${money(order.total)}</span></div>
@@ -856,7 +822,7 @@ function renderPayment() {
       </div>
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
-      <button class="primary-btn" ${state.paymentExpired ? "disabled" : ""} onclick="markPaid()">I've sent payment</button>
+      <button class="primary-btn" onclick="markPaid()">I've sent payment</button>
       <div class="hint" style="margin-top:8px;margin-bottom:0;">We'll confirm your order once payment is verified.</div>
     </div></div>
   `;
@@ -900,8 +866,6 @@ function render() {
   else html = renderMenu();
   html += `<div class="footer-link"><a href="admin.html"><button>Shop login</button></a></div>`;
   app.innerHTML = html;
-  if (state.screen === "payment" && !state.paymentExpired && state.paynowExpiresAt) startPaymentCountdown();
-  else stopPaymentCountdown();
 }
 
 init();
