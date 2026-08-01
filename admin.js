@@ -10,6 +10,7 @@ const astate = {
   settings: null,
   settingsDraft: null,
   openingOverrides: [],
+  faq: [],
   selectedAvailabilityDate: null,
   availabilityDraft: null,
   calendarMonth: null,
@@ -114,6 +115,9 @@ async function loadAll() {
       const { data: settingsRows } = await db.from("store_settings").select("*").limit(1);
       astate.settings = (settingsRows && settingsRows[0]) || null;
       astate.settingsDraft = astate.settings ? { ...astate.settings } : null;
+      const { data: faq, error: faqError } = await db.from("store_faq").select("*").order("sort_order");
+      if (faqError) console.warn("Could not load FAQ:", faqError.message);
+      astate.faq = faq || [];
       const { data: overrides, error: availabilityError } = await db.from("store_opening_overrides").select("*").order("collection_date");
       if (availabilityError) console.warn("Could not load store availability:", availabilityError.message);
       astate.openingOverrides = overrides || [];
@@ -313,6 +317,36 @@ function renderMenuTab() {
   `;
 }
 
+function addFaq() {
+  astate.faq.push({ id: null, question: "", answer: "", sort_order: astate.faq.length, is_active: true });
+  render();
+}
+function onFaqField(index, key, value) { astate.faq[index][key] = value; }
+async function saveFaq() {
+  const valid = astate.faq.filter((item) => String(item.question || "").trim() && String(item.answer || "").trim());
+  for (let index = 0; index < valid.length; index++) {
+    const item = valid[index];
+    const fields = { question: item.question.trim(), answer: item.answer.trim(), sort_order: index, is_active: true };
+    const query = item.id ? db.from("store_faq").update(fields).eq("id", item.id).select().single() : db.from("store_faq").insert(fields).select().single();
+    const { data, error } = await query;
+    if (error) { alert("Could not save FAQ: " + error.message); return; }
+    Object.assign(item, data);
+  }
+  astate.faq = valid;
+  alert("FAQ saved.");
+  render();
+}
+async function deleteFaq(index) {
+  const item = astate.faq[index];
+  if (!confirm("Delete this FAQ?")) return;
+  if (item.id) {
+    const { error } = await db.from("store_faq").delete().eq("id", item.id);
+    if (error) { alert("Could not delete FAQ: " + error.message); return; }
+  }
+  astate.faq.splice(index, 1);
+  render();
+}
+
 function renderSettingsTab() {
   if (!astate.settingsDraft) return `<div class="empty">No store_settings row found. Add one in Supabase, then refresh.</div>`;
   const s = astate.settingsDraft;
@@ -338,6 +372,11 @@ function renderSettingsTab() {
     ${field("Saturday collection time", "saturday_collection_time", "10:00 AM - 12:00 PM")}
     ${field("Sunday collection time", "sunday_collection_time", "10:00 AM - 1:00 PM")}
     <button class="btn-primary" id="settings-save-btn" style="width:100%;margin-top:8px;" onclick="saveSettings()">Save settings</button>
+    <div class="divider" style="margin:24px 0 16px;"></div>
+    <div class="display" style="font-size:20px;margin:4px 0 8px;">FAQ</div>
+    <div class="hint" style="text-align:left;margin-bottom:12px;">Edit what customers see at the bottom of the ordering website.</div>
+    ${astate.faq.map((item, index) => `<div class="order-card" style="margin-bottom:12px;"><div class="field"><label>Question</label><input value="${escapeHtml(item.question || "")}" placeholder="e.g. 🍵 How do I pay?" oninput="onFaqField(${index}, 'question', this.value)"></div><div class="field"><label>Answer</label><textarea rows="4" oninput="onFaqField(${index}, 'answer', this.value)">${escapeHtml(item.answer || "")}</textarea></div><button class="link-danger" onclick="deleteFaq(${index})">Delete FAQ</button></div>`).join("")}
+    <div class="btn-row"><button class="btn-secondary" onclick="addFaq()">+ Add FAQ</button><button class="btn-primary" onclick="saveFaq()">Save FAQ</button></div>
   `;
 }
 

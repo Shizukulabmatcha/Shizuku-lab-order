@@ -37,6 +37,7 @@ const state = {
   bundle: { drink1: null, drink2: null, drink1Options: {}, drink2Options: {} },
   slots: [],
   openingOverrides: [],
+  faq: [],
   store: {
     store_name: "Shizuku Lab",
     instagram: "shizukulab.matcha",
@@ -110,6 +111,12 @@ async function loadOpeningOverrides() {
     .lte("collection_date", formatDateForDatabase(until));
   if (error) { console.warn("Could not load store availability:", error.message); return; }
   state.openingOverrides = data || [];
+}
+async function loadFaq() {
+  if (!IS_CONFIGURED) return;
+  const { data, error } = await db.from("store_faq").select("*").eq("is_active", true).order("sort_order");
+  if (error) { console.warn("Could not load FAQ:", error.message); return; }
+  state.faq = data || [];
 }
 
 function pickupStartsAt(dateText, timeText) {
@@ -209,6 +216,7 @@ async function init() {
   try {
     await loadStoreSettings();
     await loadOpeningOverrides();
+    await loadFaq();
     state.slots = computeSlots();
     await Promise.all([loadProducts(), loadOptions()]);
   } catch (error) {
@@ -678,7 +686,7 @@ function renderFAQ() {
   return `
     <section class="faq-section">
       <div class="faq-title">FAQ</div>
-      ${(STORE_FAQ || []).map((item) => `<details class="faq-item"><summary onclick="openFaq(this.parentElement); return false;">${escapeHtml(item.q)}</summary><div class="faq-answer">${escapeHtml(item.a).replace(/\n/g, "<br>")}</div></details>`).join("")}
+      ${(state.faq.length ? state.faq.map((item) => ({ q: item.question, a: item.answer })) : (STORE_FAQ || [])).map((item) => `<details class="faq-item"><summary onclick="openFaq(this.parentElement); return false;">${escapeHtml(item.q)}</summary><div class="faq-answer">${escapeHtml(item.a).replace(/\n/g, "<br>")}</div></details>`).join("")}
     </section>
   `;
 }
