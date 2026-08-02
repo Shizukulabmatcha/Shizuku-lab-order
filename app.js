@@ -618,13 +618,17 @@ function storeInfoPanel() {
     : "";
   const bannerImage = state.store.hero_image_url || state.menu.find((item) => item.image_url)?.image_url || "matcha-latte.jpg";
   const logoUrl = state.store.logo_url || "logo.png";
+  const logoCircleSize = Math.max(56, Math.min(150, Number(state.store.logo_circle_size || 68)));
+  const logoImageScale = Math.max(0.55, Math.min(2, Number(state.store.logo_image_scale || 1)));
+  const bannerPosition = Math.max(0, Math.min(100, Number(state.store.hero_image_position ?? 68)));
+  const bannerHeight = Math.max(130, Math.min(320, Number(state.store.hero_banner_height || 190)));
   const tickerText = escapeHtml(state.store.ticker_text || "PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB");
   const storeDescription = escapeHtml(state.store.store_description || "Little cups, big comfort. Freshly whisked matcha made with care — one cup at a time.");
   return `
     ${state.store.show_ticker === false ? "" : `<div class="promo-ticker"><div class="promo-ticker-track"><span>${tickerText}</span><span>${tickerText}</span><span>${tickerText}</span></div></div>`}
     <div class="store-panel">
-      <div class="store-banner" style="background-image:linear-gradient(90deg,rgba(52,69,39,.14),rgba(52,69,39,.05)),url('${escapeHtml(bannerImage)}');"><img src="${escapeHtml(logoUrl)}" class="store-logo-overlap" alt="${escapeHtml(state.store.store_name)} logo"></div>
-      <div class="store-panel-body">
+      <div class="store-banner" style="--banner-height:${bannerHeight}px;background-position:center ${bannerPosition}%;background-image:linear-gradient(90deg,rgba(52,69,39,.14),rgba(52,69,39,.05)),url('${escapeHtml(bannerImage)}');"><span class="store-logo-overlap" style="--logo-circle-size:${logoCircleSize}px;"><img src="${escapeHtml(logoUrl)}" style="transform:scale(${logoImageScale});" alt="${escapeHtml(state.store.store_name)} logo"></span></div>
+      <div class="store-panel-body" style="padding-top:${Math.round(logoCircleSize / 2 + 12)}px;">
         <a class="store-insta" href="https://instagram.com/${encodeURIComponent(igHandle)}" target="_blank" rel="noopener">@${escapeHtml(igHandle)}</a>${whatsappLink}
         <div class="store-dropoff">${escapeHtml(state.store.collection_address || "")}</div>
         <p class="store-desc">${storeDescription}</p>
