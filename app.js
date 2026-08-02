@@ -153,7 +153,8 @@ function formatPickupTime(minutes) {
   return `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
 }
 function timesFromRange(rangeText) {
-  const times = String(rangeText || "").split(/\s*[–-]\s*/);
+  return String(rangeText || "").split("|").map((range) => {
+  const times = String(range || "").split(/\s*[–-]\s*/);
   const start = minutesFromTime(times[0]);
   const end = minutesFromTime(times[1]);
   const interval = Math.max(5, Math.min(120, Number(state.store.pickup_slot_interval_minutes || 30)));
@@ -162,6 +163,7 @@ function timesFromRange(rangeText) {
   const values = [];
   for (let minute = start; minute <= end; minute += interval) values.push(formatPickupTime(minute));
   return values;
+  }).flat();
 }
 
 function computeSlots() {
@@ -652,7 +654,7 @@ function header({ showCart = false } = {}) {
           <div class="brand-sub">雫ラボ · crafted drop by drop</div>
         </div>
         <div style="display:flex;align-items:center;gap:9px;">
-          <button onclick="setScreen('track')" style="border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--matcha);font:500 11px 'Work Sans',sans-serif;padding:8px 10px;white-space:nowrap;">Track order</button>
+          <button onclick="setScreen('track')" style="border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--matcha);font:600 13px 'Work Sans',sans-serif;padding:11px 15px;white-space:nowrap;">注文を追跡 · Track order</button>
           ${showCart ? `
             <button class="cart-btn" onclick="setScreen('cart')" aria-label="Cart">
               ${ICONS.bag}
@@ -676,15 +678,15 @@ function renderMenuCard(item) {
     <div style="background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;min-width:0;">
       <img src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(item.name)}" style="width:100%;aspect-ratio:1/1;object-fit:cover;background:var(--matcha-bg);">
       <div style="padding:11px 11px 12px;display:flex;flex:1;flex-direction:column;">
-        <button type="button" style="font:600 13px/1.25 'Work Sans',sans-serif;cursor:pointer;border:0;background:none;padding:0;text-align:left;color:var(--ink);" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} <span style="color:var(--matcha);">→</span></button>
-        <div style="font-size:10.5px;color:var(--muted);line-height:1.4;margin:5px 0 10px;">${escapeHtml(item.description)}</div>
+        <button type="button" style="font:600 13px/1.25 'Work Sans',sans-serif;cursor:pointer;border:0;background:none;padding:0;text-align:left;color:var(--ink);" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} <span style="color:var(--ink);">→</span></button>
+        <div style="font-size:10.5px;color:var(--ink);line-height:1.4;margin:5px 0 10px;">${escapeHtml(item.description)}</div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:7px;margin-top:auto;"><span style="font-size:12.5px;color:var(--matcha);font-weight:600;">${money(item.price)}</span>${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : `<button class="add-btn" style="padding:6px 10px;font-size:11px;" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}</div>
       </div>
     </div>`;
   return `
     <div class="item-card">
       <img class="item-thumb" src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(item.name)}">
-      <div class="item-info"><button class="item-name" type="button" style="cursor:pointer;border:0;background:none;padding:0;text-align:left;font:inherit;width:100%;" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} <span style="color:var(--matcha);">→</span></button><div class="item-desc">${escapeHtml(item.description)}</div><div class="item-row"><div class="item-price">${money(item.price)}</div>${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : `<button class="add-btn" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}</div></div>
+      <div class="item-info"><button class="item-name" type="button" style="cursor:pointer;border:0;background:none;padding:0;text-align:left;font:inherit;width:100%;color:var(--ink);" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} <span style="color:var(--ink);">→</span></button><div class="item-desc" style="color:var(--ink);">${escapeHtml(item.description)}</div><div class="item-row"><div class="item-price">${money(item.price)}</div>${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : `<button class="add-btn" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}</div></div>
     </div>`;
 }
 function renderMenu() {
@@ -704,7 +706,7 @@ function renderMenu() {
       <button class="pill ${state.menuView === "list" ? "active" : ""}" style="padding:6px 11px;font-size:11px;" onclick="state.menuView='list';render();">☷ List</button>
       <button class="pill ${state.menuView === "gallery" ? "active" : ""}" style="padding:6px 11px;font-size:11px;" onclick="state.menuView='gallery';render();">▦ Gallery</button>
     </div>
-    <div class="menu-list" style="padding-top:10px;">
+    <div class="menu-list" style="padding-top:10px;"><div class="menu-kana">メニュー · DRINK MENU</div>
       ${items.length === 0 ? `<div class="empty">No items available yet.</div>` : groups.map((group) => { const groupItems = items.filter((item) => productGroupName(item) === group); if (!groupItems.length) return ""; return `<section class="product-group"><h2 class="product-group-title">${escapeHtml(group)}</h2><div class="product-group-items" style="${state.menuView === "gallery" ? "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;" : ""}">${groupItems.map(renderMenuCard).join("")}</div></section>`; }).join("")}
     </div>
     ${cartCount() > 0 ? `
@@ -719,7 +721,7 @@ function renderMenu() {
 function renderFAQ() {
   return `
     <section class="faq-section">
-      <div class="faq-title">FAQ</div>
+      <div class="faq-title"><span>よくある質問</span> · FAQ</div>
       ${(state.faq.length ? state.faq.map((item) => ({ q: item.question, a: item.answer })) : (STORE_FAQ || [])).map((item) => `<details class="faq-item"><summary onclick="openFaq(this.parentElement); return false;">${escapeHtml(item.q)}</summary><div class="faq-answer">${escapeHtml(item.a).replace(/\n/g, "<br>")}</div></details>`).join("")}
     </section>
   `;
@@ -740,9 +742,9 @@ function renderOptions() {
     ${header()}
     <div class="screen">
       <button class="back-link" onclick="setScreen('menu')">${ICONS.back} Back to menu</button>
-      <div class="item-card">
-        <img class="item-thumb" src="${escapeHtml(product.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(product.name)}">
-        <div class="item-info">
+      <div class="product-detail-card">
+        <img class="product-detail-image" src="${escapeHtml(product.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(product.name)}">
+        <div class="item-info product-detail-copy">
           <div class="item-name">${escapeHtml(product.name)}</div>
           <div class="item-desc">${escapeHtml(product.description)}</div>
         </div>
@@ -752,7 +754,7 @@ function renderOptions() {
         const selected = state.selectedOptions[group.id];
         return `
           <div class="field" style="margin-top:20px;">
-            <label>${escapeHtml(group.name)}${group.required ? " *" : " (optional)"}</label>
+            <label><span class="option-kana">カスタマイズ</span>${escapeHtml(group.name)}${group.required ? " *" : " (optional)"}</label>
             <div>
               ${options.map((option) => `
                 <button type="button" class="slot ${selected && String(selected.optionId) === String(option.id) ? "active" : ""}" onclick="selectOption('${escapeHtml(group.id)}','${escapeHtml(option.id)}')">
@@ -783,9 +785,9 @@ function renderBundle() {
     ${header()}
     <div class="screen">
       <button class="back-link" onclick="setScreen('menu')">${ICONS.back} Back to menu</button>
-      <div class="item-card">
-        <img class="item-thumb" src="${escapeHtml(bundle.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(bundle.name)}">
-        <div class="item-info">
+      <div class="product-detail-card">
+        <img class="product-detail-image" src="${escapeHtml(bundle.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(bundle.name)}">
+        <div class="item-info product-detail-copy">
           <div class="item-name">${escapeHtml(bundle.name)}</div>
           <div class="item-desc">${escapeHtml(bundle.description || "Choose any two drinks from the selections below.")}</div>
           <div class="item-price">${money(bundle.price)}</div>
@@ -830,7 +832,7 @@ function renderBundleDrinkOptions(drinkNumber, drink, selectedOptions) {
         const selected = selectedOptions[group.id];
         return `
           <div class="field" style="margin-top:16px;">
-            <label>${escapeHtml(group.name)}${group.required ? " *" : ""}</label>
+            <label><span class="option-kana">カスタマイズ</span>${escapeHtml(group.name)}${group.required ? " *" : ""}</label>
             <div>
               ${options.map((option) => `
                 <button type="button" class="slot ${selected && String(selected.optionId) === String(option.id) ? "active" : ""}" onclick="selectBundleOption(${drinkNumber},'${escapeHtml(group.id)}','${escapeHtml(option.id)}')">
@@ -1087,7 +1089,6 @@ function render() {
   else if (state.screen === "confirmation") html = renderConfirmation();
   else if (state.screen === "track") html = renderTrackOrder();
   else html = renderMenu();
-  html += `<div class="footer-link"><a href="admin.html"><button>Shop login</button></a></div>`;
   app.innerHTML = html;
 }
 

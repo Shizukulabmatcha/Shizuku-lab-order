@@ -66,6 +66,26 @@ function changeCalendarMonth(amount) {
   render();
 }
 function onAvailabilityField(key, value) { astate.availabilityDraft[key] = value; }
+function availabilityRanges(value) {
+  const ranges = String(value || "").split("|").map((item) => item.trim()).filter(Boolean);
+  return ranges.length ? ranges : [""];
+}
+function setAvailabilityRange(index, value) {
+  const ranges = availabilityRanges(astate.availabilityDraft.collection_time);
+  ranges[index] = value;
+  astate.availabilityDraft.collection_time = ranges.join(" | ");
+}
+function addAvailabilityRange() {
+  const ranges = availabilityRanges(astate.availabilityDraft.collection_time);
+  astate.availabilityDraft.collection_time = [...ranges, ""].join(" | ");
+  render();
+}
+function removeAvailabilityRange(index) {
+  const ranges = availabilityRanges(astate.availabilityDraft.collection_time);
+  ranges.splice(index, 1);
+  astate.availabilityDraft.collection_time = (ranges.length ? ranges : [""]).join(" | ");
+  render();
+}
 async function saveAvailabilityOverride() {
   const entry = astate.availabilityDraft;
   if (!entry || !entry.collection_date) return;
@@ -287,6 +307,22 @@ async function saveProductGroups() {
 
 /* ---- store settings ---- */
 function onSettingsField(key, value) { astate.settingsDraft[key] = value; }
+function updateStorefrontPreview() {
+  const circle = document.getElementById("logo-live-preview");
+  const logo = document.getElementById("logo-live-preview-image");
+  const banner = document.getElementById("banner-live-preview");
+  const circleValue = document.getElementById("logo-circle-value");
+  const imageValue = document.getElementById("logo-image-value");
+  const bannerValue = document.getElementById("banner-position-value");
+  const heightValue = document.getElementById("banner-height-value");
+  if (circle && astate.settingsDraft) circle.style.width = circle.style.height = `${Number(astate.settingsDraft.logo_circle_size || 68)}px`;
+  if (logo && astate.settingsDraft) logo.style.transform = `scale(${Number(astate.settingsDraft.logo_image_scale || 1)})`;
+  if (banner && astate.settingsDraft) banner.style.objectPosition = `center ${Number(astate.settingsDraft.hero_image_position ?? 68)}%`;
+  if (circleValue) circleValue.textContent = `${Number(astate.settingsDraft.logo_circle_size || 68)} px`;
+  if (imageValue) imageValue.textContent = `${Number(astate.settingsDraft.logo_image_scale || 1).toFixed(2)}×`;
+  if (bannerValue) bannerValue.textContent = `${Number(astate.settingsDraft.hero_image_position ?? 68)}%`;
+  if (heightValue) heightValue.textContent = `${Number(astate.settingsDraft.hero_banner_height || 190)} px`;
+}
 async function saveSettings() {
   if (!astate.settings) { alert("No store_settings row found — add one in Supabase first."); return; }
   const btn = document.getElementById("settings-save-btn");
@@ -639,12 +675,12 @@ function renderSettingsTab() {
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Storefront images</div>
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 16px;"><div style="border:1px solid #E1D9C8;border-radius:13px;padding:12px;background:#fff;"><b style="display:block;margin-bottom:4px;">Logo frame · 1 : 1</b><span class="hint" style="margin:0;text-align:left;">Best upload: square, at least 1000 × 1000 px.</span></div><div style="border:1px solid #E1D9C8;border-radius:13px;padding:12px;background:#fff;"><b style="display:block;margin-bottom:4px;">Banner frame · 2 : 1</b><span class="hint" style="margin:0;text-align:left;">Best upload: landscape, at least 1600 × 800 px.</span></div></div>
-    <div class="field"><label>Logo</label><input value="${escapeHtml(s.logo_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('logo_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'logo_url')">${s.logo_url ? `<div style="width:112px;height:112px;border:1px solid #E1D9C8;border-radius:50%;overflow:hidden;margin-top:10px;background:#fff;display:grid;place-items:center;"><img src="${escapeHtml(s.logo_url)}" alt="Logo preview" style="width:100%;height:100%;object-fit:contain;transform:scale(${Number(s.logo_image_scale || 1)});"></div>` : ""}</div>
-    <div class="field"><label>Logo circle size <span style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.logo_circle_size || 68)} px</span></label><input type="range" min="56" max="150" step="1" value="${Number(s.logo_circle_size || 68)}" oninput="onSettingsField('logo_circle_size',Number(this.value));this.previousElementSibling.querySelector('span').textContent=this.value+' px'"><div class="hint" style="text-align:left;margin-top:5px;">Adjust the white circle around the logo.</div></div>
-    <div class="field"><label>Logo image size <span style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.logo_image_scale || 1).toFixed(2)}×</span></label><input type="range" min="0.55" max="2" step="0.05" value="${Number(s.logo_image_scale || 1)}" oninput="onSettingsField('logo_image_scale',Number(this.value));this.previousElementSibling.querySelector('span').textContent=Number(this.value).toFixed(2)+'×'"><div class="hint" style="text-align:left;margin-top:5px;">Zoom the logo inside the circle without changing the circle itself.</div></div>
-    <div class="field"><label>Top banner image</label><input value="${escapeHtml(s.hero_image_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('hero_image_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'hero_image_url')">${s.hero_image_url ? `<img src="${escapeHtml(s.hero_image_url)}" alt="Banner preview" style="display:block;width:100%;aspect-ratio:2/1;object-fit:cover;object-position:center ${Number(s.hero_image_position ?? 68)}%;border:1px solid #E1D9C8;border-radius:12px;margin-top:10px;">` : ""}</div>
-    <div class="field"><label>Banner crop position <span style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.hero_image_position ?? 68)}%</span></label><input type="range" min="0" max="100" step="1" value="${Number(s.hero_image_position ?? 68)}" oninput="onSettingsField('hero_image_position',Number(this.value));this.previousElementSibling.querySelector('span').textContent=this.value+'%'"><div class="hint" style="text-align:left;margin-top:5px;">This is your crop control: move it until the matcha and hojicha layers show nicely in the preview.</div></div>
-    <div class="field"><label>Banner height <span style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.hero_banner_height || 190)} px</span></label><input type="range" min="130" max="320" step="5" value="${Number(s.hero_banner_height || 190)}" oninput="onSettingsField('hero_banner_height',Number(this.value));this.previousElementSibling.querySelector('span').textContent=this.value+' px'"><div class="hint" style="text-align:left;margin-top:5px;">Make the banner taller or shorter.</div></div>
+    <div class="field"><label>Logo</label><input value="${escapeHtml(s.logo_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('logo_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'logo_url')">${s.logo_url ? `<div id="logo-live-preview" style="width:${Number(s.logo_circle_size || 68)}px;height:${Number(s.logo_circle_size || 68)}px;border:1px solid #E1D9C8;border-radius:50%;overflow:hidden;margin-top:10px;background:#fff;display:grid;place-items:center;"><img id="logo-live-preview-image" src="${escapeHtml(s.logo_url)}" alt="Logo preview" style="width:100%;height:100%;object-fit:contain;transform:scale(${Number(s.logo_image_scale || 1)});"></div>` : ""}</div>
+    <div class="field"><label>Logo circle size <span id="logo-circle-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.logo_circle_size || 68)} px</span></label><input type="range" min="56" max="150" step="1" value="${Number(s.logo_circle_size || 68)}" oninput="onSettingsField('logo_circle_size',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">The preview changes while you drag. Press Save settings to publish it to your customer page.</div></div>
+    <div class="field"><label>Logo image size <span id="logo-image-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.logo_image_scale || 1).toFixed(2)}×</span></label><input type="range" min="0.55" max="2" step="0.05" value="${Number(s.logo_image_scale || 1)}" oninput="onSettingsField('logo_image_scale',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">Zoom the logo inside the circle without changing the circle itself.</div></div>
+    <div class="field"><label>Top banner image</label><input value="${escapeHtml(s.hero_image_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('hero_image_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'hero_image_url')">${s.hero_image_url ? `<img id="banner-live-preview" src="${escapeHtml(s.hero_image_url)}" alt="Banner preview" style="display:block;width:100%;aspect-ratio:2/1;object-fit:cover;object-position:center ${Number(s.hero_image_position ?? 68)}%;border:1px solid #E1D9C8;border-radius:12px;margin-top:10px;">` : ""}</div>
+    <div class="field"><label>Banner crop position <span id="banner-position-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.hero_image_position ?? 68)}%</span></label><input type="range" min="0" max="100" step="1" value="${Number(s.hero_image_position ?? 68)}" oninput="onSettingsField('hero_image_position',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">This is your crop control: move it until the matcha and hojicha layers show nicely in the preview.</div></div>
+    <div class="field"><label>Banner height <span id="banner-height-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.hero_banner_height || 190)} px</span></label><input type="range" min="130" max="320" step="5" value="${Number(s.hero_banner_height || 190)}" oninput="onSettingsField('hero_banner_height',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">Make the banner taller or shorter.</div></div>
     <div class="field"><label>Store introduction</label><textarea rows="4" placeholder="A short introduction customers see below your collection address." oninput="onSettingsField('store_description', this.value)">${escapeHtml(s.store_description || "")}</textarea><div class="hint" style="text-align:left;margin-top:5px;">Shown on the customer ordering page.</div></div>
     ${field("Top rolling message", "ticker_text", "e.g. PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB")}
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_ticker !== false ? "checked" : ""} onchange="onSettingsField('show_ticker', this.checked)"><span><b>Show rolling message</b><br><span class="hint">Untick to hide it from the ordering page.</span></span></label>
@@ -708,7 +744,7 @@ function renderAvailabilityTab() {
         <input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${selected.is_open ? "checked" : ""} onchange="onAvailabilityField('is_open', this.checked)">
         <span><b>Open for pickup</b><br><span class="hint">Untick to close this date.</span></span>
       </label>
-      <div class="field"><label>Collection time for this date</label><input value="${escapeHtml(selected.collection_time)}" placeholder="10:00 AM - 12:00 PM" oninput="onAvailabilityField('collection_time', this.value)"></div>
+      <div class="field"><label>Pickup windows for this date</label><div class="hint" style="text-align:left;margin:0 0 8px;">You can open more than one window, e.g. 10:00 AM – 12:00 PM and 4:00 PM – 6:00 PM.</div>${availabilityRanges(selected.collection_time).map((range, index) => `<div style="display:flex;gap:8px;margin:8px 0;"><input value="${escapeHtml(range)}" placeholder="10:00 AM - 12:00 PM" oninput="setAvailabilityRange(${index}, this.value)">${availabilityRanges(selected.collection_time).length > 1 ? `<button class="btn-secondary" style="flex:0 0 auto;padding:0 12px;" onclick="removeAvailabilityRange(${index})">Remove</button>` : ""}</div>`).join("")}<button class="link-btn" style="padding:3px 0;" onclick="addAvailabilityRange()">+ Add another pickup window</button></div>
       <div class="btn-row"><button class="btn-primary" id="availability-save-btn" onclick="saveAvailabilityOverride()">Save day</button>${existing ? `<button class="btn-secondary" onclick="clearAvailabilityOverride()">Use weekly schedule</button>` : ""}</div>
     </div>
   `;
