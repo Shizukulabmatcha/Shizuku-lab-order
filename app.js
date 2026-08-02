@@ -30,6 +30,7 @@ const state = {
   cart: loadSavedCart(),
   screen: "menu",
   activeCategory: "All",
+  productGroups: [],
   menuView: "list",
   optionGroups: [],
   options: [],
@@ -75,12 +76,18 @@ function formatDateLabel(date) { return date.toLocaleDateString(undefined, { wee
 /* ---------- product helpers ---------- */
 function isBundle(product) {
   if (!product) return false;
-  return String(product.name).toLowerCase().includes("shizuku duo") || String(product.category).toLowerCase().includes("bundle");
+  return product.is_bundle === true || String(product.name).toLowerCase().includes("shizuku duo") || String(product.category).toLowerCase().includes("bundle");
 }
-function getBundleDrinkProducts() {
+function productGroupName(product) {
+  const group = state.productGroups.find((item) => String(item.id) === String(product.group_id));
+  return group?.name || product.category || "Other";
+}
+function getBundleDrinkProducts(bundle = state.selectedProduct) {
+  const allowedIds = Array.isArray(bundle?.bundle_product_ids) ? bundle.bundle_product_ids.map(String) : [];
   return state.menu.filter((product) => {
     if (!product.is_available) return false;
     if (isBundle(product)) return false;
+    if (allowedIds.length) return allowedIds.includes(String(product.id));
     const name = String(product.name || "").toLowerCase();
     return name.includes("matcha latte") || name.includes("houjicha latte");
   });
@@ -196,6 +203,12 @@ async function loadProducts() {
     stock: item.stock == null ? null : Number(item.stock),
   }));
 }
+async function loadProductGroups() {
+  const { data, error } = await db.from("product_groups").select("*").eq("is_visible", true).order("sort_order").order("name");
+  // The old shop continues to work before the one-time SQL upgrade is run.
+  if (error) { console.warn("Could not load product groups:", error.message); state.productGroups = []; return; }
+  state.productGroups = data || [];
+}
 async function loadOptions() {
   const [groupsResult, optionsResult] = await Promise.all([
     db.from("option_groups").select("*").order("id"),
@@ -220,7 +233,7 @@ async function init() {
     await loadOpeningOverrides();
     await loadFaq();
     state.slots = computeSlots();
-    await Promise.all([loadProducts(), loadOptions()]);
+    await Promise.all([loadProducts(), loadOptions(), loadProductGroups()]);
   } catch (error) {
     console.error(error);
     state.loadError = error?.message || String(error);
@@ -603,13 +616,14 @@ function storeInfoPanel() {
   const whatsappLink = state.store.show_whatsapp && whatsappNumber
     ? `<a class="store-insta" style="display:inline-block;margin-left:10px;" href="https://wa.me/${encodeURIComponent(whatsappNumber)}" target="_blank" rel="noopener">WhatsApp us</a>`
     : "";
-  const bannerImage = state.menu.find((item) => item.image_url)?.image_url || "matcha-latte.jpg";
+  const bannerImage = state.store.hero_image_url || state.menu.find((item) => item.image_url)?.image_url || "matcha-latte.jpg";
+  const logoUrl = state.store.logo_url || "logo.png";
   const tickerText = escapeHtml(state.store.ticker_text || "PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB");
   const storeDescription = escapeHtml(state.store.store_description || "Little cups, big comfort. Freshly whisked matcha made with care — one cup at a time.");
   return `
-    <div class="promo-ticker"><div class="promo-ticker-track"><span>${tickerText}</span><span>${tickerText}</span><span>${tickerText}</span></div></div>
+    ${state.store.show_ticker === false ? "" : `<div class="promo-ticker"><div class="promo-ticker-track"><span>${tickerText}</span><span>${tickerText}</span><span>${tickerText}</span></div></div>`}
     <div class="store-panel">
-      <div class="store-banner" style="background-image:linear-gradient(90deg,rgba(52,69,39,.14),rgba(52,69,39,.05)),url('${escapeHtml(bannerImage)}');"><img src="logo.png" class="store-logo-overlap" alt="${escapeHtml(state.store.store_name)} logo"></div>
+      <div class="store-banner" style="background-image:linear-gradient(90deg,rgba(52,69,39,.14),rgba(52,69,39,.05)),url('${escapeHtml(bannerImage)}');"><img src="${escapeHtml(logoUrl)}" class="store-logo-overlap" alt="${escapeHtml(state.store.store_name)} logo"></div>
       <div class="store-panel-body">
         <a class="store-insta" href="https://instagram.com/${encodeURIComponent(igHandle)}" target="_blank" rel="noopener">@${escapeHtml(igHandle)}</a>${whatsappLink}
         <div class="store-dropoff">${escapeHtml(state.store.collection_address || "")}</div>
@@ -653,9 +667,28 @@ function header({ showCart = false } = {}) {
 }
 
 /* ---------- menu ---------- */
+function renderMenuCard(item) {
+  if (state.menuView === "gallery") return `
+    <div style="background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;min-width:0;">
+      <img src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(item.name)}" style="width:100%;aspect-ratio:1/1;object-fit:cover;background:var(--matcha-bg);">
+      <div style="padding:11px 11px 12px;display:flex;flex:1;flex-direction:column;">
+        <button type="button" style="font:600 13px/1.25 'Work Sans',sans-serif;cursor:pointer;border:0;background:none;padding:0;text-align:left;color:var(--ink);" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} <span style="color:var(--matcha);">→</span></button>
+        <div style="font-size:10.5px;color:var(--muted);line-height:1.4;margin:5px 0 10px;">${escapeHtml(item.description)}</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:7px;margin-top:auto;"><span style="font-size:12.5px;color:var(--matcha);font-weight:600;">${money(item.price)}</span>${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : `<button class="add-btn" style="padding:6px 10px;font-size:11px;" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}</div>
+      </div>
+    </div>`;
+  return `
+    <div class="item-card">
+      <img class="item-thumb" src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(item.name)}">
+      <div class="item-info"><button class="item-name" type="button" style="cursor:pointer;border:0;background:none;padding:0;text-align:left;font:inherit;width:100%;" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} <span style="color:var(--matcha);">→</span></button><div class="item-desc">${escapeHtml(item.description)}</div><div class="item-row"><div class="item-price">${money(item.price)}</div>${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : `<button class="add-btn" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}</div></div>
+    </div>`;
+}
 function renderMenu() {
-  const categories = ["All", ...Array.from(new Set(state.menu.map((item) => item.category)))];
-  const items = state.activeCategory === "All" ? state.menu : state.menu.filter((item) => item.category === state.activeCategory);
+  const productGroupNames = state.productGroups.map((group) => group.name);
+  const extraNames = state.menu.map(productGroupName).filter((name) => !productGroupNames.includes(name));
+  const categories = ["All", ...productGroupNames, ...Array.from(new Set(extraNames))];
+  const items = state.activeCategory === "All" ? state.menu : state.menu.filter((item) => productGroupName(item) === state.activeCategory);
+  const groups = state.activeCategory === "All" ? categories.slice(1) : [state.activeCategory];
   return `
     ${header({ showCart: true })}
     ${storeInfoPanel()}
@@ -667,31 +700,8 @@ function renderMenu() {
       <button class="pill ${state.menuView === "list" ? "active" : ""}" style="padding:6px 11px;font-size:11px;" onclick="state.menuView='list';render();">☷ List</button>
       <button class="pill ${state.menuView === "gallery" ? "active" : ""}" style="padding:6px 11px;font-size:11px;" onclick="state.menuView='gallery';render();">▦ Gallery</button>
     </div>
-    <div class="menu-list" style="${state.menuView === "gallery" ? "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding-top:10px;" : ""}">
-      ${items.length === 0 ? `<div class="empty">No items available yet.</div>` : state.menuView === "list" ? items.map((item) => `
-        <div class="item-card">
-          <img class="item-thumb" src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(item.name)}">
-          <div class="item-info">
-            <button class="item-name" type="button" style="cursor:pointer;border:0;background:none;padding:0;text-align:left;font:inherit;width:100%;" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} <span style="color:var(--matcha);">→</span></button>
-            <div class="item-desc">${escapeHtml(item.description)}</div>
-            <div class="item-row">
-              <div class="item-price">${money(item.price)}</div>
-              ${state.cart[`${item.id}__`]?.qty > 0
-                ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty)
-                : `<button class="add-btn" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}
-            </div>
-          </div>
-        </div>
-      `).join("") : items.map((item) => `
-        <div style="background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;min-width:0;">
-          <img src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(item.name)}" style="width:100%;aspect-ratio:1/1;object-fit:cover;background:var(--matcha-bg);">
-          <div style="padding:11px 11px 12px;display:flex;flex:1;flex-direction:column;">
-            <button type="button" style="font:600 13px/1.25 'Work Sans',sans-serif;cursor:pointer;border:0;background:none;padding:0;text-align:left;color:var(--ink);" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} <span style="color:var(--matcha);">→</span></button>
-            <div style="font-size:10.5px;color:var(--muted);line-height:1.4;margin:5px 0 10px;">${escapeHtml(item.description)}</div>
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:7px;margin-top:auto;"><span style="font-size:12.5px;color:var(--matcha);font-weight:600;">${money(item.price)}</span>${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : `<button class="add-btn" style="padding:6px 10px;font-size:11px;" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}</div>
-          </div>
-        </div>
-      `).join("")}
+    <div class="menu-list" style="padding-top:10px;">
+      ${items.length === 0 ? `<div class="empty">No items available yet.</div>` : groups.map((group) => { const groupItems = items.filter((item) => productGroupName(item) === group); if (!groupItems.length) return ""; return `<section class="product-group"><h2 class="product-group-title">${escapeHtml(group)}</h2><div class="product-group-items" style="${state.menuView === "gallery" ? "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;" : ""}">${groupItems.map(renderMenuCard).join("")}</div></section>`; }).join("")}
     </div>
     ${cartCount() > 0 ? `
     <div class="sticky-bar"><div class="sticky-bar-inner">
@@ -770,10 +780,10 @@ function renderBundle() {
     <div class="screen">
       <button class="back-link" onclick="setScreen('menu')">${ICONS.back} Back to menu</button>
       <div class="item-card">
-        <img class="item-thumb" src="${escapeHtml(bundle.image_url || "matcha-lab.jpg")}" alt="Shizuku Duo">
+        <img class="item-thumb" src="${escapeHtml(bundle.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(bundle.name)}">
         <div class="item-info">
-          <div class="item-name">Shizuku Duo</div>
-          <div class="item-desc">Choose your Matcha Latte + Hojicha Latte combination.</div>
+          <div class="item-name">${escapeHtml(bundle.name)}</div>
+          <div class="item-desc">${escapeHtml(bundle.description || "Choose any two drinks from the selections below.")}</div>
           <div class="item-price">${money(bundle.price)}</div>
         </div>
       </div>
@@ -803,7 +813,7 @@ function renderBundle() {
       </div>
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
-      <button class="primary-btn" onclick="addBundleToCart()">Add Duo to cart · ${money(bundle.price)}</button>
+      <button class="primary-btn" onclick="addBundleToCart()">Add bundle to cart · ${money(bundle.price)}</button>
     </div></div>
   `;
 }

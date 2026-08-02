@@ -7,6 +7,7 @@ const astate = {
   tab: "dashboard",
   orders: [],
   menu: [],
+  productGroups: [],
   promos: [],
   customerNotes: {},
   loyaltySettings: null,
@@ -119,6 +120,10 @@ async function loadAll() {
       if (mErr) astate.loadError = mErr.message;
       astate.menu = menu || [];
 
+      const { data: groups, error: groupError } = await db.from("product_groups").select("*").order("sort_order").order("name");
+      if (groupError) console.warn("Could not load product groups:", groupError.message);
+      astate.productGroups = groups || [];
+
       const { data: settingsRows } = await db.from("store_settings").select("*").limit(1);
       astate.settings = (settingsRows && settingsRows[0]) || null;
       astate.settingsDraft = astate.settings ? { ...astate.settings } : null;
@@ -194,7 +199,8 @@ async function cancelOrder(id) {
 
 /* ---- menu (products) CRUD — unchanged from before ---- */
 function newMenuItem() {
-  astate.editing = { id: null, category: "Signature", name: "", description: "", price: 0, image_url: "", is_available: true, stock: 0 };
+  const firstGroup = astate.productGroups[0];
+  astate.editing = { id: null, group_id: firstGroup?.id || null, category: firstGroup?.name || "Signature", name: "", description: "", price: 0, image_url: "", is_available: true, is_bundle: false, bundle_product_ids: [], stock: 0 };
   render();
 }
 function editMenuItem(id) {
@@ -205,6 +211,29 @@ function cancelEdit() { astate.editing = null; render(); }
 function onEditField(key, value) {
   if (key === "price" || key === "stock") astate.editing[key] = parseFloat(value) || 0;
   else astate.editing[key] = value;
+}
+function onEditGroup(value) {
+  const group = astate.productGroups.find((item) => String(item.id) === String(value));
+  astate.editing.group_id = group ? group.id : null;
+  astate.editing.category = group ? group.name : "Other";
+}
+function toggleBundleProduct(productId, checked) {
+  const ids = Array.isArray(astate.editing.bundle_product_ids) ? astate.editing.bundle_product_ids.map(String) : [];
+  astate.editing.bundle_product_ids = checked ? [...new Set([...ids, String(productId)])] : ids.filter((id) => id !== String(productId));
+}
+async function uploadStorefrontImage(input, target) {
+  const file = input?.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith("image/")) { alert("Please choose an image file."); return; }
+  if (file.size > 8 * 1024 * 1024) { alert("Please use an image smaller than 8 MB."); return; }
+  const extension = (file.name.split(".").pop() || "jpg").replace(/[^a-z0-9]/gi, "");
+  const path = `${target}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
+  const { error } = await db.storage.from("storefront-images").upload(path, file, { upsert: false, contentType: file.type });
+  if (error) { alert("Could not upload image: " + error.message); return; }
+  const { data } = db.storage.from("storefront-images").getPublicUrl(path);
+  if (target === "products") astate.editing.image_url = data.publicUrl;
+  else { astate.settingsDraft[target] = data.publicUrl; }
+  render();
 }
 async function saveMenuItem() {
   const item = astate.editing;
@@ -236,6 +265,22 @@ async function deleteMenuItem(id) {
   astate.menu = astate.menu.filter((m) => String(m.id) !== String(id));
   render();
   if (IS_CONFIGURED) await db.from("products").delete().eq("id", id);
+}
+
+function addProductGroup() { astate.productGroups = [...astate.productGroups, { id: null, name: "", sort_order: astate.productGroups.length, is_visible: true }]; render(); }
+function onGroupField(index, key, value) { astate.productGroups[index][key] = key === "sort_order" ? Number(value || 0) : value; }
+async function saveProductGroups() {
+  const rows = astate.productGroups.filter((group) => String(group.name || "").trim());
+  for (let index = 0; index < rows.length; index++) {
+    const group = rows[index];
+    const fields = { name: String(group.name).trim(), sort_order: Number(group.sort_order ?? index), is_visible: !!group.is_visible };
+    const query = group.id ? db.from("product_groups").update(fields).eq("id", group.id).select().single() : db.from("product_groups").insert(fields).select().single();
+    const { data, error } = await query;
+    if (error) { alert("Could not save group: " + error.message); return; }
+    Object.assign(group, data);
+  }
+  astate.productGroups = rows.sort((a, b) => Number(a.sort_order) - Number(b.sort_order));
+  alert("Product groups saved."); render();
 }
 
 /* ---- store settings ---- */
@@ -352,7 +397,7 @@ function renderDashboardTab() {
   const insights = customerInsights();
   const highestDailySale = Math.max(...performance.days.map((day) => day.total), 1);
   return `
-    <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</h1><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><a class="open-shop" href="index.html">Open customer shop ↗</a></div>
+    <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</h1><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
     <div class="stat-grid">
       <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Revenue this month</div><div class="stat-value">${money(stats.revenue)}</div><div class="stat-help">Paid orders only</div></div>
       <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Orders this month</div><div class="stat-value">${stats.orders}</div><div class="stat-help">${stats.paymentReview ? `${stats.paymentReview} need payment review` : "Everything is up to date"}</div></div>
@@ -420,12 +465,16 @@ function renderOrders() {
 
 function renderMenuTab() {
   return `
+    <section class="dashboard-card" style="padding:20px;margin-bottom:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Product groups</h2><span>These become the big headings on the ordering page</span></div>
+      ${astate.productGroups.map((group, index) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 78px auto;gap:9px;align-items:center;margin:9px 0;"><input value="${escapeHtml(group.name || "")}" placeholder="e.g. Special" oninput="onGroupField(${index},'name',this.value)"><input type="number" value="${Number(group.sort_order || 0)}" title="Display order" oninput="onGroupField(${index},'sort_order',this.value)"><label style="font-size:12px;white-space:nowrap;"><input type="checkbox" style="width:auto;" ${group.is_visible ? "checked" : ""} onchange="onGroupField(${index},'is_visible',this.checked)"> Show</label></div>`).join("")}
+      <div class="btn-row" style="margin-top:14px;"><button class="btn-secondary" onclick="addProductGroup()">+ Add group</button><button class="btn-primary" onclick="saveProductGroups()">Save groups</button></div>
+    </section>
     ${astate.menu.map((item) => `
       <div class="order-card">
         <div class="order-top">
           <div>
             <div style="font-size:14px;font-weight:600;">${item.name}</div>
-            <div class="order-meta">${item.category} · ${money(item.price)}</div>
+            <div class="order-meta">${item.category || "Other"} · ${item.is_bundle ? "Bundle · " : ""}${item.is_available ? "Visible" : "Hidden"} · ${money(item.price)}</div>
           </div>
           <div style="display:flex;gap:10px;">
             <button class="link-btn" onclick="editMenuItem('${item.id}')">Edit</button>
@@ -555,8 +604,14 @@ function renderSettingsTab() {
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Store details</div>
     ${field("Store name", "store_name")}
     ${field("Instagram (without @)", "instagram")}
+    ${field("Shizuku Lab website link (optional)", "website_url", "https://your-brand-website.com")}
+    <div class="divider"></div>
+    <div class="display" style="font-size:20px;margin:4px 0 8px;">Storefront images</div>
+    <div class="field"><label>Logo</label><input value="${escapeHtml(s.logo_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('logo_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'logo_url')">${s.logo_url ? `<img src="${escapeHtml(s.logo_url)}" alt="Logo preview" style="width:74px;height:74px;object-fit:contain;border:1px solid #E1D9C8;border-radius:12px;margin-top:8px;">` : ""}</div>
+    <div class="field"><label>Top banner image</label><input value="${escapeHtml(s.hero_image_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('hero_image_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'hero_image_url')">${s.hero_image_url ? `<img src="${escapeHtml(s.hero_image_url)}" alt="Banner preview" style="display:block;width:100%;height:120px;object-fit:cover;border:1px solid #E1D9C8;border-radius:12px;margin-top:8px;">` : ""}</div>
     <div class="field"><label>Store introduction</label><textarea rows="4" placeholder="A short introduction customers see below your collection address." oninput="onSettingsField('store_description', this.value)">${escapeHtml(s.store_description || "")}</textarea><div class="hint" style="text-align:left;margin-top:5px;">Shown on the customer ordering page.</div></div>
     ${field("Top rolling message", "ticker_text", "e.g. PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB")}
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_ticker !== false ? "checked" : ""} onchange="onSettingsField('show_ticker', this.checked)"><span><b>Show rolling message</b><br><span class="hint">Untick to hide it from the ordering page.</span></span></label>
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Contact</div>
     ${field("WhatsApp number", "whatsapp_number", "+65 9XXX XXXX")}
@@ -573,12 +628,11 @@ function renderSettingsTab() {
     ${field("Saturday collection time", "saturday_collection_time", "10:00 AM - 12:00 PM")}
     ${field("Sunday collection time", "sunday_collection_time", "10:00 AM - 1:00 PM")}
     <button class="btn-primary" id="settings-save-btn" style="width:100%;margin-top:8px;" onclick="saveSettings()">Save settings</button>
-    <div class="divider" style="margin:24px 0 16px;"></div>
-    <div class="display" style="font-size:20px;margin:4px 0 8px;">FAQ</div>
-    <div class="hint" style="text-align:left;margin-bottom:12px;">Edit what customers see at the bottom of the ordering website.</div>
-    ${astate.faq.map((item, index) => `<div class="order-card" style="margin-bottom:12px;"><div class="field"><label>Question</label><input value="${escapeHtml(item.question || "")}" placeholder="e.g. 🍵 How do I pay?" oninput="onFaqField(${index}, 'question', this.value)"></div><div class="field"><label>Answer</label><textarea rows="4" oninput="onFaqField(${index}, 'answer', this.value)">${escapeHtml(item.answer || "")}</textarea></div><button class="link-danger" onclick="deleteFaq(${index})">Delete FAQ</button></div>`).join("")}
-    <div class="btn-row"><button class="btn-secondary" onclick="addFaq()">+ Add FAQ</button><button class="btn-primary" onclick="saveFaq()">Save FAQ</button></div>
   `;
+}
+
+function renderFaqTab() {
+  return `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Customer FAQ</h2><span>Shown at the bottom of the ordering page</span></div><div class="hint" style="text-align:left;margin-bottom:14px;">Use emoji in the question if you want the tone to feel friendly and casual.</div>${astate.faq.map((item, index) => `<div class="order-card" style="margin-bottom:12px;"><div class="field"><label>Question</label><input value="${escapeHtml(item.question || "")}" placeholder="e.g. 🍵 How do I pay?" oninput="onFaqField(${index}, 'question', this.value)"></div><div class="field"><label>Answer</label><textarea rows="4" oninput="onFaqField(${index}, 'answer', this.value)">${escapeHtml(item.answer || "")}</textarea></div><button class="link-danger" onclick="deleteFaq(${index})">Delete FAQ</button></div>`).join("")}<div class="btn-row"><button class="btn-secondary" onclick="addFaq()">+ Add FAQ</button><button class="btn-primary" onclick="saveFaq()">Save FAQ</button></div></section>`;
 }
 
 function renderAvailabilityTab() {
@@ -632,16 +686,18 @@ function renderEditOverlay() {
     <div class="overlay-card" style="max-height:80vh;overflow-y:auto;">
       <div class="display overlay-title" style="font-size:18px;">${astate.menu.some(m => String(m.id) === String(item.id)) ? "Edit item" : "New item"}</div>
       <div class="field"><label>Name</label><input value="${item.name}" oninput="onEditField('name', this.value)"></div>
-      <div class="field"><label>Category</label><input value="${item.category || ''}" oninput="onEditField('category', this.value)"></div>
+      <div class="field"><label>Product group</label><select onchange="onEditGroup(this.value)"><option value="">Other</option>${astate.productGroups.map((group) => `<option value="${group.id}" ${String(item.group_id) === String(group.id) ? "selected" : ""}>${escapeHtml(group.name)}</option>`).join("")}</select><div class="hint" style="text-align:left;margin-top:5px;">Shown as a large group heading on the ordering page.</div></div>
       <div class="field"><label>Description</label><textarea rows="2" oninput="onEditField('description', this.value)">${item.description || ""}</textarea></div>
       <div class="field"><label>Price (SGD)</label><input type="number" step="0.1" value="${item.price}" oninput="onEditField('price', this.value)"></div>
-      <div class="field"><label>Image path or URL</label><input value="${item.image_url || ""}" placeholder="your-photo.jpg" oninput="onEditField('image_url', this.value)"></div>
+      <div class="field"><label>Product image</label><input value="${item.image_url || ""}" placeholder="Upload below or paste image URL" oninput="onEditField('image_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'products')">${item.image_url ? `<img src="${escapeHtml(item.image_url)}" alt="Product preview" style="display:block;width:100%;height:150px;object-fit:cover;border:1px solid #E1D9C8;border-radius:12px;margin-top:8px;">` : ""}</div>
       <div class="field"><label>Stock</label><input type="number" value="${item.stock || 0}" oninput="onEditField('stock', this.value)"></div>
+      <div class="field" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="bundle-check" ${item.is_bundle ? "checked" : ""} onchange="onEditField('is_bundle', this.checked);render()" style="width:auto;"><label style="margin:0;" for="bundle-check">This is a Bundle of Two</label></div>
+      ${item.is_bundle ? `<div class="field"><label>Drinks customers can choose in this bundle</label><div class="hint" style="text-align:left;margin:0 0 7px;">Tick the drinks you want to allow. Leave all unticked to use the normal latte choices.</div>${astate.menu.filter((product) => String(product.id) !== String(item.id) && !product.is_bundle).map((product) => `<label class="slot" style="cursor:pointer;gap:10px;margin:7px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${Array.isArray(item.bundle_product_ids) && item.bundle_product_ids.map(String).includes(String(product.id)) ? "checked" : ""} onchange="toggleBundleProduct('${product.id}',this.checked)"><span>${escapeHtml(product.name)}</span></label>`).join("")}</div>` : ""}
       <div class="field" style="display:flex;align-items:center;gap:8px;">
         <input type="checkbox" id="avail-check" ${item.is_available ? "checked" : ""} onchange="onEditField('is_available', this.checked)" style="width:auto;">
         <label style="margin:0;" for="avail-check">Available on menu</label>
       </div>
-      <div class="hint" style="text-align:left;margin-bottom:0;">To add a new photo: upload the image file to the same GitHub folder as the other photos, then reference it here as <code>filename.jpg</code>.</div>
+      <div class="hint" style="text-align:left;margin-bottom:0;">Visible items show on the customer ordering page. Hidden items stay saved in your catalogue.</div>
       <div class="btn-row" style="margin-top:14px;">
         <button class="btn-secondary" onclick="cancelEdit()">Cancel</button>
         <button class="btn-primary" id="save-btn" onclick="saveMenuItem()">Save</button>
@@ -662,19 +718,20 @@ function render() {
     ["rewards", "♧", "Rewards"],
     ["customers", "◉", "Customers"],
     ["availability", "◷", "Availability"],
+    ["faq", "?", "FAQ"],
     ["settings", "⚙", "Store settings"],
   ];
-  const tabTitle = { orders: "Orders", menu: "Products", promos: "Promos", rewards: "Rewards", customers: "Customers", availability: "Availability", settings: "Store settings" };
-  const tabSubtitle = { orders: "Review payments and manage every customer order.", menu: "Keep your drinks, prices and availability up to date.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", availability: "Choose your pickup window and collection calendar.", settings: "Manage your store details, contact information and FAQ." };
+  const tabTitle = { orders: "Orders", menu: "Products", promos: "Promos", rewards: "Rewards", customers: "Customers", availability: "Availability", faq: "FAQ", settings: "Store settings" };
+  const tabSubtitle = { orders: "Review payments and manage every customer order.", menu: "Keep your drinks, prices and availability up to date.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", settings: "Manage your store details, images, contact information and payment details." };
   const page = astate.tab === "dashboard" ? renderDashboardTab() : `
-    <div class="admin-top"><div><div class="admin-eyebrow">Shizuku Lab admin</div><h1 class="tab-page-title">${tabTitle[astate.tab] || "Dashboard"}</h1><p class="tab-page-subtitle">${tabSubtitle[astate.tab] || ""}</p></div><a class="open-shop" href="index.html">Open customer shop ↗</a></div>
+    <div class="admin-top"><div><div class="admin-eyebrow">Shizuku Lab admin</div><h1 class="tab-page-title">${tabTitle[astate.tab] || "Dashboard"}</h1><p class="tab-page-subtitle">${tabSubtitle[astate.tab] || ""}</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
     <div class="admin-content">
-      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "availability" ? renderAvailabilityTab() : renderSettingsTab()}
+      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : renderSettingsTab()}
     </div>`;
   app.innerHTML = `
     ${dashboardStyles()}
     <div class="shop-admin">
-      <aside class="admin-side"><div class="admin-logo">${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</div><div class="admin-caption">SHOP ADMIN</div><div class="admin-nav-label">MAIN</div><nav class="admin-nav">${nav.map(([tab, icon, label]) => `<button class="${astate.tab === tab ? "active" : ""}" onclick="setTab('${tab}')"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="admin-side-bottom"><a href="index.html">↗ Open customer shop</a><br><span>${astate.orders.length} order${astate.orders.length === 1 ? "" : "s"} total</span></div></aside>
+      <aside class="admin-side"><div class="admin-logo">${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</div><div class="admin-caption">SHOP ADMIN</div><div class="admin-nav-label">MAIN</div><nav class="admin-nav">${nav.map(([tab, icon, label]) => `<button class="${astate.tab === tab ? "active" : ""}" onclick="setTab('${tab}')"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="admin-side-bottom"><a href="order.html">↗ Open customer shop</a><br><span>${astate.orders.length} order${astate.orders.length === 1 ? "" : "s"} total</span></div></aside>
       <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}${page}</main>
     </div>
     ${renderEditOverlay()}
