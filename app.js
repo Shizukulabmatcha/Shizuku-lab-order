@@ -53,12 +53,13 @@ const state = {
   form: { name: "", phone: "", instagram: "", pickupDate: "", slotId: "", notes: "", promoCode: "" },
   promo: null,
   promoMsg: "",
-  payment: { transactionReference: "", proofFile: null },
+  payment: { transactionReference: "", proofFile: null, expiresAt: null },
   tracking: { orderNumber: "", phone: "", order: null, message: "", loading: false },
   lastOrder: null,
   loading: true,
   loadError: null,
 };
+let paymentCountdownTimer = null;
 
 /* ---------- helpers ---------- */
 function money(n) { return `$${Number(n || 0).toFixed(2)}`; }
@@ -450,6 +451,8 @@ async function submitOrder() {
 
   const orderNumber = uidCode();
   const total = orderTotal();
+  // Each payment screen gets its own 15-minute PayNow request window.
+  state.payment.expiresAt = Date.now() + 15 * 60 * 1000;
 
   // NOTE: your Supabase orders table column for phone is customer_phone.
   const orderPayload = {
@@ -569,7 +572,7 @@ async function markPaid() {
   state.lastOrder = { ...order, payment_status: "submitted", order_status: "awaiting_confirmation" };
   state.cart = {};
   clearSavedCart();
-  state.payment = { transactionReference: "", proofFile: null };
+  state.payment = { transactionReference: "", proofFile: null, expiresAt: null };
   state.screen = "confirmation";
   render();
 }
@@ -586,9 +589,9 @@ function crc16(s) {
   return (crc & 0xFFFF).toString(16).toUpperCase().padStart(4, "0");
 }
 function tlv(id, value) { return id + String(value.length).padStart(2, "0") + value; }
-function buildPayNowPayload({ mobile, amount, refNumber, merchantName }) {
+function buildPayNowPayload({ mobile, amount, refNumber, merchantName, expiresAt }) {
   const expiry = (() => {
-    const d = new Date(Date.now() + 15 * 60 * 1000);
+    const d = new Date(expiresAt || Date.now() + 15 * 60 * 1000);
     const pad = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
   })();
@@ -600,11 +603,11 @@ function buildPayNowPayload({ mobile, amount, refNumber, merchantName }) {
   str += "6304" + crc16(str + "6304");
   return str;
 }
-function payNowQrSvg(amount, refNumber) {
+function payNowQrSvg(amount, refNumber, expiresAt) {
   const mobile = (state.store.paynow_number || "").replace(/\s+/g, "");
   if (!mobile) throw new Error("no paynow number configured");
   const merchantName = state.store.paynow_name || state.store.store_name || "SHIZUKU LAB";
-  const payload = buildPayNowPayload({ mobile, amount, refNumber, merchantName });
+  const payload = buildPayNowPayload({ mobile, amount, refNumber, merchantName, expiresAt });
   const qr = qrcode(0, "M");
   qr.addData(payload);
   qr.make();
@@ -963,14 +966,48 @@ function onPickupDateChange(date) {
 }
 
 /* ---------- payment ---------- */
+function paymentSecondsLeft() {
+  return Math.max(0, Math.ceil((Number(state.payment.expiresAt || 0) - Date.now()) / 1000));
+}
+function paymentCountdownText() {
+  const seconds = paymentSecondsLeft();
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+}
+function refreshPayNowQr() {
+  state.payment.expiresAt = Date.now() + 15 * 60 * 1000;
+  render();
+}
+function startPaymentCountdown() {
+  if (paymentCountdownTimer) clearInterval(paymentCountdownTimer);
+  const countdown = document.getElementById("paynow-countdown");
+  if (!countdown) return;
+  const refreshButton = document.getElementById("refresh-paynow-qr");
+  const update = () => {
+    const seconds = paymentSecondsLeft();
+    if (seconds > 0) {
+      countdown.textContent = `Please complete payment within ${paymentCountdownText()}.`;
+      if (refreshButton) refreshButton.hidden = true;
+      return;
+    }
+    countdown.textContent = "This payment QR has expired. Please refresh it before paying.";
+    if (refreshButton) refreshButton.hidden = false;
+    if (paymentCountdownTimer) clearInterval(paymentCountdownTimer);
+    paymentCountdownTimer = null;
+  };
+  update();
+  if (paymentSecondsLeft() > 0) paymentCountdownTimer = setInterval(update, 1000);
+}
 function renderPayment() {
   const order = state.lastOrder;
   if (!order) return renderMenu();
+  if (!state.payment.expiresAt) state.payment.expiresAt = Date.now() + 15 * 60 * 1000;
+  const paymentExpired = paymentSecondsLeft() === 0;
   const paynowName = state.store.paynow_name || state.store.store_name || "Shizuku Lab";
   const paynowNumber = state.store.paynow_number || "";
   let qrHtml;
   try {
-    qrHtml = paynowNumber ? `<div class="qr-box">${payNowQrSvg(order.total, order.order_number)}</div>` : null;
+    qrHtml = paynowNumber ? `<div class="qr-box ${paymentExpired ? "qr-expired" : ""}">${payNowQrSvg(order.total, order.order_number, state.payment.expiresAt)}</div>` : null;
   } catch (e) { qrHtml = null; }
   if (!qrHtml) {
     qrHtml = state.store.paynow_url
@@ -983,7 +1020,8 @@ function renderPayment() {
       <div class="summary-card">
         ${qrHtml}
         <div class="hint">Scan with your banking app, or PayNow to <b>${escapeHtml(paynowName)}</b>${paynowNumber ? `<br>${escapeHtml(paynowNumber)}` : ""}</div>
-        <div class="hint" style="color:#B78A2E;">This QR code is valid for 15 minutes — please pay promptly.</div>
+        <div class="payment-timer" id="paynow-countdown" aria-live="polite">Please complete payment within ${paymentCountdownText()}.</div>
+        <button class="btn-secondary refresh-qr-btn" id="refresh-paynow-qr" ${paymentExpired ? "" : "hidden"} onclick="refreshPayNowQr()">Refresh QR · 15 minutes</button>
         <div class="divider"></div>
         <div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(order.order_number || order.id || "")}</span></div>
         <div class="row bold"><span class="label">Amount</span><span>${money(order.total)}</span></div>
@@ -1090,6 +1128,7 @@ function render() {
   else if (state.screen === "track") html = renderTrackOrder();
   else html = renderMenu();
   app.innerHTML = html;
+  if (state.screen === "payment") startPaymentCountdown();
 }
 
 init();
