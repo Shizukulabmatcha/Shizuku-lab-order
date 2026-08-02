@@ -22,6 +22,8 @@ const astate = {
   selectedAvailabilityDate: null,
   availabilityDraft: null,
   calendarMonth: null,
+  orderFilter: "all",
+  orderSearch: "",
   loading: true,
   loadError: null,
   editing: null,
@@ -429,9 +431,38 @@ function renderLogin() {
   </div>`;
 }
 
+function setOrderFilter(filter) { astate.orderFilter = filter; render(); }
+function setOrderSearch(value) { astate.orderSearch = value; render(); }
+function orderMatchesFilter(order, filter) {
+  if (filter === "payment") return order.payment_status === "submitted";
+  if (filter === "awaiting") return order.payment_status === "awaiting_payment";
+  if (filter === "paid") return order.payment_status === "paid" && order.order_status === "confirmed";
+  if (filter === "preparing") return order.order_status === "preparing";
+  if (filter === "ready") return order.order_status === "ready";
+  if (filter === "collected") return order.order_status === "collected";
+  if (filter === "cancelled") return order.order_status === "cancelled";
+  return true;
+}
 function renderOrders() {
-  if (astate.orders.length === 0) return `<div class="empty">No orders yet.</div>`;
-  return astate.orders.map((o) => `
+  const search = String(astate.orderSearch || "").trim().toLowerCase();
+  const orders = astate.orders.filter((order) => {
+    const searchable = [order.order_number, order.customer_name, order.customer_phone, order.instagram, order.collection_date].join(" ").toLowerCase();
+    return orderMatchesFilter(order, astate.orderFilter) && (!search || searchable.includes(search));
+  });
+  const filters = [
+    ["all", "All orders"], ["payment", "Payment review"], ["awaiting", "Awaiting payment"],
+    ["paid", "Paid"], ["preparing", "Preparing"], ["ready", "Ready"], ["collected", "Collected"], ["cancelled", "Cancelled"]
+  ];
+  const controls = `<section class="dashboard-card" style="padding:18px 20px;margin-bottom:18px;overflow:visible;">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <input aria-label="Search orders" placeholder="Search order, customer, phone or Instagram" value="${escapeHtml(astate.orderSearch)}" oninput="setOrderSearch(this.value)" style="flex:1 1 320px;margin:0;">
+      <span class="hint" style="margin:0;white-space:nowrap;">${orders.length} shown</span>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:13px;">${filters.map(([key, label]) => `<button class="${astate.orderFilter === key ? "btn-primary" : "btn-secondary"}" style="padding:8px 11px;font-size:12px;" onclick="setOrderFilter('${key}')">${label}</button>`).join("")}</div>
+  </section>`;
+  if (astate.orders.length === 0) return controls + `<div class="empty">No orders yet.</div>`;
+  if (orders.length === 0) return controls + `<div class="empty">No orders match this search or filter.</div>`;
+  return controls + orders.map((o) => `
     <div class="order-card">
       <div class="order-top">
         <div class="mono">${o.order_number || o.id}</div>
@@ -607,11 +638,12 @@ function renderSettingsTab() {
     ${field("Shizuku Lab website link (optional)", "website_url", "https://your-brand-website.com")}
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Storefront images</div>
-    <div class="field"><label>Logo</label><input value="${escapeHtml(s.logo_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('logo_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'logo_url')">${s.logo_url ? `<img src="${escapeHtml(s.logo_url)}" alt="Logo preview" style="width:74px;height:74px;object-fit:contain;border:1px solid #E1D9C8;border-radius:12px;margin-top:8px;">` : ""}</div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 16px;"><div style="border:1px solid #E1D9C8;border-radius:13px;padding:12px;background:#fff;"><b style="display:block;margin-bottom:4px;">Logo frame · 1 : 1</b><span class="hint" style="margin:0;text-align:left;">Best upload: square, at least 1000 × 1000 px.</span></div><div style="border:1px solid #E1D9C8;border-radius:13px;padding:12px;background:#fff;"><b style="display:block;margin-bottom:4px;">Banner frame · 2 : 1</b><span class="hint" style="margin:0;text-align:left;">Best upload: landscape, at least 1600 × 800 px.</span></div></div>
+    <div class="field"><label>Logo</label><input value="${escapeHtml(s.logo_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('logo_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'logo_url')">${s.logo_url ? `<div style="width:112px;height:112px;border:1px solid #E1D9C8;border-radius:50%;overflow:hidden;margin-top:10px;background:#fff;display:grid;place-items:center;"><img src="${escapeHtml(s.logo_url)}" alt="Logo preview" style="width:100%;height:100%;object-fit:contain;transform:scale(${Number(s.logo_image_scale || 1)});"></div>` : ""}</div>
     <div class="field"><label>Logo circle size <span style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.logo_circle_size || 68)} px</span></label><input type="range" min="56" max="150" step="1" value="${Number(s.logo_circle_size || 68)}" oninput="onSettingsField('logo_circle_size',Number(this.value));this.previousElementSibling.querySelector('span').textContent=this.value+' px'"><div class="hint" style="text-align:left;margin-top:5px;">Adjust the white circle around the logo.</div></div>
     <div class="field"><label>Logo image size <span style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.logo_image_scale || 1).toFixed(2)}×</span></label><input type="range" min="0.55" max="2" step="0.05" value="${Number(s.logo_image_scale || 1)}" oninput="onSettingsField('logo_image_scale',Number(this.value));this.previousElementSibling.querySelector('span').textContent=Number(this.value).toFixed(2)+'×'"><div class="hint" style="text-align:left;margin-top:5px;">Zoom the logo inside the circle without changing the circle itself.</div></div>
-    <div class="field"><label>Top banner image</label><input value="${escapeHtml(s.hero_image_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('hero_image_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'hero_image_url')">${s.hero_image_url ? `<img src="${escapeHtml(s.hero_image_url)}" alt="Banner preview" style="display:block;width:100%;height:120px;object-fit:cover;border:1px solid #E1D9C8;border-radius:12px;margin-top:8px;">` : ""}</div>
-    <div class="field"><label>Banner image position <span style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.hero_image_position ?? 68)}%</span></label><input type="range" min="0" max="100" step="1" value="${Number(s.hero_image_position ?? 68)}" oninput="onSettingsField('hero_image_position',Number(this.value));this.previousElementSibling.querySelector('span').textContent=this.value+'%'"><div class="hint" style="text-align:left;margin-top:5px;">Move the image up or down inside the banner to show the drink layers you like.</div></div>
+    <div class="field"><label>Top banner image</label><input value="${escapeHtml(s.hero_image_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('hero_image_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'hero_image_url')">${s.hero_image_url ? `<img src="${escapeHtml(s.hero_image_url)}" alt="Banner preview" style="display:block;width:100%;aspect-ratio:2/1;object-fit:cover;object-position:center ${Number(s.hero_image_position ?? 68)}%;border:1px solid #E1D9C8;border-radius:12px;margin-top:10px;">` : ""}</div>
+    <div class="field"><label>Banner crop position <span style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.hero_image_position ?? 68)}%</span></label><input type="range" min="0" max="100" step="1" value="${Number(s.hero_image_position ?? 68)}" oninput="onSettingsField('hero_image_position',Number(this.value));this.previousElementSibling.querySelector('span').textContent=this.value+'%'"><div class="hint" style="text-align:left;margin-top:5px;">This is your crop control: move it until the matcha and hojicha layers show nicely in the preview.</div></div>
     <div class="field"><label>Banner height <span style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.hero_banner_height || 190)} px</span></label><input type="range" min="130" max="320" step="5" value="${Number(s.hero_banner_height || 190)}" oninput="onSettingsField('hero_banner_height',Number(this.value));this.previousElementSibling.querySelector('span').textContent=this.value+' px'"><div class="hint" style="text-align:left;margin-top:5px;">Make the banner taller or shorter.</div></div>
     <div class="field"><label>Store introduction</label><textarea rows="4" placeholder="A short introduction customers see below your collection address." oninput="onSettingsField('store_description', this.value)">${escapeHtml(s.store_description || "")}</textarea><div class="hint" style="text-align:left;margin-top:5px;">Shown on the customer ordering page.</div></div>
     ${field("Top rolling message", "ticker_text", "e.g. PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB")}
