@@ -4,9 +4,10 @@
 // (NOT the service_role key)
 const SUPABASE_URL = "https://ohgfmmvsxckayamlzdlj.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_6l6Jp0etNJyGUgFc1UUg4w_FfJnLZd1";
-// Shop PIN to gate the admin.html dashboard.
-// This only gates the page, not the database — fine for a small pre-order shop.
-const SHOP_PIN = "0130";
+// The only email address allowed to open the real shop dashboard.
+// Supabase sends this inbox a one-time sign-in link — there is no reusable PIN
+// sitting in the public website code.
+const ADMIN_EMAIL = "tinghuioh29@gmail.com";
 // Store name, address, hours and PayNow information now live in Supabase
 // (store_settings table), so you can edit them from the Settings tab
 // in admin.html without touching this file.

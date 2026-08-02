@@ -2,8 +2,8 @@
 
 const astate = {
   unlocked: false,
-  pin: "",
-  pinError: false,
+  loginEmail: "tinghuioh29@gmail.com",
+  loginMessage: "",
   tab: "dashboard",
   orders: [],
   menu: [],
@@ -335,9 +335,46 @@ async function saveSettings() {
   alert("Saved.");
 }
 
-function tryUnlock() {
-  if (astate.pin === SHOP_PIN) { astate.unlocked = true; astate.pinError = false; loadAll(); }
-  else { astate.pinError = true; render(); }
+async function requestAdminLink() {
+  const email = String(astate.loginEmail || "").trim().toLowerCase();
+  if (email !== String(ADMIN_EMAIL || "").toLowerCase()) {
+    astate.loginMessage = "Please use the Shizuku Lab Outlook email address.";
+    render();
+    return;
+  }
+  if (!db) { astate.loginMessage = "Supabase is not connected yet."; render(); return; }
+  astate.loginMessage = "Sending your secure sign-in link…";
+  render();
+  const { error } = await db.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: `${window.location.origin}${window.location.pathname}` },
+  });
+  astate.loginMessage = error
+    ? `We could not send the sign-in link: ${error.message}`
+    : "Check your Outlook inbox and open the sign-in link. You can close this page after that.";
+  render();
+}
+
+async function checkAdminSession() {
+  if (!db) return;
+  const { data, error } = await db.auth.getUser();
+  if (error || !data?.user) return;
+  const email = String(data.user.email || "").toLowerCase();
+  if (email === String(ADMIN_EMAIL || "").toLowerCase()) {
+    astate.unlocked = true;
+    await loadAll();
+  } else {
+    astate.loginMessage = "This email does not have access to the Shizuku Lab dashboard.";
+    await db.auth.signOut();
+    render();
+  }
+}
+
+async function logoutAdmin() {
+  if (db) await db.auth.signOut();
+  astate.unlocked = false;
+  astate.loginMessage = "You have signed out.";
+  render();
 }
 
 function header(subtitle) {
@@ -454,14 +491,14 @@ function renderLogin() {
   <div class="overlay" style="position:relative;background:none;align-items:flex-start;padding:60px 16px;">
     <div class="overlay-card" style="max-width:340px;margin:0 auto;">
       <div class="display overlay-title">Shop access</div>
-      <div class="overlay-sub">Enter the shop PIN to view and manage orders.</div>
-      <input id="pin-input" type="text" inputmode="numeric" placeholder="PIN" value="${astate.pin}"
-        oninput="astate.pin=this.value; astate.pinError=false;"
-        style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid ${astate.pinError ? "#B33" : "#E1D9C8"};margin-bottom:10px;font-size:15px;">
-      ${astate.pinError ? `<div class="error-text">Incorrect PIN, try again.</div>` : ""}
+      <div class="overlay-sub">We’ll send a one-time sign-in link to your Shizuku Lab Outlook inbox.</div>
+      <input type="email" placeholder="tinghuioh29@gmail.com" value="${escapeHtml(astate.loginEmail)}"
+        oninput="astate.loginEmail=this.value; astate.loginMessage='';"
+        style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #E1D9C8;margin-bottom:10px;font-size:15px;">
+      ${astate.loginMessage ? `<div class="hint" style="text-align:left;line-height:1.45;margin:0 0 10px;">${escapeHtml(astate.loginMessage)}</div>` : ""}
       <div class="btn-row">
         <a href="index.html" style="flex:1;"><button class="btn-secondary" style="width:100%;">Cancel</button></a>
-        <button class="btn-primary" onclick="tryUnlock()">Enter</button>
+        <button class="btn-primary" onclick="requestAdminLink()">Email me a link</button>
       </div>
     </div>
   </div>`;
@@ -803,7 +840,7 @@ function render() {
   app.innerHTML = `
     ${dashboardStyles()}
     <div class="shop-admin">
-      <aside class="admin-side"><div class="admin-logo">${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</div><div class="admin-caption">SHOP ADMIN</div><div class="admin-nav-label">MAIN</div><nav class="admin-nav">${nav.map(([tab, icon, label]) => `<button class="${astate.tab === tab ? "active" : ""}" onclick="setTab('${tab}')"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav></aside>
+      <aside class="admin-side"><div class="admin-logo">${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</div><div class="admin-caption">SHOP ADMIN</div><div class="admin-nav-label">MAIN</div><nav class="admin-nav">${nav.map(([tab, icon, label]) => `<button class="${astate.tab === tab ? "active" : ""}" onclick="setTab('${tab}')"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="admin-side-bottom"><button class="link-btn" onclick="logoutAdmin()">Sign out</button></div></aside>
       <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}${page}</main>
     </div>
     ${renderEditOverlay()}
@@ -811,3 +848,4 @@ function render() {
 }
 
 render();
+checkAdminSession();

@@ -54,6 +54,7 @@ const state = {
   promo: null,
   promoMsg: "",
   payment: { transactionReference: "", proofFile: null, expiresAt: null },
+  customerId: null,
   tracking: { orderNumber: "", phone: "", order: null, message: "", loading: false },
   lastOrder: null,
   loading: true,
@@ -100,6 +101,24 @@ async function loadStoreSettings() {
   const { data, error } = await db.from("store_settings").select("*").limit(1).maybeSingle();
   if (error) { console.warn("Could not load store settings:", error.message); return; }
   if (data) state.store = { ...state.store, ...data };
+}
+
+// Invisible to customers: Supabase gives each browser a private visitor identity.
+// It lets the database keep each person's order and payment screenshot separate.
+async function ensureCustomerSession() {
+  if (!IS_CONFIGURED || !db) return null;
+  const { data: sessionData } = await db.auth.getSession();
+  if (sessionData?.session?.user?.id) {
+    state.customerId = sessionData.session.user.id;
+    return state.customerId;
+  }
+  const { data, error } = await db.auth.signInAnonymously();
+  if (error) {
+    console.warn("Secure customer session is not enabled yet:", error.message);
+    return null;
+  }
+  state.customerId = data?.user?.id || null;
+  return state.customerId;
 }
 
 /* ---------- pickup slots ---------- */
@@ -232,6 +251,7 @@ async function init() {
   if (!IS_CONFIGURED) { state.loading = false; render(); return; }
 
   try {
+    await ensureCustomerSession();
     await loadStoreSettings();
     await loadOpeningOverrides();
     await loadFaq();
@@ -469,6 +489,7 @@ async function submitOrder() {
     payment_method: "PayNow",
     payment_reference: orderNumber,
   };
+  if (state.customerId) orderPayload.customer_id = state.customerId;
 
   if (!IS_CONFIGURED) {
     state.lastOrder = { ...orderPayload, id: null, items: cartLines().map((line) => ({ ...line })), slot };
@@ -558,15 +579,14 @@ async function markPaid() {
   if (!proofFile) { alert("Please upload your payment screenshot before submitting."); return; }
   if (IS_CONFIGURED && order.id) {
     const safeFileName = String(proofFile.name || "payment-proof.jpg").replace(/[^a-zA-Z0-9._-]/g, "-");
-    const filePath = `${order.id}/${Date.now()}-${safeFileName}`;
+    const filePath = `${state.customerId || "legacy"}/${order.id}/${Date.now()}-${safeFileName}`;
     const { data: upload, error: uploadError } = await db.storage.from("payment-proofs").upload(filePath, proofFile, { contentType: proofFile.type, upsert: false });
     if (uploadError) { alert("Could not upload your payment screenshot. Please try again.\n\n" + uploadError.message); return; }
-    const { error } = await db.from("orders").update({
-      payment_status: "submitted",
-      order_status: "awaiting_confirmation",
-      payment_transaction_reference: state.payment.transactionReference.trim() || null,
-      payment_screenshot_url: upload.path,
-    }).eq("id", order.id);
+    const { error } = await db.rpc("submit_payment_proof", {
+      p_order_id: order.id,
+      p_transaction_reference: state.payment.transactionReference.trim() || null,
+      p_screenshot_path: upload.path,
+    });
     if (error) { alert("Could not update payment status.\n" + error.message); return; }
   }
   state.lastOrder = { ...order, payment_status: "submitted", order_status: "awaiting_confirmation" };
@@ -1085,7 +1105,7 @@ async function findOrder() {
   const phone = String(t.phone || "").trim();
   if (!number || !phone) { t.message = "Enter both your order number and phone number."; t.order = null; render(); return; }
   t.loading = true; t.message = ""; t.order = null; render();
-  const { data, error } = await db.from("orders").select("order_number,customer_name,customer_phone,collection_date,collection_time,total,payment_status,order_status").eq("order_number", number).eq("customer_phone", phone).maybeSingle();
+  const { data, error } = await db.rpc("track_shizuku_order", { p_order_number: number, p_phone: phone }).maybeSingle();
   t.loading = false;
   if (error) t.message = "We couldn’t check this order right now. Please try again shortly.";
   else if (!data) t.message = "We couldn’t find an order with those details. Please check and try again.";
