@@ -3,8 +3,10 @@
 const astate = {
   unlocked: false,
   loginEmail: "tinghuioh29@gmail.com",
-  loginCode: "",
-  loginStep: "email",
+  loginPassword: "",
+  recoveryMode: false,
+  recoveryPassword: "",
+  recoveryPasswordConfirm: "",
   loginMessage: "",
   tab: "dashboard",
   orders: [],
@@ -337,48 +339,71 @@ async function saveSettings() {
   alert("Saved.");
 }
 
-async function requestAdminCode() {
+function adminEmailIsAllowed() {
   const email = String(astate.loginEmail || "").trim().toLowerCase();
   if (email !== String(ADMIN_EMAIL || "").toLowerCase()) {
     astate.loginMessage = "Please use the Gmail address linked to your Supabase account.";
     render();
-    return;
+    return false;
   }
+  return true;
+}
+
+async function loginWithPassword() {
+  if (!adminEmailIsAllowed()) return;
   if (!db) { astate.loginMessage = "Supabase is not connected yet."; render(); return; }
-  astate.loginMessage = "Sending your secure one-time code…";
+  if (!astate.loginPassword) { astate.loginMessage = "Please enter your password."; render(); return; }
+  astate.loginMessage = "Signing in…";
   render();
-  const { error } = await db.auth.signInWithOtp({ email });
-  astate.loginStep = error ? "email" : "code";
-  astate.loginCode = "";
+  const { error } = await db.auth.signInWithPassword({
+    email: String(astate.loginEmail || "").trim().toLowerCase(),
+    password: astate.loginPassword,
+  });
   astate.loginMessage = error
-    ? `We could not send the one-time code: ${error.message}`
-    : "A one-time code was sent to your Gmail. Enter it below on this device.";
+    ? "That Gmail or password is not correct. Please try again."
+    : "Signed in.";
+  if (!error) await checkAdminSession();
   render();
 }
 
-function returnToAdminEmail() {
-  astate.loginStep = "email";
-  astate.loginCode = "";
-  astate.loginMessage = "";
+async function sendPasswordSetup() {
+  if (!adminEmailIsAllowed()) return;
+  if (!db) { astate.loginMessage = "Supabase is not connected yet."; render(); return; }
+  astate.loginMessage = "Sending a password setup email…";
+  render();
+  const { error } = await db.auth.resetPasswordForEmail(String(astate.loginEmail || "").trim().toLowerCase(), {
+    redirectTo: `${window.location.origin}${window.location.pathname}`,
+  });
+  astate.loginMessage = error
+    ? `We could not send the password setup email: ${error.message}`
+    : "Check Gmail and set your password once. After that, you can sign in here with Gmail and password.";
   render();
 }
 
-async function verifyAdminCode() {
-  const email = String(astate.loginEmail || "").trim().toLowerCase();
-  const token = String(astate.loginCode || "").replace(/\s/g, "");
-  if (!/^\d{6,8}$/.test(token)) {
-    astate.loginMessage = "Enter the 6-digit code from your Gmail.";
+async function saveNewPassword() {
+  if (!db) return;
+  if (astate.recoveryPassword.length < 10) {
+    astate.loginMessage = "Please choose a password with at least 10 characters.";
     render();
     return;
   }
-  astate.loginMessage = "Checking your code…";
+  if (astate.recoveryPassword !== astate.recoveryPasswordConfirm) {
+    astate.loginMessage = "The two passwords do not match.";
+    render();
+    return;
+  }
+  astate.loginMessage = "Saving your password…";
   render();
-  const { error } = await db.auth.verifyOtp({ email, token, type: "email" });
+  const { error } = await db.auth.updateUser({ password: astate.recoveryPassword });
   if (error) {
-    astate.loginMessage = "That code is not valid or has expired. Request a new one and try again.";
+    astate.loginMessage = `We could not save your password: ${error.message}`;
     render();
     return;
   }
+  astate.recoveryMode = false;
+  astate.recoveryPassword = "";
+  astate.recoveryPasswordConfirm = "";
+  astate.loginMessage = "Password saved. You are now signed in.";
   await checkAdminSession();
 }
 
@@ -514,21 +539,40 @@ function renderDashboardTab() {
 }
 
 function renderLogin() {
-  const enteringCode = astate.loginStep === "code";
+  if (astate.recoveryMode) return `
+  <div class="overlay" style="position:relative;background:none;align-items:flex-start;padding:60px 16px;">
+    <div class="overlay-card" style="max-width:340px;margin:0 auto;">
+      <div class="display overlay-title">Choose your password</div>
+      <div class="overlay-sub">This is a one-time setup. Use this password to sign in to your dashboard from any device.</div>
+      <input type="password" autocomplete="new-password" placeholder="New password (at least 10 characters)"
+        oninput="astate.recoveryPassword=this.value; astate.loginMessage='';"
+        style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #E1D9C8;margin-bottom:10px;font-size:15px;">
+      <input type="password" autocomplete="new-password" placeholder="Confirm new password"
+        oninput="astate.recoveryPasswordConfirm=this.value; astate.loginMessage='';"
+        onkeydown="if(event.key==='Enter') saveNewPassword();"
+        style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #E1D9C8;margin-bottom:10px;font-size:15px;">
+      ${astate.loginMessage ? `<div class="hint" style="text-align:left;line-height:1.45;margin:0 0 10px;">${escapeHtml(astate.loginMessage)}</div>` : ""}
+      <button class="btn-primary" style="width:100%;" onclick="saveNewPassword()">Save password</button>
+    </div>
+  </div>`;
   return `
   <div class="overlay" style="position:relative;background:none;align-items:flex-start;padding:60px 16px;">
     <div class="overlay-card" style="max-width:340px;margin:0 auto;">
       <div class="display overlay-title">Shop access</div>
-      <div class="overlay-sub">${enteringCode ? "Enter the one-time code sent to your Gmail." : "We’ll send a one-time code to the Gmail linked to your Supabase account."}</div>
+      <div class="overlay-sub">Sign in with the Gmail and password linked to your Supabase account.</div>
       <input type="email" placeholder="tinghuioh29@gmail.com" value="${escapeHtml(astate.loginEmail)}"
-        ${enteringCode ? "disabled" : ""} oninput="astate.loginEmail=this.value; astate.loginMessage='';"
-        style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #E1D9C8;margin-bottom:10px;font-size:15px;${enteringCode ? "opacity:.65;" : ""}">
-      ${enteringCode ? `<input type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="6-digit code" value="${escapeHtml(astate.loginCode)}" oninput="this.value=this.value.replace(/[^0-9]/g,'');astate.loginCode=this.value;astate.loginMessage='';" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #E1D9C8;margin-bottom:10px;font-size:18px;letter-spacing:.14em;text-align:center;">` : ""}
+        oninput="astate.loginEmail=this.value; astate.loginMessage='';"
+        style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #E1D9C8;margin-bottom:10px;font-size:15px;">
+      <input type="password" autocomplete="current-password" placeholder="Your password" value=""
+        oninput="astate.loginPassword=this.value; astate.loginMessage='';"
+        onkeydown="if(event.key==='Enter') loginWithPassword();"
+        style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #E1D9C8;margin-bottom:10px;font-size:15px;">
       ${astate.loginMessage ? `<div class="hint" style="text-align:left;line-height:1.45;margin:0 0 10px;">${escapeHtml(astate.loginMessage)}</div>` : ""}
       <div class="btn-row">
-        ${enteringCode ? `<button class="btn-secondary" onclick="returnToAdminEmail()">Back</button>` : `<a href="index.html" style="flex:1;"><button class="btn-secondary" style="width:100%;">Cancel</button></a>`}
-        <button class="btn-primary" onclick="${enteringCode ? "verifyAdminCode()" : "requestAdminCode()"}">${enteringCode ? "Verify code" : "Email me a code"}</button>
+        <a href="index.html" style="flex:1;"><button class="btn-secondary" style="width:100%;">Cancel</button></a>
+        <button class="btn-primary" onclick="loginWithPassword()">Sign in</button>
       </div>
+      <button class="link-btn" style="margin-top:14px;width:100%;" onclick="sendPasswordSetup()">First time here? Set or reset password</button>
     </div>
   </div>`;
 }
@@ -876,5 +920,14 @@ function render() {
   `;
 }
 
+if (db) {
+  db.auth.onAuthStateChange((event) => {
+    if (event === "PASSWORD_RECOVERY") {
+      astate.recoveryMode = true;
+      astate.unlocked = false;
+      render();
+    }
+  });
+}
 render();
 checkAdminSession();
