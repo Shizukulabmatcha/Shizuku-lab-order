@@ -3,6 +3,8 @@
 const astate = {
   unlocked: false,
   loginEmail: "tinghuioh29@gmail.com",
+  loginCode: "",
+  loginStep: "email",
   loginMessage: "",
   tab: "dashboard",
   orders: [],
@@ -335,24 +337,49 @@ async function saveSettings() {
   alert("Saved.");
 }
 
-async function requestAdminLink() {
+async function requestAdminCode() {
   const email = String(astate.loginEmail || "").trim().toLowerCase();
   if (email !== String(ADMIN_EMAIL || "").toLowerCase()) {
-    astate.loginMessage = "Please use the Shizuku Lab Outlook email address.";
+    astate.loginMessage = "Please use the Gmail address linked to your Supabase account.";
     render();
     return;
   }
   if (!db) { astate.loginMessage = "Supabase is not connected yet."; render(); return; }
-  astate.loginMessage = "Sending your secure sign-in link…";
+  astate.loginMessage = "Sending your secure one-time code…";
   render();
-  const { error } = await db.auth.signInWithOtp({
-    email,
-    options: { emailRedirectTo: `${window.location.origin}${window.location.pathname}` },
-  });
+  const { error } = await db.auth.signInWithOtp({ email });
+  astate.loginStep = error ? "email" : "code";
+  astate.loginCode = "";
   astate.loginMessage = error
-    ? `We could not send the sign-in link: ${error.message}`
-    : "Check your Outlook inbox and open the sign-in link. You can close this page after that.";
+    ? `We could not send the one-time code: ${error.message}`
+    : "A one-time code was sent to your Gmail. Enter it below on this device.";
   render();
+}
+
+function returnToAdminEmail() {
+  astate.loginStep = "email";
+  astate.loginCode = "";
+  astate.loginMessage = "";
+  render();
+}
+
+async function verifyAdminCode() {
+  const email = String(astate.loginEmail || "").trim().toLowerCase();
+  const token = String(astate.loginCode || "").replace(/\s/g, "");
+  if (!/^\d{6,8}$/.test(token)) {
+    astate.loginMessage = "Enter the 6-digit code from your Gmail.";
+    render();
+    return;
+  }
+  astate.loginMessage = "Checking your code…";
+  render();
+  const { error } = await db.auth.verifyOtp({ email, token, type: "email" });
+  if (error) {
+    astate.loginMessage = "That code is not valid or has expired. Request a new one and try again.";
+    render();
+    return;
+  }
+  await checkAdminSession();
 }
 
 async function checkAdminSession() {
@@ -487,18 +514,20 @@ function renderDashboardTab() {
 }
 
 function renderLogin() {
+  const enteringCode = astate.loginStep === "code";
   return `
   <div class="overlay" style="position:relative;background:none;align-items:flex-start;padding:60px 16px;">
     <div class="overlay-card" style="max-width:340px;margin:0 auto;">
       <div class="display overlay-title">Shop access</div>
-      <div class="overlay-sub">We’ll send a one-time sign-in link to your Shizuku Lab Outlook inbox.</div>
+      <div class="overlay-sub">${enteringCode ? "Enter the one-time code sent to your Gmail." : "We’ll send a one-time code to the Gmail linked to your Supabase account."}</div>
       <input type="email" placeholder="tinghuioh29@gmail.com" value="${escapeHtml(astate.loginEmail)}"
-        oninput="astate.loginEmail=this.value; astate.loginMessage='';"
-        style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #E1D9C8;margin-bottom:10px;font-size:15px;">
+        ${enteringCode ? "disabled" : ""} oninput="astate.loginEmail=this.value; astate.loginMessage='';"
+        style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #E1D9C8;margin-bottom:10px;font-size:15px;${enteringCode ? "opacity:.65;" : ""}">
+      ${enteringCode ? `<input type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="6-digit code" value="${escapeHtml(astate.loginCode)}" oninput="this.value=this.value.replace(/[^0-9]/g,'');astate.loginCode=this.value;astate.loginMessage='';" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #E1D9C8;margin-bottom:10px;font-size:18px;letter-spacing:.14em;text-align:center;">` : ""}
       ${astate.loginMessage ? `<div class="hint" style="text-align:left;line-height:1.45;margin:0 0 10px;">${escapeHtml(astate.loginMessage)}</div>` : ""}
       <div class="btn-row">
-        <a href="index.html" style="flex:1;"><button class="btn-secondary" style="width:100%;">Cancel</button></a>
-        <button class="btn-primary" onclick="requestAdminLink()">Email me a link</button>
+        ${enteringCode ? `<button class="btn-secondary" onclick="returnToAdminEmail()">Back</button>` : `<a href="index.html" style="flex:1;"><button class="btn-secondary" style="width:100%;">Cancel</button></a>`}
+        <button class="btn-primary" onclick="${enteringCode ? "verifyAdminCode()" : "requestAdminCode()"}">${enteringCode ? "Verify code" : "Email me a code"}</button>
       </div>
     </div>
   </div>`;

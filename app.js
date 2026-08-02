@@ -68,6 +68,12 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 function uidCode() { return "SL-" + Math.random().toString(36).slice(2, 8).toUpperCase(); }
+function cleanPhoneInput(value) { return String(value || "").replace(/[^0-9+\-\s]/g, ""); }
+function normalisePhone(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.length === 10 && digits.startsWith("65") ? digits.slice(2) : digits;
+}
+function isValidPhone(value) { return /^[689]\d{7}$/.test(normalisePhone(value)); }
 function normaliseTime(time) { return time ? String(time).replace(/\s+/g, " ").trim() : ""; }
 function formatDateForDatabase(date) {
   const y = date.getFullYear(), m = String(date.getMonth() + 1).padStart(2, "0"), d = String(date.getDate()).padStart(2, "0");
@@ -418,7 +424,7 @@ function setCategory(category) { state.activeCategory = category; render(); }
 async function applyPromoCode() {
   const code = (state.form.promoCode || "").trim().toUpperCase();
   if (!code) { state.promoMsg = "Please enter a promo code."; render(); return; }
-  if (!state.form.phone.trim()) { state.promoMsg = "Please enter your phone number first."; render(); return; }
+  if (!isValidPhone(state.form.phone)) { state.promoMsg = "Enter a valid Singapore phone number first."; render(); return; }
   if (!IS_CONFIGURED) { state.promoMsg = "Connect Supabase to validate promo codes."; render(); return; }
 
   try {
@@ -439,7 +445,7 @@ async function applyPromoCode() {
     }
 
     try {
-      const { count: usedByPhone } = await db.from("promo_redemptions").select("id", { count: "exact", head: true }).ilike("code", code).eq("phone", state.form.phone.trim());
+      const { count: usedByPhone } = await db.from("promo_redemptions").select("id", { count: "exact", head: true }).ilike("code", code).eq("phone", normalisePhone(state.form.phone));
       if ((usedByPhone || 0) > 0) { state.promo = null; state.promoMsg = "You've already used this code."; render(); return; }
     } catch (e) { /* best-effort — table may not exist */ }
 
@@ -463,7 +469,7 @@ function removePromoCode() { state.promo = null; state.promoMsg = ""; state.form
 async function submitOrder() {
   const f = state.form;
   if (!f.name.trim()) { alert("Please enter your name."); return; }
-  if (!f.phone.trim()) { alert("Please enter your phone number."); return; }
+  if (!isValidPhone(f.phone)) { alert("Please enter a valid Singapore phone number (for example, 91234567)."); return; }
   if (!f.slotId) { alert("Please select a pickup slot."); return; }
   if (cartLines().length === 0) { alert("Your cart is empty."); setScreen("menu"); return; }
   const slot = state.slots.find((item) => item.id === f.slotId);
@@ -478,7 +484,7 @@ async function submitOrder() {
   const orderPayload = {
     order_number: orderNumber,
     customer_name: f.name.trim(),
-    customer_phone: f.phone.trim(),
+    customer_phone: normalisePhone(f.phone),
     collection_date: slot.date,
     collection_time: slot.time,
     instagram: f.instagram ? f.instagram.trim().replace(/^@/, "") : null,
@@ -536,7 +542,7 @@ async function submitOrder() {
 
     if (state.promo) {
       try {
-        await db.from("promo_redemptions").insert({ code: state.promo.code, phone: f.phone.trim(), order_id: order.id });
+        await db.from("promo_redemptions").insert({ code: state.promo.code, phone: normalisePhone(f.phone), order_id: order.id });
         await db.from("promo_codes").update({ used_count: (Number(state.promo.used_count) || 0) + 1 }).eq("id", state.promo.id);
       } catch (e) { /* non-fatal — order already placed */ }
     }
@@ -917,7 +923,7 @@ function renderCart() {
 /* ---------- checkout ---------- */
 function renderCheckout() {
   const f = state.form;
-  const canSubmit = f.name.trim() && f.phone.trim() && f.slotId;
+  const canSubmit = f.name.trim() && isValidPhone(f.phone) && f.slotId;
   const pickupDates = Array.from(new Map(state.slots.map((slot) => [slot.date, slot.label])).entries());
   const availableTimes = state.slots.filter((slot) => slot.date === f.pickupDate);
   return `
@@ -925,7 +931,7 @@ function renderCheckout() {
     <div class="screen">
       <button class="back-link" onclick="setScreen('cart')">${ICONS.back} Back to cart</button>
       <div class="field"><label>Name</label><input id="f-name" value="${escapeHtml(f.name)}" placeholder="Your name" oninput="onFormInput('name', this.value)"></div>
-      <div class="field"><label>Phone</label><input id="f-phone" value="${escapeHtml(f.phone)}" placeholder="For pickup updates" inputmode="tel" oninput="onFormInput('phone', this.value)"></div>
+      <div class="field"><label>Phone</label><input id="f-phone" value="${escapeHtml(f.phone)}" placeholder="e.g. 91234567" inputmode="tel" autocomplete="tel" oninput="this.value=cleanPhoneInput(this.value);onFormInput('phone', this.value)"></div>
       <div class="field"><label>Instagram (optional)</label><input id="f-instagram" value="${escapeHtml(f.instagram)}" placeholder="@yourhandle" oninput="onFormInput('instagram', this.value)"></div>
       <div class="field"><label>Collection date</label>
         <select style="width:100%;min-height:74px;padding:14px 18px;border-radius:14px;border:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-size:18px;" onchange="onPickupDateChange(this.value)">
@@ -974,7 +980,7 @@ function renderCheckout() {
 function onFormInput(key, value) {
   state.form[key] = value;
   if (state.screen !== "checkout") return;
-  const canSubmit = state.form.name.trim() && state.form.phone.trim() && state.form.slotId;
+  const canSubmit = state.form.name.trim() && isValidPhone(state.form.phone) && state.form.slotId;
   const button = document.getElementById("checkout-btn");
   if (button) { button.toggleAttribute("disabled", !canSubmit); button.textContent = `Continue to payment · ${money(orderTotal())}`; }
   if (key === "slotId") render();
@@ -1102,7 +1108,7 @@ function trackingStatus(order) {
 async function findOrder() {
   const t = state.tracking;
   const number = String(t.orderNumber || "").trim().toUpperCase();
-  const phone = String(t.phone || "").trim();
+  const phone = normalisePhone(t.phone);
   if (!number || !phone) { t.message = "Enter both your order number and phone number."; t.order = null; render(); return; }
   t.loading = true; t.message = ""; t.order = null; render();
   const { data, error } = await db.rpc("track_shizuku_order", { p_order_number: number, p_phone: phone }).maybeSingle();
@@ -1124,7 +1130,7 @@ function renderTrackOrder() {
       <div class="hint" style="text-align:left;line-height:1.5;">Enter the order number and phone number you used at checkout.</div>
       <div class="summary-card" style="margin-top:16px;">
         <div class="field"><label>Order number</label><input value="${escapeHtml(t.orderNumber)}" placeholder="e.g. SL-ABC123" style="text-transform:uppercase;" oninput="state.tracking.orderNumber=this.value.toUpperCase()"></div>
-        <div class="field" style="margin-bottom:0;"><label>Phone number</label><input value="${escapeHtml(t.phone)}" placeholder="The number used at checkout" inputmode="tel" oninput="state.tracking.phone=this.value"></div>
+        <div class="field" style="margin-bottom:0;"><label>Phone number</label><input value="${escapeHtml(t.phone)}" placeholder="The number used at checkout" inputmode="tel" oninput="this.value=cleanPhoneInput(this.value);state.tracking.phone=this.value"></div>
         <button class="primary-btn" style="margin-top:16px;" ${t.loading ? "disabled" : ""} onclick="findOrder()">${t.loading ? "Checking…" : "Track order"}</button>
         ${t.message ? `<div class="ref-note" style="color:#B33333;">${escapeHtml(t.message)}</div>` : ""}
       </div>
