@@ -33,6 +33,10 @@ const astate = {
   loading: true,
   loadError: null,
   editing: null,
+  knownOrderIds: null,
+  liveOrderPoll: null,
+  liveOrderChannel: null,
+  liveNotice: null,
 };
 
 function money(n) { return `$${Number(n).toFixed(2)}`; }
@@ -121,8 +125,82 @@ async function clearAvailabilityOverride() {
   render();
 }
 
-async function loadAll() {
-  astate.loading = true; astate.loadError = null; render();
+function rememberOrdersAndAlertIfNeeded(orders) {
+  const currentIds = new Set((orders || []).map((order) => String(order.id)));
+  if (!astate.knownOrderIds) {
+    // The orders already in the dashboard are not "new". Only alert for orders
+    // that arrive after the owner has opened the dashboard.
+    astate.knownOrderIds = currentIds;
+    return false;
+  }
+  const newOrders = (orders || []).filter((order) => !astate.knownOrderIds.has(String(order.id)));
+  astate.knownOrderIds = currentIds;
+  if (!newOrders.length) return false;
+
+  const newest = newOrders.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0];
+  astate.liveNotice = {
+    orderNumber: newest.order_number || `Order ${newest.id}`,
+    customer: newest.customer_name || "A customer",
+    total: Number(newest.total || 0),
+  };
+  showBrowserOrderAlert(newest);
+  return true;
+}
+
+function showBrowserOrderAlert(order) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  try {
+    new Notification("🍵 New Shizuku Lab order", {
+      body: `${order.order_number || "New order"} · ${order.customer_name || "Customer"} · ${money(order.total || 0)}`,
+      tag: `shizuku-order-${order.id}`,
+    });
+  } catch (_) {
+    // The dashboard banner still appears if this browser does not support a pop-up notification.
+  }
+}
+
+async function enableBrowserAlerts() {
+  if (!("Notification" in window)) {
+    alert("This browser does not support dashboard notifications. Keep the Shizuku admin page open and the in-page alert will still appear.");
+    return;
+  }
+  if (Notification.permission === "denied") {
+    alert("Notifications are blocked for this website. Open your browser's website settings for this admin page and allow Notifications, then try again.");
+    return;
+  }
+  const permission = await Notification.requestPermission();
+  alert(permission === "granted"
+    ? "Browser alerts are on. Keep this dashboard open and you will be alerted when a new order arrives."
+    : "No problem — the dashboard will still show an in-page new-order alert while it is open.");
+  render();
+}
+
+function dismissLiveNotice() { astate.liveNotice = null; render(); }
+
+function stopLiveOrderMonitoring() {
+  if (astate.liveOrderPoll) window.clearInterval(astate.liveOrderPoll);
+  astate.liveOrderPoll = null;
+  if (astate.liveOrderChannel && db) db.removeChannel(astate.liveOrderChannel);
+  astate.liveOrderChannel = null;
+}
+
+function startLiveOrderMonitoring() {
+  if (!db || !astate.unlocked) return;
+  stopLiveOrderMonitoring();
+  // Realtime is immediate when it is available. The small polling fallback means
+  // alerts still work even if Realtime has not been enabled in Supabase.
+  if (typeof db.channel === "function") {
+    astate.liveOrderChannel = db.channel("shizuku-admin-new-orders")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "orders" }, () => loadAll({ silent: true }))
+      .subscribe();
+  }
+  astate.liveOrderPoll = window.setInterval(() => {
+    if (astate.unlocked && !document.hidden) loadAll({ silent: true });
+  }, 30000);
+}
+
+async function loadAll({ silent = false } = {}) {
+  if (!silent) { astate.loading = true; astate.loadError = null; render(); }
   if (IS_CONFIGURED) {
     try {
       // try the nested query first (needs FKs orders<-order_items<-order_item_options)
@@ -147,6 +225,7 @@ async function loadAll() {
         orders = nested.data || [];
       }
       astate.orders = orders;
+      const foundNewOrder = rememberOrdersAndAlertIfNeeded(orders);
 
       const { data: menu, error: mErr } = await db.from("products").select("*").order("category");
       if (mErr) astate.loadError = mErr.message;
@@ -187,6 +266,7 @@ async function loadAll() {
       if (!astate.selectedAvailabilityDate) astate.selectedAvailabilityDate = localDateText(new Date());
       if (!astate.calendarMonth) astate.calendarMonth = astate.selectedAvailabilityDate.slice(0, 7) + "-01";
       setAvailabilityDraft(astate.selectedAvailabilityDate);
+      if (silent && foundNewOrder) render();
     } catch (e) {
       astate.loadError = (e && e.message) || String(e);
       astate.orders = []; astate.menu = [];
@@ -195,7 +275,7 @@ async function loadAll() {
     astate.orders = []; astate.menu = [];
   }
   astate.loading = false;
-  render();
+  if (!silent) render();
 }
 
 async function confirmPayment(id) {
@@ -452,6 +532,7 @@ async function checkAdminSession() {
   if (email === String(ADMIN_EMAIL || "").toLowerCase()) {
     astate.unlocked = true;
     await loadAll();
+    startLiveOrderMonitoring();
   } else {
     astate.loginMessage = "This email does not have access to the Shizuku Lab dashboard.";
     await db.auth.signOut();
@@ -461,7 +542,10 @@ async function checkAdminSession() {
 
 async function logoutAdmin() {
   if (db) await db.auth.signOut();
+  stopLiveOrderMonitoring();
   astate.unlocked = false;
+  astate.knownOrderIds = null;
+  astate.liveNotice = null;
   astate.loginMessage = "You have signed out.";
   render();
 }
@@ -560,8 +644,11 @@ function renderDashboardTab() {
   const production = nextPickupProduction();
   const insights = customerInsights();
   const highestDailySale = Math.max(...performance.days.map((day) => day.total), 1);
+  const alertButton = ("Notification" in window && Notification.permission === "granted")
+    ? `<button class="open-shop" type="button" onclick="enableBrowserAlerts()">🔔 Browser alerts on</button>`
+    : `<button class="open-shop" type="button" onclick="enableBrowserAlerts()">🔔 Enable new-order alerts</button>`;
   return `
-    <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</h1><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
+    <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</h1><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">${alertButton}<a class="open-shop" href="order.html">Open customer shop ↗</a></div></div>
     <div class="stat-grid">
       <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Revenue this month</div><div class="stat-value">${money(stats.revenue)}</div><div class="stat-help">Paid orders only</div></div>
       <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Orders this month</div><div class="stat-value">${stats.orders}</div><div class="stat-help">${stats.paymentReview ? `${stats.paymentReview} need payment review` : "Everything is up to date"}</div></div>
@@ -855,16 +942,24 @@ function renderSettingsTab() {
     ${field("Saturday collection time", "saturday_collection_time", "10:00 AM - 12:00 PM")}
     ${field("Sunday collection time", "sunday_collection_time", "10:00 AM - 1:00 PM")}
     <button class="btn-primary" id="settings-save-btn" style="width:100%;margin-top:8px;" onclick="saveSettings()">Save settings</button>
+  `;
+}
+
+function renderNotificationsTab() {
+  const isBrowserReady = ("Notification" in window) && Notification.permission === "granted";
+  return `<section class="dashboard-card" style="padding:20px;max-width:760px;">
+    <div class="dashboard-card-head" style="padding:0 0 16px;"><h2>New-order alerts</h2><span>Choose how you want to be notified</span></div>
+    <div class="order-card" style="margin:0 0 16px;background:#f0f7e8;border-color:#d7e8c8;"><div class="display" style="font-size:20px;margin-bottom:8px;">🔔 Dashboard browser alert</div><div class="hint" style="text-align:left;margin:0 0 14px;">Free and private. While your dashboard is open, you will see a new-order alert here and can also receive a browser pop-up.</div><button class="btn-primary" onclick="enableBrowserAlerts()">${isBrowserReady ? "Browser alerts are on" : "Enable browser alerts"}</button></div>
     <div class="divider"></div>
-    <div class="display" style="font-size:20px;margin:4px 0 8px;">Order email alerts</div>
-    <div class="hint" style="text-align:left;margin:0 0 12px;">After the one-time Google setup, alerts will be sent to this Gmail when a customer orders or submits payment proof.</div>
+    <div class="display" style="font-size:20px;margin:4px 0 8px;">Email alerts (optional)</div>
+    <div class="hint" style="text-align:left;margin:0 0 12px;">Keep this off until you decide to finish the separate Google email setup. Your browser alert above works without Gmail permissions.</div>
     <div class="field"><label>Receive alerts at</label><input type="email" value="${escapeHtml(astate.notificationDraft?.recipient_email || "")}" placeholder="tinghuioh29@gmail.com" oninput="onNotificationField('recipient_email', this.value)"></div>
-    <div class="field"><label>Google Apps Script web app URL</label><input value="${escapeHtml(astate.notificationDraft?.webhook_url || "")}" placeholder="Paste the web app URL after you deploy it" oninput="onNotificationField('webhook_url', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">This link is stored privately for the admin only.</div></div>
+    <div class="field"><label>Google Apps Script web app URL</label><input value="${escapeHtml(astate.notificationDraft?.webhook_url || "")}" placeholder="Paste the web app URL after you deploy it" oninput="onNotificationField('webhook_url', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">Only needed if you later choose to activate Gmail alerts.</div></div>
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${astate.notificationDraft?.enabled ? "checked" : ""} onchange="onNotificationField('enabled', this.checked)"><span><b>Turn on order email alerts</b></span></label>
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${astate.notificationDraft?.alert_new_order !== false ? "checked" : ""} onchange="onNotificationField('alert_new_order', this.checked)"><span>Notify me when a new order is placed</span></label>
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${astate.notificationDraft?.alert_payment_proof !== false ? "checked" : ""} onchange="onNotificationField('alert_payment_proof', this.checked)"><span>Notify me when payment proof is uploaded</span></label>
     <button class="btn-primary" id="notification-save-btn" style="width:100%;margin-top:0;" onclick="saveNotificationSettings()">Save notification settings</button>
-  `;
+  </section>`;
 }
 
 function renderFaqTab() {
@@ -955,20 +1050,21 @@ function render() {
     ["customers", "◉", "Customers"],
     ["availability", "◷", "Availability"],
     ["faq", "?", "FAQ"],
+    ["notifications", "🔔", "Notifications"],
     ["settings", "⚙", "Store settings"],
   ];
-  const tabTitle = { orders: "Orders", menu: "Products", promos: "Promos", rewards: "Rewards", customers: "Customers", availability: "Availability", faq: "FAQ", settings: "Store settings" };
-  const tabSubtitle = { orders: "Review payments and manage every customer order.", menu: "Keep your drinks, prices and availability up to date.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", settings: "Manage your store details, images, contact information and payment details." };
+  const tabTitle = { orders: "Orders", menu: "Products", promos: "Promos", rewards: "Rewards", customers: "Customers", availability: "Availability", faq: "FAQ", notifications: "Notifications", settings: "Store settings" };
+  const tabSubtitle = { orders: "Review payments and manage every customer order.", menu: "Keep your drinks, prices and availability up to date.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose browser and optional email alerts for new orders.", settings: "Manage your store details, images, contact information and payment details." };
   const page = astate.tab === "dashboard" ? renderDashboardTab() : `
     <div class="admin-top"><div><div class="admin-eyebrow">Shizuku Lab admin</div><h1 class="tab-page-title">${tabTitle[astate.tab] || "Dashboard"}</h1><p class="tab-page-subtitle">${tabSubtitle[astate.tab] || ""}</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
     <div class="admin-content">
-      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : renderSettingsTab()}
+      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : renderSettingsTab()}
     </div>`;
   app.innerHTML = `
     ${dashboardStyles()}
     <div class="shop-admin">
       <aside class="admin-side"><div class="admin-logo">${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</div><div class="admin-caption">SHOP ADMIN</div><div class="admin-nav-label">MAIN</div><nav class="admin-nav">${nav.map(([tab, icon, label]) => `<button class="${astate.tab === tab ? "active" : ""}" onclick="setTab('${tab}')"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="admin-side-bottom"><button class="link-btn" onclick="logoutAdmin()">Sign out</button></div></aside>
-      <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}${page}</main>
+      <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}${astate.liveNotice ? `<div class="setup-banner" style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-color:#9bb780;background:#f0f7e8;color:#314427;"><span><b>🍵 New order received</b><br>${escapeHtml(astate.liveNotice.orderNumber)} · ${escapeHtml(astate.liveNotice.customer)} · ${money(astate.liveNotice.total)}</span><button class="btn-secondary" style="padding:8px 12px;flex:0 0 auto;" onclick="dismissLiveNotice()">Dismiss</button></div>` : ""}${page}</main>
     </div>
     ${renderEditOverlay()}
   `;
