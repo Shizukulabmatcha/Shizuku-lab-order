@@ -17,6 +17,8 @@ const astate = {
   loyaltySettings: null,
   loyaltyDraft: null,
   customerLoyalty: {},
+  notificationSettings: null,
+  notificationDraft: null,
   promoDraft: { code: "", discount_type: "fixed", discount_value: "", minimum_spend: "", usage_limit: "", valid_until: "" },
   selectedCustomerKey: null,
   settings: null,
@@ -71,8 +73,11 @@ function changeCalendarMonth(amount) {
 }
 function onAvailabilityField(key, value) { astate.availabilityDraft[key] = value; }
 function availabilityRanges(value) {
-  const ranges = String(value || "").split("|").map((item) => item.trim()).filter(Boolean);
-  return ranges.length ? ranges : [""];
+  const text = String(value || "");
+  // Keep an empty final line while the owner is adding a second pickup window.
+  // Filtering it out made the new input disappear immediately after clicking Add.
+  if (!text.trim()) return [""];
+  return text.split("|").map((item) => item.trim());
 }
 function setAvailabilityRange(index, value) {
   const ranges = availabilityRanges(astate.availabilityDraft.collection_time);
@@ -95,7 +100,8 @@ async function saveAvailabilityOverride() {
   if (!entry || !entry.collection_date) return;
   const button = document.getElementById("availability-save-btn");
   if (button) { button.textContent = "Saving…"; button.disabled = true; }
-  const payload = { collection_date: entry.collection_date, is_open: !!entry.is_open, collection_time: entry.is_open ? String(entry.collection_time || "").trim() : null };
+  const cleanWindows = availabilityRanges(entry.collection_time).filter(Boolean).join(" | ");
+  const payload = { collection_date: entry.collection_date, is_open: !!entry.is_open, collection_time: entry.is_open ? cleanWindows : null };
   const { data, error } = await db.from("store_opening_overrides").upsert(payload, { onConflict: "collection_date" }).select().single();
   if (button) { button.textContent = "Save day"; button.disabled = false; }
   if (error) { alert("Could not save this day: " + error.message); return; }
@@ -159,21 +165,25 @@ async function loadAll() {
       const { data: overrides, error: availabilityError } = await db.from("store_opening_overrides").select("*").order("collection_date");
       if (availabilityError) console.warn("Could not load store availability:", availabilityError.message);
       astate.openingOverrides = overrides || [];
-      const [{ data: promos, error: promoError }, { data: notes, error: notesError }, { data: loyaltySettings, error: loyaltySettingsError }, { data: loyaltyRows, error: loyaltyRowsError }] = await Promise.all([
+      const [{ data: promos, error: promoError }, { data: notes, error: notesError }, { data: loyaltySettings, error: loyaltySettingsError }, { data: loyaltyRows, error: loyaltyRowsError }, { data: notificationSettings, error: notificationError }] = await Promise.all([
         db.from("promo_codes").select("*").order("created_at", { ascending: false }),
         db.from("customer_notes").select("*"),
         db.from("loyalty_settings").select("*").eq("id", 1).maybeSingle(),
         db.from("customer_loyalty").select("*"),
+        db.from("notification_settings").select("*").eq("id", 1).maybeSingle(),
       ]);
       if (promoError) console.warn("Could not load promo codes:", promoError.message);
       if (notesError) console.warn("Could not load customer notes:", notesError.message);
       if (loyaltySettingsError) console.warn("Could not load loyalty settings:", loyaltySettingsError.message);
       if (loyaltyRowsError) console.warn("Could not load loyalty balances:", loyaltyRowsError.message);
+      if (notificationError) console.warn("Could not load notification settings:", notificationError.message);
       astate.promos = promos || [];
       astate.customerNotes = Object.fromEntries((notes || []).map((note) => [note.customer_key, note.note || ""]));
       astate.loyaltySettings = loyaltySettings || { id: 1, enabled: false, reward_type: "stamps", stamps_required: 10, minimum_spend: 5, points_per_dollar: 1, points_required: 50, reward_description: "A free drink is on us." };
       astate.loyaltyDraft = { ...astate.loyaltySettings };
       astate.customerLoyalty = Object.fromEntries((loyaltyRows || []).map((row) => [row.customer_key, row]));
+      astate.notificationSettings = notificationSettings || { id: 1, recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true };
+      astate.notificationDraft = { ...astate.notificationSettings };
       if (!astate.selectedAvailabilityDate) astate.selectedAvailabilityDate = localDateText(new Date());
       if (!astate.calendarMonth) astate.calendarMonth = astate.selectedAvailabilityDate.slice(0, 7) + "-01";
       setAvailabilityDraft(astate.selectedAvailabilityDate);
@@ -337,6 +347,33 @@ async function saveSettings() {
   if (error) { alert("Could not save: " + error.message); return; }
   astate.settings = { ...astate.settingsDraft };
   alert("Saved.");
+}
+
+function onNotificationField(key, value) { astate.notificationDraft[key] = value; }
+async function saveNotificationSettings() {
+  if (!astate.notificationDraft) return;
+  const draft = astate.notificationDraft;
+  const email = String(draft.recipient_email || "").trim();
+  if (draft.enabled && !/^\S+@\S+\.\S+$/.test(email)) {
+    alert("Please enter a valid Gmail address before turning on alerts.");
+    return;
+  }
+  const button = document.getElementById("notification-save-btn");
+  if (button) { button.textContent = "Saving…"; button.disabled = true; }
+  const fields = {
+    id: 1,
+    recipient_email: email || null,
+    webhook_url: String(draft.webhook_url || "").trim() || null,
+    enabled: !!draft.enabled,
+    alert_new_order: !!draft.alert_new_order,
+    alert_payment_proof: !!draft.alert_payment_proof,
+  };
+  const { data, error } = await db.from("notification_settings").upsert(fields, { onConflict: "id" }).select().single();
+  if (button) { button.textContent = "Save notification settings"; button.disabled = false; }
+  if (error) { alert("Could not save notification settings: " + error.message); return; }
+  astate.notificationSettings = data;
+  astate.notificationDraft = { ...data };
+  alert("Notification settings saved.");
 }
 
 function adminEmailIsAllowed() {
@@ -783,6 +820,14 @@ function renderSettingsTab() {
     ${field("Instagram (without @)", "instagram")}
     ${field("Shizuku Lab website link (optional)", "website_url", "https://your-brand-website.com")}
     <div class="divider"></div>
+    <div class="display" style="font-size:20px;margin:4px 0 8px;">Welcome cover</div>
+    ${field("Welcome title", "welcome_title", "Welcome to Shizuku Lab")}
+    ${field("Welcome subtitle", "welcome_subtitle", "雫ラボ · CRAFTED DROP BY DROP")}
+    <div class="field"><label>Welcome introduction</label><textarea rows="3" placeholder="A short message shown before customers enter the ordering page." oninput="onSettingsField('welcome_copy', this.value)">${escapeHtml(s.welcome_copy || "")}</textarea></div>
+    ${field("Order button text", "welcome_order_button_text", "Enter ordering →")}
+    ${field("Website button text", "welcome_website_button_text", "Visit Shizuku Lab website ↗")}
+    <div class="hint" style="text-align:left;margin:-6px 0 14px;">Your Welcome cover uses the same logo you upload below. Leave the website link empty if you only want the ordering button.</div>
+    <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Storefront images</div>
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 16px;"><div style="border:1px solid #E1D9C8;border-radius:13px;padding:12px;background:#fff;"><b style="display:block;margin-bottom:4px;">Logo frame · 1 : 1</b><span class="hint" style="margin:0;text-align:left;">Best upload: square, at least 1000 × 1000 px.</span></div><div style="border:1px solid #E1D9C8;border-radius:13px;padding:12px;background:#fff;"><b style="display:block;margin-bottom:4px;">Banner frame · 2 : 1</b><span class="hint" style="margin:0;text-align:left;">Best upload: landscape, at least 1600 × 800 px.</span></div></div>
     <div class="field"><label>Logo</label><input value="${escapeHtml(s.logo_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('logo_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'logo_url')">${s.logo_url ? `<div id="logo-live-preview" style="width:${Number(s.logo_circle_size || 68)}px;height:${Number(s.logo_circle_size || 68)}px;border:1px solid #E1D9C8;border-radius:50%;overflow:hidden;margin-top:10px;background:#fff;display:grid;place-items:center;"><img id="logo-live-preview-image" src="${escapeHtml(s.logo_url)}" alt="Logo preview" style="width:100%;height:100%;object-fit:contain;transform:scale(${Number(s.logo_image_scale || 1)});"></div>` : ""}</div>
@@ -810,6 +855,15 @@ function renderSettingsTab() {
     ${field("Saturday collection time", "saturday_collection_time", "10:00 AM - 12:00 PM")}
     ${field("Sunday collection time", "sunday_collection_time", "10:00 AM - 1:00 PM")}
     <button class="btn-primary" id="settings-save-btn" style="width:100%;margin-top:8px;" onclick="saveSettings()">Save settings</button>
+    <div class="divider"></div>
+    <div class="display" style="font-size:20px;margin:4px 0 8px;">Order email alerts</div>
+    <div class="hint" style="text-align:left;margin:0 0 12px;">After the one-time Google setup, alerts will be sent to this Gmail when a customer orders or submits payment proof.</div>
+    <div class="field"><label>Receive alerts at</label><input type="email" value="${escapeHtml(astate.notificationDraft?.recipient_email || "")}" placeholder="tinghuioh29@gmail.com" oninput="onNotificationField('recipient_email', this.value)"></div>
+    <div class="field"><label>Google Apps Script web app URL</label><input value="${escapeHtml(astate.notificationDraft?.webhook_url || "")}" placeholder="Paste the web app URL after you deploy it" oninput="onNotificationField('webhook_url', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">This link is stored privately for the admin only.</div></div>
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${astate.notificationDraft?.enabled ? "checked" : ""} onchange="onNotificationField('enabled', this.checked)"><span><b>Turn on order email alerts</b></span></label>
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${astate.notificationDraft?.alert_new_order !== false ? "checked" : ""} onchange="onNotificationField('alert_new_order', this.checked)"><span>Notify me when a new order is placed</span></label>
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${astate.notificationDraft?.alert_payment_proof !== false ? "checked" : ""} onchange="onNotificationField('alert_payment_proof', this.checked)"><span>Notify me when payment proof is uploaded</span></label>
+    <button class="btn-primary" id="notification-save-btn" style="width:100%;margin-top:0;" onclick="saveNotificationSettings()">Save notification settings</button>
   `;
 }
 
