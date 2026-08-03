@@ -404,16 +404,24 @@ function onSettingsField(key, value) { astate.settingsDraft[key] = value; }
 function updateStorefrontPreview() {
   const circle = document.getElementById("logo-live-preview");
   const logo = document.getElementById("logo-live-preview-image");
+  const welcomeCircle = document.getElementById("welcome-logo-live-preview");
+  const welcomeLogo = document.getElementById("welcome-logo-live-preview-image");
   const banner = document.getElementById("banner-live-preview");
   const circleValue = document.getElementById("logo-circle-value");
   const imageValue = document.getElementById("logo-image-value");
+  const welcomeCircleValue = document.getElementById("welcome-logo-circle-value");
+  const welcomeImageValue = document.getElementById("welcome-logo-image-value");
   const bannerValue = document.getElementById("banner-position-value");
   const heightValue = document.getElementById("banner-height-value");
   if (circle && astate.settingsDraft) circle.style.width = circle.style.height = `${Number(astate.settingsDraft.logo_circle_size || 68)}px`;
   if (logo && astate.settingsDraft) logo.style.transform = `scale(${Number(astate.settingsDraft.logo_image_scale || 1)})`;
+  if (welcomeCircle && astate.settingsDraft) welcomeCircle.style.width = welcomeCircle.style.height = `${Number(astate.settingsDraft.welcome_logo_circle_size || astate.settingsDraft.logo_circle_size || 100)}px`;
+  if (welcomeLogo && astate.settingsDraft) welcomeLogo.style.transform = `scale(${Number(astate.settingsDraft.welcome_logo_image_scale || astate.settingsDraft.logo_image_scale || 1)})`;
   if (banner && astate.settingsDraft) banner.style.objectPosition = `center ${Number(astate.settingsDraft.hero_image_position ?? 68)}%`;
   if (circleValue) circleValue.textContent = `${Number(astate.settingsDraft.logo_circle_size || 68)} px`;
   if (imageValue) imageValue.textContent = `${Number(astate.settingsDraft.logo_image_scale || 1).toFixed(2)}×`;
+  if (welcomeCircleValue) welcomeCircleValue.textContent = `${Number(astate.settingsDraft.welcome_logo_circle_size || astate.settingsDraft.logo_circle_size || 100)} px`;
+  if (welcomeImageValue) welcomeImageValue.textContent = `${Number(astate.settingsDraft.welcome_logo_image_scale || astate.settingsDraft.logo_image_scale || 1).toFixed(2)}×`;
   if (bannerValue) bannerValue.textContent = `${Number(astate.settingsDraft.hero_image_position ?? 68)}%`;
   if (heightValue) heightValue.textContent = `${Number(astate.settingsDraft.hero_banner_height || 190)} px`;
 }
@@ -913,7 +921,10 @@ function renderSettingsTab() {
     <div class="field"><label>Welcome introduction</label><textarea rows="3" placeholder="A short message shown before customers enter the ordering page." oninput="onSettingsField('welcome_copy', this.value)">${escapeHtml(s.welcome_copy || "")}</textarea></div>
     ${field("Order button text", "welcome_order_button_text", "Enter ordering →")}
     ${field("Website button text", "welcome_website_button_text", "Visit Shizuku Lab website ↗")}
-    <div class="hint" style="text-align:left;margin:-6px 0 14px;">Your Welcome cover uses the same logo you upload below. Leave the website link empty if you only want the ordering button.</div>
+    <div class="hint" style="text-align:left;margin:-6px 0 14px;">Your Welcome cover uses the same logo you upload below, but you can size it separately here. Leave the website link empty if you only want the ordering button.</div>
+    ${s.logo_url ? `<div class="field"><label>Welcome logo preview</label><div id="welcome-logo-live-preview" style="width:${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)}px;height:${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)}px;border:4px solid #F4EEE3;border-radius:50%;overflow:hidden;background:#fff;display:grid;place-items:center;box-shadow:0 10px 22px rgba(42,42,34,.10);"><img id="welcome-logo-live-preview-image" src="${escapeHtml(s.logo_url)}" alt="Welcome logo preview" style="width:100%;height:100%;object-fit:contain;transform:scale(${Number(s.welcome_logo_image_scale || s.logo_image_scale || 1)});"></div></div>` : `<div class="hint" style="text-align:left;margin:0 0 12px;">Upload your logo below first, then you can preview and adjust it here.</div>`}
+    <div class="field"><label>Welcome logo circle size <span id="welcome-logo-circle-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)} px</span></label><input type="range" min="56" max="220" step="1" value="${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)}" oninput="onSettingsField('welcome_logo_circle_size',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">Changes only the logo on the Welcome cover.</div></div>
+    <div class="field"><label>Welcome logo image size <span id="welcome-logo-image-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.welcome_logo_image_scale || s.logo_image_scale || 1).toFixed(2)}×</span></label><input type="range" min="0.55" max="2.4" step="0.05" value="${Number(s.welcome_logo_image_scale || s.logo_image_scale || 1)}" oninput="onSettingsField('welcome_logo_image_scale',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">Zoom the Welcome logo inside its own circle. It will not change the ordering page logo.</div></div>
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Storefront images</div>
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 16px;"><div style="border:1px solid #E1D9C8;border-radius:13px;padding:12px;background:#fff;"><b style="display:block;margin-bottom:4px;">Logo frame · 1 : 1</b><span class="hint" style="margin:0;text-align:left;">Best upload: square, at least 1000 × 1000 px.</span></div><div style="border:1px solid #E1D9C8;border-radius:13px;padding:12px;background:#fff;"><b style="display:block;margin-bottom:4px;">Banner frame · 2 : 1</b><span class="hint" style="margin:0;text-align:left;">Best upload: landscape, at least 1600 × 800 px.</span></div></div>
