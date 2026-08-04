@@ -14,6 +14,9 @@ const astate = {
   productGroups: [],
   optionGroups: [],
   options: [],
+  productOptionGroups: [],
+  realtimeChannel: null,
+  newOrderAlert: null,
   promos: [],
   customerNotes: {},
   loyaltySettings: null,
@@ -166,6 +169,9 @@ async function loadAll() {
       if (optionsError) console.warn("Could not load drink options:", optionsError.message);
       astate.optionGroups = optionGroups || [];
       astate.options = options || [];
+      const { data: productOptionGroups, error: productOptionGroupsError } = await db.from("product_option_groups").select("product_id, option_group_id");
+      if (productOptionGroupsError) console.warn("Could not load product option mappings:", productOptionGroupsError.message);
+      astate.productOptionGroups = productOptionGroups || [];
 
       const { data: settingsRows } = await db.from("store_settings").select("*").limit(1);
       astate.settings = (settingsRows && settingsRows[0]) || null;
@@ -207,6 +213,7 @@ async function loadAll() {
   }
   astate.loading = false;
   render();
+  subscribeToOrderChanges();
 }
 
 async function confirmPayment(id) {
@@ -247,11 +254,13 @@ async function cancelOrder(id) {
 /* ---- menu (products) CRUD — unchanged from before ---- */
 function newMenuItem() {
   const firstGroup = astate.productGroups[0];
-  astate.editing = { id: null, group_id: firstGroup?.id || null, category: firstGroup?.name || "Signature", name: "", description: "", price: 0, discount_price: null, image_url: "", is_available: true, is_bundle: false, bundle_product_ids: [], stock: 0 };
+  astate.editing = { id: null, enabled_option_group_ids: [], group_id: firstGroup?.id || null, category: firstGroup?.name || "Signature", name: "", description: "", price: 0, discount_price: null, image_url: "", is_available: true, is_bundle: false, bundle_product_ids: [], stock: 0 };
   render();
 }
 function editMenuItem(id) {
-  astate.editing = { ...astate.menu.find((m) => String(m.id) === String(id)) };
+  const item = astate.menu.find((m) => String(m.id) === String(id));
+  const enabled_option_group_ids = astate.productOptionGroups.filter((row) => String(row.product_id) === String(id)).map((row) => String(row.option_group_id));
+  astate.editing = { ...item, enabled_option_group_ids };
   render();
 }
 function cancelEdit() { astate.editing = null; render(); }
@@ -268,6 +277,24 @@ function onEditGroup(value) {
 function toggleBundleProduct(productId, checked) {
   const ids = Array.isArray(astate.editing.bundle_product_ids) ? astate.editing.bundle_product_ids.map(String) : [];
   astate.editing.bundle_product_ids = checked ? [...new Set([...ids, String(productId)])] : ids.filter((id) => id !== String(productId));
+}
+
+function toggleProductOptionGroup(groupId, checked) {
+  const ids = Array.isArray(astate.editing.enabled_option_group_ids) ? astate.editing.enabled_option_group_ids.map(String) : [];
+  astate.editing.enabled_option_group_ids = checked ? [...new Set([...ids, String(groupId)])] : ids.filter((id) => id !== String(groupId));
+}
+async function saveProductOptionMappings(productId, groupIds) {
+  const { error: deleteError } = await db.from("product_option_groups").delete().eq("product_id", productId);
+  if (deleteError) throw deleteError;
+  const rows = (groupIds || []).map((groupId) => ({ product_id: productId, option_group_id: groupId }));
+  if (rows.length) {
+    const { error: insertError } = await db.from("product_option_groups").insert(rows);
+    if (insertError) throw insertError;
+  }
+  astate.productOptionGroups = [
+    ...astate.productOptionGroups.filter((row) => String(row.product_id) !== String(productId)),
+    ...rows,
+  ];
 }
 async function uploadStorefrontImage(input, target) {
   const file = input?.files?.[0];
@@ -290,17 +317,23 @@ async function saveMenuItem() {
   const btn = document.getElementById("save-btn");
   if (btn) { btn.textContent = "Saving…"; btn.disabled = true; }
   try {
+    const enabledGroupIds = Array.isArray(item.enabled_option_group_ids) ? item.enabled_option_group_ids : [];
+    const { enabled_option_group_ids, ...cleanItem } = item;
+    let savedProductId;
     if (item.id) {
-      const { id, ...fields } = item;
+      const { id, ...fields } = cleanItem;
       const { error } = await db.from("products").update(fields).eq("id", id);
       if (error) throw error;
-      astate.menu = astate.menu.map((m) => (String(m.id) === String(id) ? item : m));
+      savedProductId = id;
+      astate.menu = astate.menu.map((m) => (String(m.id) === String(id) ? cleanItem : m));
     } else {
-      const { id, ...fields } = item;
+      const { id, ...fields } = cleanItem;
       const { data, error } = await db.from("products").insert(fields).select().single();
       if (error) throw error;
+      savedProductId = data.id;
       astate.menu = [...astate.menu, data];
     }
+    await saveProductOptionMappings(savedProductId, enabledGroupIds);
     astate.editing = null;
     render();
   } catch (e) {
@@ -696,6 +729,43 @@ function customerInsights() {
   });
   return { top, repeat, newThisMonth };
 }
+
+function showNewOrderNotice(order) {
+  astate.newOrderAlert = {
+    id: order.id,
+    orderNumber: order.order_number || order.id,
+    customer: order.customer_name || "Customer",
+    total: Number(order.total || 0),
+  };
+  try {
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification("New Shizuku Lab order", { body: `${astate.newOrderAlert.orderNumber} · ${astate.newOrderAlert.customer} · ${money(astate.newOrderAlert.total)}` });
+    }
+  } catch (_) {}
+}
+function dismissNewOrderAlert() { astate.newOrderAlert = null; render(); }
+async function refreshOrdersOnly() {
+  const nested = await db.from("orders").select("*, order_items(*, order_item_options(*))").order("created_at", { ascending: false });
+  if (!nested.error) astate.orders = nested.data || [];
+  else {
+    const { data } = await db.from("orders").select("*").order("created_at", { ascending: false });
+    astate.orders = data || [];
+  }
+  render();
+}
+function subscribeToOrderChanges() {
+  if (!IS_CONFIGURED || astate.realtimeChannel) return;
+  astate.realtimeChannel = db.channel("admin-live-orders")
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "orders" }, async (payload) => {
+      showNewOrderNotice(payload.new || {});
+      await refreshOrdersOnly();
+    })
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders" }, async () => {
+      await refreshOrdersOnly();
+    })
+    .subscribe();
+  if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
+}
 function setTab(tab) { astate.tab = tab; render(); }
 function renderDashboardTab() {
   const stats = dashboardStats();
@@ -705,6 +775,7 @@ function renderDashboardTab() {
   const insights = customerInsights();
   const highestDailySale = Math.max(...performance.days.map((day) => day.total), 1);
   return `
+    ${astate.newOrderAlert ? `<div class="new-order-alert"><div><strong>New order received</strong><span>${escapeHtml(astate.newOrderAlert.orderNumber)} · ${escapeHtml(astate.newOrderAlert.customer)} · ${money(astate.newOrderAlert.total)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="setTab('orders')">Open order</button><button class="btn-secondary" onclick="dismissNewOrderAlert()">Dismiss</button></div></div>` : ""}
     <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</h1><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
     <div class="stat-grid">
       <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Revenue this month</div><div class="stat-value">${money(stats.revenue)}</div><div class="stat-help">Paid orders only</div></div>
@@ -1088,6 +1159,7 @@ function renderEditOverlay() {
       <div class="field"><label>Product image</label><input value="${item.image_url || ""}" placeholder="Upload below or paste image URL" oninput="onEditField('image_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'products')">${item.image_url ? `<img src="${escapeHtml(item.image_url)}" alt="Product preview" style="display:block;width:100%;height:150px;object-fit:cover;border:1px solid #E1D9C8;border-radius:12px;margin-top:8px;">` : ""}</div>
       <div class="field"><label>Stock</label><input type="number" value="${item.stock || 0}" oninput="onEditField('stock', this.value)"></div>
       <div class="field" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="bundle-check" ${item.is_bundle ? "checked" : ""} onchange="onEditField('is_bundle', this.checked);render()" style="width:auto;"><label style="margin:0;" for="bundle-check">This is a Bundle of Two</label></div>
+      <div class="field"><label>Customisation shown for this drink</label><div class="hint" style="text-align:left;margin:0 0 7px;">Tick only the options that apply. Unticked groups will not appear to customers.</div>${astate.optionGroups.filter((group) => group.is_visible !== false).map((group) => `<label class="slot" style="cursor:pointer;gap:10px;margin:7px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${(item.enabled_option_group_ids || []).map(String).includes(String(group.id)) ? "checked" : ""} onchange="toggleProductOptionGroup('${group.id}',this.checked)"><span>${escapeHtml(group.name)}</span></label>`).join("")}</div>
       ${item.is_bundle ? `<div class="field"><label>Drinks customers can choose in this bundle</label><div class="hint" style="text-align:left;margin:0 0 7px;">Tick the drinks you want to allow. Leave all unticked to use the normal latte choices.</div>${astate.menu.filter((product) => String(product.id) !== String(item.id) && !product.is_bundle).map((product) => `<label class="slot" style="cursor:pointer;gap:10px;margin:7px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${Array.isArray(item.bundle_product_ids) && item.bundle_product_ids.map(String).includes(String(product.id)) ? "checked" : ""} onchange="toggleBundleProduct('${product.id}',this.checked)"><span>${escapeHtml(product.name)}</span></label>`).join("")}</div>` : ""}
       <div class="field" style="display:flex;align-items:center;gap:8px;">
         <input type="checkbox" id="avail-check" ${item.is_available ? "checked" : ""} onchange="onEditField('is_available', this.checked)" style="width:auto;">

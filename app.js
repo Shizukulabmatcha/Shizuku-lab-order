@@ -34,6 +34,7 @@ const state = {
   menuView: "list",
   optionGroups: [],
   options: [],
+  productOptionGroups: [],
   selectedProduct: null,
   selectedOptions: {},
   bundle: { drink1: null, drink2: null, drink1Options: {}, drink2Options: {} },
@@ -270,15 +271,27 @@ async function loadProductGroups() {
   state.productGroups = data || [];
 }
 async function loadOptions() {
-  const [groupsResult, optionsResult] = await Promise.all([
+  const [groupsResult, optionsResult, mappingResult] = await Promise.all([
     db.from("option_groups").select("*").order("id"),
     db.from("options").select("*").eq("is_available", true).order("option_group_id").order("id"),
+    db.from("product_option_groups").select("product_id, option_group_id"),
   ]);
   if (groupsResult.error) throw groupsResult.error;
   if (optionsResult.error) throw optionsResult.error;
-  // Owners can hide a whole group (for example, Sweetness) from the dashboard.
   state.optionGroups = (groupsResult.data || []).filter((group) => group.is_visible !== false);
   state.options = optionsResult.data || [];
+  if (mappingResult.error) {
+    console.warn("Product-specific options are not enabled yet:", mappingResult.error.message);
+    state.productOptionGroups = [];
+  } else {
+    state.productOptionGroups = mappingResult.data || [];
+  }
+}
+function optionGroupsForProduct(productId) {
+  const mappings = state.productOptionGroups.filter((row) => String(row.product_id) === String(productId));
+  if (!mappings.length) return [];
+  const enabledIds = new Set(mappings.map((row) => String(row.option_group_id)));
+  return state.optionGroups.filter((group) => enabledIds.has(String(group.id)));
 }
 
 /* ---------- init ---------- */
@@ -329,7 +342,7 @@ function selectOption(groupId, optionId) {
   render();
 }
 function validateRequiredOptions() {
-  for (const group of state.optionGroups) {
+  for (const group of optionGroupsForProduct(state.selectedProduct?.id)) {
     if (!group.required) continue;
     if (!state.selectedOptions[group.id]) { alert(`Please choose an option for "${group.name}".`); return false; }
   }
@@ -402,7 +415,7 @@ function selectBundleOption(drinkNumber, groupId, optionId) {
 }
 function validateBundleDrink(drink, selectedOptions) {
   if (!drink) return false;
-  for (const group of state.optionGroups) {
+  for (const group of optionGroupsForProduct(drink.id)) {
     if (!group.required) continue;
     if (!selectedOptions[group.id]) return false;
   }
@@ -814,7 +827,7 @@ function renderOptions() {
           <div class="item-desc">${escapeHtml(product.description)}</div>
         </div>
       </div>
-      ${state.optionGroups.length === 0 ? `<div class="hint">No customisation options available.</div>` : state.optionGroups.map((group) => {
+      ${optionGroupsForProduct(product.id).length === 0 ? `<div class="hint">No customisation needed for this drink.</div>` : optionGroupsForProduct(product.id).map((group) => {
         const options = getOptionsForGroup(group.id);
         const selected = state.selectedOptions[group.id];
         return `
@@ -892,7 +905,7 @@ function renderBundleDrinkOptions(drinkNumber, drink, selectedOptions) {
   return `
     <div class="bundle-customisation" style="margin-top:18px;">
       <div class="bundle-selected">${escapeHtml(drink.name)}</div>
-      ${state.optionGroups.map((group) => {
+      ${optionGroupsForProduct(drink.id).map((group) => {
         const options = getOptionsForGroup(group.id);
         const selected = selectedOptions[group.id];
         return `
@@ -1060,6 +1073,21 @@ function startPaymentCountdown() {
   update();
   if (paymentSecondsLeft() > 0) paymentCountdownTimer = setInterval(update, 1000);
 }
+function instagramDmUrl() {
+  const handle = String(state.store.instagram || "shizukulab.matcha").replace(/^@/, "").trim();
+  return `https://ig.me/m/${encodeURIComponent(handle)}`;
+}
+function sendPaymentScreenshotViaInstagram() {
+  const order = state.lastOrder;
+  if (!order) return;
+  window.open(instagramDmUrl(), "_blank", "noopener");
+  state.cart = {};
+  saveCart();
+  state.lastOrder = { ...order, payment_status: "awaiting_payment", order_status: order.order_status || "pending" };
+  state.payment = { transactionReference: "", proofFile: null, expiresAt: null };
+  state.screen = "confirmation";
+  render();
+}
 function renderPayment() {
   const order = state.lastOrder;
   if (!order) return renderMenu();
@@ -1067,6 +1095,7 @@ function renderPayment() {
   const paymentExpired = paymentSecondsLeft() === 0;
   const paynowName = state.store.paynow_name || state.store.store_name || "Shizuku Lab";
   const paynowNumber = state.store.paynow_number || "";
+  const igHandle = String(state.store.instagram || "shizukulab.matcha").replace(/^@/, "");
   let qrHtml;
   try {
     qrHtml = paynowNumber ? `<div class="qr-box ${paymentExpired ? "qr-expired" : ""}">${payNowQrSvg(order.total, order.order_number, state.payment.expiresAt)}</div>` : null;
@@ -1087,23 +1116,16 @@ function renderPayment() {
         <div class="divider"></div>
         <div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(order.order_number || order.id || "")}</span></div>
         <div class="row bold"><span class="label">Amount</span><span>${money(order.total)}</span></div>
-        <div class="ref-note">Enter <b>${escapeHtml(order.order_number || order.id || "")}</b> as the payment reference.</div>
+        <div class="ref-note">Use <b>${escapeHtml(order.order_number || order.id || "")}</b> as your PayNow reference.</div>
       </div>
-      <div class="summary-card" style="margin-top:16px;">
-        <div class="field">
-          <label>PayNow transaction reference <span class="hint">(optional)</span></label>
-          <input value="${escapeHtml(state.payment.transactionReference)}" placeholder="e.g. 123456789" oninput="onPaymentReference(this.value)">
-        </div>
-        <div class="field" style="margin-bottom:0;">
-          <label>Payment screenshot <span style="color:#B33;">*</span></label>
-          <input type="file" accept="image/*" onchange="onPaymentProof(this)">
-          <div class="hint" style="margin-top:8px;">${state.payment.proofFile ? `Selected: <b>${escapeHtml(state.payment.proofFile.name)}</b>` : "Upload a clear screenshot of your successful PayNow payment."}</div>
-        </div>
+      <div class="summary-card payment-dm-card">
+        <b>Send your payment screenshot through Instagram</b>
+        <p class="hint" style="text-align:left;margin:8px 0 0;">After payment, tap the button below and attach the screenshot in your DM to <b>@${escapeHtml(igHandle)}</b>. Your order number is already shown above.</p>
       </div>
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
-      <button class="primary-btn" ${state.payment.proofFile ? "" : "disabled"} onclick="markPaid()">Submit payment proof</button>
-      <div class="hint" style="margin-top:8px;margin-bottom:0;">We'll confirm your order once payment is verified.</div>
+      <button class="primary-btn" onclick="sendPaymentScreenshotViaInstagram()">Open Instagram DM · Send screenshot</button>
+      <div class="hint" style="margin-top:8px;margin-bottom:0;">Instagram will open in a new tab or app.</div>
     </div></div>
   `;
 }

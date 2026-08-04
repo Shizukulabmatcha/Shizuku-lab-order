@@ -5,7 +5,7 @@
 const SUPABASE_URL = "https://ohgfmmvsxckayamlzdlj.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_6l6Jp0etNJyGUgFc1UUg4w_FfJnLZd1";
 // The only email address allowed to open the real shop dashboard.
-// Supabase sends this inbox a one-time sign-in link — there is no reusable PIN
+// This Gmail is the only account allowed to use the admin dashboard.
 // sitting in the public website code.
 const ADMIN_EMAIL = "tinghuioh29@gmail.com";
 // Store name, address, hours and PayNow information now live in Supabase
