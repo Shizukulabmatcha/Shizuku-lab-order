@@ -276,7 +276,8 @@ async function loadOptions() {
   ]);
   if (groupsResult.error) throw groupsResult.error;
   if (optionsResult.error) throw optionsResult.error;
-  state.optionGroups = groupsResult.data || [];
+  // Owners can hide a whole group (for example, Sweetness) from the dashboard.
+  state.optionGroups = (groupsResult.data || []).filter((group) => group.is_visible !== false);
   state.options = optionsResult.data || [];
 }
 

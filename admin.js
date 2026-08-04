@@ -12,6 +12,8 @@ const astate = {
   orders: [],
   menu: [],
   productGroups: [],
+  optionGroups: [],
+  options: [],
   promos: [],
   customerNotes: {},
   loyaltySettings: null,
@@ -155,6 +157,15 @@ async function loadAll() {
       const { data: groups, error: groupError } = await db.from("product_groups").select("*").order("sort_order").order("name");
       if (groupError) console.warn("Could not load product groups:", groupError.message);
       astate.productGroups = groups || [];
+
+      const [{ data: optionGroups, error: optionGroupError }, { data: options, error: optionsError }] = await Promise.all([
+        db.from("option_groups").select("*").order("id"),
+        db.from("options").select("*").order("option_group_id").order("id"),
+      ]);
+      if (optionGroupError) console.warn("Could not load drink option groups:", optionGroupError.message);
+      if (optionsError) console.warn("Could not load drink options:", optionsError.message);
+      astate.optionGroups = optionGroups || [];
+      astate.options = options || [];
 
       const { data: settingsRows } = await db.from("store_settings").select("*").limit(1);
       astate.settings = (settingsRows && settingsRows[0]) || null;
@@ -331,6 +342,95 @@ async function saveProductGroups() {
   }
   astate.productGroups = rows.sort((a, b) => Number(a.sort_order) - Number(b.sort_order));
   alert("Product groups saved."); render();
+}
+
+/* ---- drink customisation: Ice, Sweetness, etc. ---- */
+function drinkOptionsForGroup(groupId) {
+  return astate.options.map((option, index) => ({ option, index })).filter(({ option }) => String(option.option_group_id) === String(groupId));
+}
+function addDrinkOptionGroup() {
+  astate.optionGroups = [...astate.optionGroups, { id: null, name: "", required: true, is_visible: true }];
+  render();
+}
+function onDrinkOptionGroupField(index, key, value) {
+  astate.optionGroups[index][key] = (key === "required" || key === "is_visible") ? !!value : value;
+}
+async function deleteDrinkOptionGroup(index) {
+  const group = astate.optionGroups[index];
+  if (!group) return;
+  if (group.id && drinkOptionsForGroup(group.id).length) {
+    alert("Delete this group's choices first, then you can delete the group.");
+    return;
+  }
+  if (!confirm(`Delete the drink option group “${group.name || "Untitled"}”?`)) return;
+  if (group.id && IS_CONFIGURED) {
+    const { error } = await db.from("option_groups").delete().eq("id", group.id);
+    if (error) { alert("Could not delete option group: " + error.message); return; }
+  }
+  astate.optionGroups.splice(index, 1);
+  render();
+}
+async function saveDrinkOptionGroups() {
+  const rows = astate.optionGroups.filter((group) => String(group.name || "").trim());
+  for (const group of rows) {
+    const fields = { name: String(group.name).trim(), required: !!group.required, is_visible: group.is_visible !== false };
+    const query = group.id ? db.from("option_groups").update(fields).eq("id", group.id).select().single() : db.from("option_groups").insert(fields).select().single();
+    const { data, error } = await query;
+    if (error) { alert("Could not save drink option group: " + error.message); return; }
+    Object.assign(group, data);
+  }
+  astate.optionGroups = rows;
+  alert("Drink option groups saved. You can now add choices below.");
+  render();
+}
+function addDrinkOption(groupId) {
+  if (!groupId) { alert("Save this new option group first, then add its choices."); return; }
+  astate.options = [...astate.options, { id: null, option_group_id: groupId, name: "", price: 0, is_available: true }];
+  render();
+}
+function onDrinkOptionField(index, key, value) {
+  astate.options[index][key] = key === "price" ? Number(value || 0) : key === "is_available" ? !!value : value;
+}
+async function deleteDrinkOption(index) {
+  const option = astate.options[index];
+  if (!option || !confirm(`Delete “${option.name || "this choice"}”?`)) return;
+  if (option.id && IS_CONFIGURED) {
+    const { error } = await db.from("options").delete().eq("id", option.id);
+    if (error) { alert("Could not delete choice: " + error.message); return; }
+  }
+  astate.options.splice(index, 1);
+  render();
+}
+async function saveDrinkOptions() {
+  const rows = astate.options.filter((option) => String(option.name || "").trim());
+  for (const option of rows) {
+    const fields = { option_group_id: option.option_group_id, name: String(option.name).trim(), price: Math.max(0, Number(option.price || 0)), is_available: option.is_available !== false };
+    const query = option.id ? db.from("options").update(fields).eq("id", option.id).select().single() : db.from("options").insert(fields).select().single();
+    const { data, error } = await query;
+    if (error) { alert("Could not save drink choice: " + error.message); return; }
+    Object.assign(option, data);
+  }
+  astate.options = rows;
+  alert("Drink choices saved.");
+  render();
+}
+function renderDrinkOptionsManager() {
+  return `<section class="dashboard-card" style="padding:20px;margin-bottom:20px;">
+    <div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Drink customisation</h2><span>Manage Ice, Sweetness and any future drink choices</span></div>
+    ${astate.optionGroups.length ? astate.optionGroups.map((group, groupIndex) => {
+      const choices = drinkOptionsForGroup(group.id);
+      return `<div style="border:1px solid #e7ddd0;border-radius:16px;padding:14px;margin:12px 0;background:#fffdf9;">
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:9px;align-items:center;">
+          <input value="${escapeHtml(group.name || "")}" placeholder="e.g. Ice" oninput="onDrinkOptionGroupField(${groupIndex},'name',this.value)">
+          <label style="font-size:12px;white-space:nowrap;"><input type="checkbox" style="width:auto;" ${group.required ? "checked" : ""} onchange="onDrinkOptionGroupField(${groupIndex},'required',this.checked)"> Required</label>
+          <label style="font-size:12px;white-space:nowrap;"><input type="checkbox" style="width:auto;" ${group.is_visible !== false ? "checked" : ""} onchange="onDrinkOptionGroupField(${groupIndex},'is_visible',this.checked)"> Show</label>
+          <button class="link-danger" style="font-size:12px;" onclick="deleteDrinkOptionGroup(${groupIndex})">Delete</button>
+        </div>
+        ${group.id ? `<div style="margin-top:12px;">${choices.length ? choices.map(({ option, index }) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 100px auto auto;gap:9px;align-items:center;margin:8px 0;"><input value="${escapeHtml(option.name || "")}" placeholder="e.g. Less Ice" oninput="onDrinkOptionField(${index},'name',this.value)"><input type="number" min="0" step="0.10" value="${Number(option.price || 0)}" title="Extra price" oninput="onDrinkOptionField(${index},'price',this.value)"><label style="font-size:12px;white-space:nowrap;"><input type="checkbox" style="width:auto;" ${option.is_available !== false ? "checked" : ""} onchange="onDrinkOptionField(${index},'is_available',this.checked)"> Show</label><button class="link-danger" style="font-size:12px;" onclick="deleteDrinkOption(${index})">Delete</button></div>`).join("") : `<div class="hint" style="text-align:left;margin:6px 0;">No choices yet.</div>`}<button class="btn-secondary" style="margin-top:6px;" onclick="addDrinkOption('${group.id}')">+ Add choice</button></div>` : `<div class="hint" style="text-align:left;margin:10px 0 0;">Save this new group first, then add choices such as Normal Ice or Less Ice.</div>`}
+      </div>`;
+    }).join("") : `<div class="dashboard-empty">No drink option groups yet. Add Ice or Sweetness below.</div>`}
+    <div class="btn-row" style="margin-top:14px;"><button class="btn-secondary" onclick="addDrinkOptionGroup()">+ Add option group</button><button class="btn-primary" onclick="saveDrinkOptionGroups()">Save groups</button><button class="btn-primary" onclick="saveDrinkOptions()">Save choices</button></div>
+  </section>`;
 }
 
 /* ---- store settings ---- */
@@ -526,17 +626,17 @@ function dashboardStyles() {
   return `<style>
     #app.wrap{width:100%;max-width:none!important;margin:0!important;padding:0!important}
     .shop-admin{min-height:100vh;background:#fffaf5;color:#292720;font-family:inherit;display:flex}
-    .shop-admin *{box-sizing:border-box}.shop-admin .admin-side{width:248px;flex:0 0 248px;min-height:100vh;padding:28px 16px;border-right:1px solid #eadfd2;background:#fffdf9;position:sticky;top:0;height:100vh}
+    .shop-admin *{box-sizing:border-box}.shop-admin .admin-side{width:248px;flex:0 0 248px;min-height:100vh;padding:28px 16px;border-right:1px solid #eadfd2;background:#fffdf9;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;overflow:hidden}
     .shop-admin .admin-logo{font-family:Georgia,serif;font-size:27px;font-weight:700;line-height:1.05}.shop-admin .admin-caption{margin:6px 8px 32px;color:#75845d;font-size:13px;letter-spacing:.06em}
-    .shop-admin .admin-nav-label{margin:0 8px 10px;color:#877d70;font-size:11px;font-weight:800;letter-spacing:.12em}.shop-admin .admin-nav{display:grid;gap:6px}
+    .shop-admin .admin-nav-label{margin:0 8px 10px;color:#877d70;font-size:11px;font-weight:800;letter-spacing:.12em}.shop-admin .admin-nav{display:grid;gap:6px;flex:1;min-height:0;overflow-y:auto;align-content:start;padding:0 4px 8px 0}
     .shop-admin .admin-nav button{appearance:none;width:100%;border:0;border-radius:14px;background:transparent;padding:13px 14px;color:#504a42;font:600 15px/1.2 inherit;text-align:left;cursor:pointer}.shop-admin .admin-nav button:hover{background:#f5ede2}.shop-admin .admin-nav button.active{background:#263125;color:#fff;box-shadow:0 10px 24px rgba(47,63,36,.16)}
     .shop-admin .admin-nav .nav-icon{display:inline-block;width:27px;color:#fa7439;font-size:18px;text-align:center;margin-right:5px}.shop-admin .admin-nav button.active .nav-icon{color:#ffe4d8}
-    .shop-admin .admin-side-bottom{margin:28px 8px 0;border-top:1px solid #eadfd2;padding:18px 0 0;color:#6b645b;font-size:13px}.shop-admin .admin-side-bottom a{color:#4d633d;text-decoration:none;font-weight:700}
+    .shop-admin .admin-side-bottom{margin:16px 8px 0;border-top:1px solid #eadfd2;padding:18px 0 0;color:#6b645b;font-size:13px;flex:0 0 auto}.shop-admin .admin-side-bottom a{color:#4d633d;text-decoration:none;font-weight:700}
     .shop-admin .admin-main{width:100%;max-width:1500px;margin:0 auto;padding:42px 54px 80px}.shop-admin .admin-top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;border-bottom:1px solid #eadfd2;padding-bottom:26px;margin-bottom:28px}.shop-admin .admin-eyebrow{font-size:12px;font-weight:800;letter-spacing:.12em;color:#ef7138;text-transform:uppercase;margin-bottom:9px}.shop-admin .admin-title{font:700 40px/1.05 Georgia,serif;margin:0;letter-spacing:-.02em}.shop-admin .admin-subtitle{color:#6e6b63;margin:9px 0 0;font-size:16px}.shop-admin .open-shop{border:1px solid #e8d9ca;background:#fff;border-radius:13px;padding:12px 16px;color:#33492c;font:700 14px inherit;white-space:nowrap;cursor:pointer}
     .shop-admin .stat-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:22px}.shop-admin .stat{border:1px solid #eadfd2;border-radius:18px;padding:19px 20px;background:#fff;min-height:120px}.shop-admin .stat:nth-child(1){background:#f0f7e8;border-color:#d7e8c8}.shop-admin .stat:nth-child(2){background:#fff1e7;border-color:#f2d7c4}.shop-admin .stat:nth-child(3){background:#f3efff;border-color:#dfd6ff}.shop-admin .stat-label{display:flex;gap:8px;align-items:center;color:#69675f;font-weight:700;font-size:14px}.shop-admin .stat-icon{font-size:19px}.shop-admin .stat-value{font:700 30px/1 Georgia,serif;margin-top:18px}.shop-admin .stat-help{font-size:13px;color:#756e64;margin-top:7px}
     .shop-admin .dashboard-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(280px,.75fr);gap:20px}.shop-admin .dashboard-card{border:1px solid #eadfd2;border-radius:18px;background:#fff;overflow:hidden}.shop-admin .dashboard-card-head{display:flex;justify-content:space-between;align-items:center;padding:19px 20px;border-bottom:1px solid #eee3d8}.shop-admin .dashboard-card-head h2{font:700 19px/1.1 Georgia,serif;margin:0}.shop-admin .dashboard-card-head span{color:#756e64;font-size:13px}.shop-admin .queue-row{padding:16px 20px;border-bottom:1px solid #f0e7de;cursor:pointer}.shop-admin .queue-row:last-child{border-bottom:0}.shop-admin .queue-row:hover{background:#fffaf6}.shop-admin .queue-top{display:flex;justify-content:space-between;gap:14px;align-items:center}.shop-admin .queue-number{font-family:ui-monospace,monospace;font-size:14px;font-weight:800}.shop-admin .queue-name{color:#6d665d;font-size:14px;margin-top:6px}.shop-admin .queue-amount{font-weight:800}.shop-admin .queue-status{font-size:12px;font-weight:800;padding:6px 9px;border-radius:99px;background:#f5efe7;color:#756950;white-space:nowrap}.shop-admin .dashboard-empty{padding:30px 20px;color:#756e64;text-align:center}.shop-admin .action-list{padding:8px 20px 12px}.shop-admin .action{display:flex;gap:12px;padding:17px 0;border-bottom:1px solid #f0e7de}.shop-admin .action:last-child{border:0}.shop-admin .action-icon{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:#fff0e7;color:#ef7138}.shop-admin .action strong{font-size:14px}.shop-admin .action p{font-size:13px;color:#756e64;line-height:1.4;margin:4px 0 0}
     .shop-admin .tab-page-title{font:700 32px/1.1 Georgia,serif;margin:0 0 8px}.shop-admin .tab-page-subtitle{margin:0 0 24px;color:#6e6b63}.shop-admin .admin-content .tabs{margin-bottom:22px}.shop-admin .admin-content .screen{max-width:none}.shop-admin .admin-content .order-card{box-shadow:none}
-    @media(max-width:800px){.shop-admin{display:block}.shop-admin .admin-side{position:static;width:auto;height:auto;min-height:0;padding:20px 16px;border-right:0;border-bottom:1px solid #eadfd2}.shop-admin .admin-caption{margin-bottom:16px}.shop-admin .admin-nav{grid-template-columns:repeat(5,minmax(max-content,1fr));overflow-x:auto;gap:7px;padding-bottom:2px}.shop-admin .admin-nav-label,.shop-admin .admin-side-bottom{display:none}.shop-admin .admin-nav button{padding:10px 11px;font-size:13px;text-align:center;white-space:nowrap}.shop-admin .admin-nav .nav-icon{display:none}.shop-admin .admin-main{padding:28px 16px 70px}.shop-admin .admin-top{margin-bottom:22px}.shop-admin .admin-title{font-size:32px}.shop-admin .open-shop{padding:10px;font-size:12px}.shop-admin .stat-grid,.shop-admin .dashboard-grid{grid-template-columns:1fr}.shop-admin .stat-grid{gap:10px}.shop-admin .stat{min-height:95px;padding:16px}.shop-admin .stat-value{font-size:26px;margin-top:12px}}
+    @media(max-width:800px){.shop-admin{display:block}.shop-admin .admin-side{position:static;width:auto;height:auto;min-height:0;padding:20px 16px;border-right:0;border-bottom:1px solid #eadfd2;display:block;overflow:visible}.shop-admin .admin-caption{margin-bottom:16px}.shop-admin .admin-nav{grid-template-columns:repeat(5,minmax(max-content,1fr));overflow-x:auto;overflow-y:visible;gap:7px;padding-bottom:2px}.shop-admin .admin-nav-label,.shop-admin .admin-side-bottom{display:none}.shop-admin .admin-nav button{padding:10px 11px;font-size:13px;text-align:center;white-space:nowrap}.shop-admin .admin-nav .nav-icon{display:none}.shop-admin .admin-main{padding:28px 16px 70px}.shop-admin .admin-top{margin-bottom:22px}.shop-admin .admin-title{font-size:32px}.shop-admin .open-shop{padding:10px;font-size:12px}.shop-admin .stat-grid,.shop-admin .dashboard-grid{grid-template-columns:1fr}.shop-admin .stat-grid{gap:10px}.shop-admin .stat{min-height:95px;padding:16px}.shop-admin .stat-value{font-size:26px;margin-top:12px}}
   </style>`;
 }
 
@@ -727,6 +827,7 @@ function renderMenuTab() {
       ${astate.productGroups.map((group, index) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 78px auto auto;gap:9px;align-items:center;margin:9px 0;"><input value="${escapeHtml(group.name || "")}" placeholder="e.g. Special" oninput="onGroupField(${index},'name',this.value)"><input type="number" value="${Number(group.sort_order || 0)}" title="Display order" oninput="onGroupField(${index},'sort_order',this.value)"><label style="font-size:12px;white-space:nowrap;"><input type="checkbox" style="width:auto;" ${group.is_visible ? "checked" : ""} onchange="onGroupField(${index},'is_visible',this.checked)"> Show</label><button class="link-danger" style="font-size:12px;" onclick="deleteProductGroup(${index})">Delete</button></div>`).join("")}
       <div class="btn-row" style="margin-top:14px;"><button class="btn-secondary" onclick="addProductGroup()">+ Add group</button><button class="btn-primary" onclick="saveProductGroups()">Save groups</button></div>
     </section>
+    ${renderDrinkOptionsManager()}
     ${astate.menu.map((item) => `
       <div class="order-card">
         <div class="order-top">
@@ -908,16 +1009,21 @@ function renderSettingsTab() {
     ${field("Saturday collection time", "saturday_collection_time", "10:00 AM - 12:00 PM")}
     ${field("Sunday collection time", "sunday_collection_time", "10:00 AM - 1:00 PM")}
     <button class="btn-primary" id="settings-save-btn" style="width:100%;margin-top:8px;" onclick="saveSettings()">Save settings</button>
-    <div class="divider"></div>
-    <div class="display" style="font-size:20px;margin:4px 0 8px;">Order email alerts</div>
-    <div class="hint" style="text-align:left;margin:0 0 12px;">After the one-time Google setup, alerts will be sent to this Gmail when a customer orders or submits payment proof.</div>
-    <div class="field"><label>Receive alerts at</label><input type="email" value="${escapeHtml(astate.notificationDraft?.recipient_email || "")}" placeholder="tinghuioh29@gmail.com" oninput="onNotificationField('recipient_email', this.value)"></div>
-    <div class="field"><label>Google Apps Script web app URL</label><input value="${escapeHtml(astate.notificationDraft?.webhook_url || "")}" placeholder="Paste the web app URL after you deploy it" oninput="onNotificationField('webhook_url', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">This link is stored privately for the admin only.</div></div>
-    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${astate.notificationDraft?.enabled ? "checked" : ""} onchange="onNotificationField('enabled', this.checked)"><span><b>Turn on order email alerts</b></span></label>
-    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${astate.notificationDraft?.alert_new_order !== false ? "checked" : ""} onchange="onNotificationField('alert_new_order', this.checked)"><span>Notify me when a new order is placed</span></label>
-    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${astate.notificationDraft?.alert_payment_proof !== false ? "checked" : ""} onchange="onNotificationField('alert_payment_proof', this.checked)"><span>Notify me when payment proof is uploaded</span></label>
-    <button class="btn-primary" id="notification-save-btn" style="width:100%;margin-top:0;" onclick="saveNotificationSettings()">Save notification settings</button>
   `;
+}
+
+function renderNotificationsTab() {
+  const n = astate.notificationDraft || { recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true };
+  return `<section class="dashboard-card" style="padding:22px;max-width:860px;">
+    <div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Order email alerts</h2><span>${n.enabled ? "On" : "Off"}</span></div>
+    <p class="hint" style="text-align:left;margin:0 0 16px;">Choose where you want new-order alerts sent. This is kept separate from your store details so it is easier to find.</p>
+    <div class="field"><label>Receive alerts at</label><input type="email" value="${escapeHtml(n.recipient_email || "")}" placeholder="tinghuioh29@gmail.com" oninput="onNotificationField('recipient_email', this.value)"></div>
+    <div class="field"><label>Google Apps Script web app URL</label><input value="${escapeHtml(n.webhook_url || "")}" placeholder="Paste the web app URL after you deploy it" oninput="onNotificationField('webhook_url', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">This private link sends the alert to your Gmail. Leave alerts off until your Google setup is complete.</div></div>
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.enabled ? "checked" : ""} onchange="onNotificationField('enabled', this.checked)"><span><b>Turn on order email alerts</b></span></label>
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.alert_new_order !== false ? "checked" : ""} onchange="onNotificationField('alert_new_order', this.checked)"><span>Notify me when a new order is placed</span></label>
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.alert_payment_proof !== false ? "checked" : ""} onchange="onNotificationField('alert_payment_proof', this.checked)"><span>Notify me when payment proof is uploaded</span></label>
+    <button class="btn-primary" id="notification-save-btn" style="width:100%;margin-top:0;" onclick="saveNotificationSettings()">Save notification settings</button>
+  </section>`;
 }
 
 function renderFaqTab() {
@@ -1009,14 +1115,15 @@ function render() {
     ["customers", "◉", "Customers"],
     ["availability", "◷", "Availability"],
     ["faq", "?", "FAQ"],
+    ["notifications", "🔔", "Notifications"],
     ["settings", "⚙", "Store settings"],
   ];
-  const tabTitle = { orders: "Orders", menu: "Products", promos: "Promos", rewards: "Rewards", customers: "Customers", availability: "Availability", faq: "FAQ", settings: "Store settings" };
-  const tabSubtitle = { orders: "Review payments and manage every customer order.", menu: "Keep your drinks, prices and availability up to date.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", settings: "Manage your store details, images, contact information and payment details." };
+  const tabTitle = { orders: "Orders", menu: "Products", promos: "Promos", rewards: "Rewards", customers: "Customers", availability: "Availability", faq: "FAQ", notifications: "Notifications", settings: "Store settings" };
+  const tabSubtitle = { orders: "Review payments and manage every customer order.", menu: "Keep your drinks, prices and availability up to date.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose where you receive new-order alerts.", settings: "Manage your store details, images, contact information and payment details." };
   const page = astate.tab === "dashboard" ? renderDashboardTab() : `
     <div class="admin-top"><div><div class="admin-eyebrow">Shizuku Lab admin</div><h1 class="tab-page-title">${tabTitle[astate.tab] || "Dashboard"}</h1><p class="tab-page-subtitle">${tabSubtitle[astate.tab] || ""}</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
     <div class="admin-content">
-      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : renderSettingsTab()}
+      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : renderSettingsTab()}
     </div>`;
   app.innerHTML = `
     ${dashboardStyles()}
