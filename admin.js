@@ -236,7 +236,7 @@ async function cancelOrder(id) {
 /* ---- menu (products) CRUD — unchanged from before ---- */
 function newMenuItem() {
   const firstGroup = astate.productGroups[0];
-  astate.editing = { id: null, group_id: firstGroup?.id || null, category: firstGroup?.name || "Signature", name: "", description: "", price: 0, image_url: "", is_available: true, is_bundle: false, bundle_product_ids: [], stock: 0 };
+  astate.editing = { id: null, group_id: firstGroup?.id || null, category: firstGroup?.name || "Signature", name: "", description: "", price: 0, discount_price: null, image_url: "", is_available: true, is_bundle: false, bundle_product_ids: [], stock: 0 };
   render();
 }
 function editMenuItem(id) {
@@ -245,7 +245,8 @@ function editMenuItem(id) {
 }
 function cancelEdit() { astate.editing = null; render(); }
 function onEditField(key, value) {
-  if (key === "price" || key === "stock") astate.editing[key] = parseFloat(value) || 0;
+  if (key === "discount_price") astate.editing[key] = value === "" ? null : (parseFloat(value) || 0);
+  else if (key === "price" || key === "stock") astate.editing[key] = parseFloat(value) || 0;
   else astate.editing[key] = value;
 }
 function onEditGroup(value) {
@@ -305,6 +306,19 @@ async function deleteMenuItem(id) {
 
 function addProductGroup() { astate.productGroups = [...astate.productGroups, { id: null, name: "", sort_order: astate.productGroups.length, is_visible: true }]; render(); }
 function onGroupField(index, key, value) { astate.productGroups[index][key] = key === "sort_order" ? Number(value || 0) : value; }
+async function deleteProductGroup(index) {
+  const group = astate.productGroups[index];
+  if (!group) return;
+  const groupHasProducts = astate.menu.some((product) => String(product.group_id) === String(group.id));
+  if (groupHasProducts) { alert("Move or delete the products in this group before deleting the group."); return; }
+  if (!confirm(`Delete the product group “${group.name || "Untitled"}”?`)) return;
+  if (group.id && IS_CONFIGURED) {
+    const { error } = await db.from("product_groups").delete().eq("id", group.id);
+    if (error) { alert("Could not delete group: " + error.message); return; }
+  }
+  astate.productGroups.splice(index, 1);
+  render();
+}
 async function saveProductGroups() {
   const rows = astate.productGroups.filter((group) => String(group.name || "").trim());
   for (let index = 0; index < rows.length; index++) {
@@ -327,14 +341,23 @@ function updateStorefrontPreview() {
   const banner = document.getElementById("banner-live-preview");
   const circleValue = document.getElementById("logo-circle-value");
   const imageValue = document.getElementById("logo-image-value");
-  const bannerValue = document.getElementById("banner-position-value");
+  const logoXValue = document.getElementById("logo-x-value");
+  const logoYValue = document.getElementById("logo-y-value");
+  const bannerXValue = document.getElementById("banner-x-value");
+  const bannerYValue = document.getElementById("banner-y-value");
   const heightValue = document.getElementById("banner-height-value");
   if (circle && astate.settingsDraft) circle.style.width = circle.style.height = `${Number(astate.settingsDraft.logo_circle_size || 68)}px`;
-  if (logo && astate.settingsDraft) logo.style.transform = `scale(${Number(astate.settingsDraft.logo_image_scale || 1)})`;
-  if (banner && astate.settingsDraft) banner.style.objectPosition = `center ${Number(astate.settingsDraft.hero_image_position ?? 68)}%`;
+  const s = astate.settingsDraft || {};
+  const logoX = Number(s.logo_image_x || 0), logoY = Number(s.logo_image_y || 0);
+  const bannerX = Number(s.hero_image_x ?? 50), bannerY = Number(s.hero_image_y ?? s.hero_image_position ?? 68);
+  if (logo) logo.style.transform = `translate(${logoX}%, ${logoY}%) scale(${Number(s.logo_image_scale || 1)})`;
+  if (banner) banner.style.objectPosition = `${bannerX}% ${bannerY}%`;
   if (circleValue) circleValue.textContent = `${Number(astate.settingsDraft.logo_circle_size || 68)} px`;
   if (imageValue) imageValue.textContent = `${Number(astate.settingsDraft.logo_image_scale || 1).toFixed(2)}×`;
-  if (bannerValue) bannerValue.textContent = `${Number(astate.settingsDraft.hero_image_position ?? 68)}%`;
+  if (logoXValue) logoXValue.textContent = `${logoX > 0 ? "+" : ""}${logoX}%`;
+  if (logoYValue) logoYValue.textContent = `${logoY > 0 ? "+" : ""}${logoY}%`;
+  if (bannerXValue) bannerXValue.textContent = `${bannerX}%`;
+  if (bannerYValue) bannerYValue.textContent = `${bannerY}%`;
   if (heightValue) heightValue.textContent = `${Number(astate.settingsDraft.hero_banner_height || 190)} px`;
 }
 
@@ -701,7 +724,7 @@ function renderOrders() {
 function renderMenuTab() {
   return `
     <section class="dashboard-card" style="padding:20px;margin-bottom:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Product groups</h2><span>These become the big headings on the ordering page</span></div>
-      ${astate.productGroups.map((group, index) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 78px auto;gap:9px;align-items:center;margin:9px 0;"><input value="${escapeHtml(group.name || "")}" placeholder="e.g. Special" oninput="onGroupField(${index},'name',this.value)"><input type="number" value="${Number(group.sort_order || 0)}" title="Display order" oninput="onGroupField(${index},'sort_order',this.value)"><label style="font-size:12px;white-space:nowrap;"><input type="checkbox" style="width:auto;" ${group.is_visible ? "checked" : ""} onchange="onGroupField(${index},'is_visible',this.checked)"> Show</label></div>`).join("")}
+      ${astate.productGroups.map((group, index) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 78px auto auto;gap:9px;align-items:center;margin:9px 0;"><input value="${escapeHtml(group.name || "")}" placeholder="e.g. Special" oninput="onGroupField(${index},'name',this.value)"><input type="number" value="${Number(group.sort_order || 0)}" title="Display order" oninput="onGroupField(${index},'sort_order',this.value)"><label style="font-size:12px;white-space:nowrap;"><input type="checkbox" style="width:auto;" ${group.is_visible ? "checked" : ""} onchange="onGroupField(${index},'is_visible',this.checked)"> Show</label><button class="link-danger" style="font-size:12px;" onclick="deleteProductGroup(${index})">Delete</button></div>`).join("")}
       <div class="btn-row" style="margin-top:14px;"><button class="btn-secondary" onclick="addProductGroup()">+ Add group</button><button class="btn-primary" onclick="saveProductGroups()">Save groups</button></div>
     </section>
     ${astate.menu.map((item) => `
@@ -709,7 +732,7 @@ function renderMenuTab() {
         <div class="order-top">
           <div>
             <div style="font-size:14px;font-weight:600;">${item.name}</div>
-            <div class="order-meta">${item.category || "Other"} · ${item.is_bundle ? "Bundle · " : ""}${item.is_available ? "Visible" : "Hidden"} · ${money(item.price)}</div>
+            <div class="order-meta">${item.category || "Other"} · ${item.is_bundle ? "Bundle · " : ""}${item.is_available ? "Visible" : "Hidden"} · ${Number(item.discount_price) > 0 && Number(item.discount_price) < Number(item.price) ? `${money(item.discount_price)} (was ${money(item.price)})` : money(item.price)}</div>
           </div>
           <div style="display:flex;gap:10px;">
             <button class="link-btn" onclick="editMenuItem('${item.id}')">Edit</button>
@@ -857,11 +880,14 @@ function renderSettingsTab() {
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Storefront images</div>
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 16px;"><div style="border:1px solid #E1D9C8;border-radius:13px;padding:12px;background:#fff;"><b style="display:block;margin-bottom:4px;">Logo frame · 1 : 1</b><span class="hint" style="margin:0;text-align:left;">Best upload: square, at least 1000 × 1000 px.</span></div><div style="border:1px solid #E1D9C8;border-radius:13px;padding:12px;background:#fff;"><b style="display:block;margin-bottom:4px;">Banner frame · 2 : 1</b><span class="hint" style="margin:0;text-align:left;">Best upload: landscape, at least 1600 × 800 px.</span></div></div>
-    <div class="field"><label>Logo</label><input value="${escapeHtml(s.logo_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('logo_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'logo_url')">${s.logo_url ? `<div id="logo-live-preview" style="width:${Number(s.logo_circle_size || 68)}px;height:${Number(s.logo_circle_size || 68)}px;border:1px solid #E1D9C8;border-radius:50%;overflow:hidden;margin-top:10px;background:#fff;display:grid;place-items:center;"><img id="logo-live-preview-image" src="${escapeHtml(s.logo_url)}" alt="Logo preview" style="width:100%;height:100%;object-fit:contain;transform:scale(${Number(s.logo_image_scale || 1)});"></div>` : ""}</div>
+    <div class="field"><label>Logo</label><input value="${escapeHtml(s.logo_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('logo_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'logo_url')">${s.logo_url ? `<div id="logo-live-preview" style="width:${Number(s.logo_circle_size || 68)}px;height:${Number(s.logo_circle_size || 68)}px;border:1px solid #E1D9C8;border-radius:50%;overflow:hidden;margin-top:10px;background:#fff;display:grid;place-items:center;"><img id="logo-live-preview-image" src="${escapeHtml(s.logo_url)}" alt="Logo preview" style="width:100%;height:100%;object-fit:contain;transform:translate(${Number(s.logo_image_x || 0)}%,${Number(s.logo_image_y || 0)}%) scale(${Number(s.logo_image_scale || 1)});"></div>` : ""}</div>
     <div class="field"><label>Logo circle size <span id="logo-circle-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.logo_circle_size || 68)} px</span></label><input type="range" min="56" max="150" step="1" value="${Number(s.logo_circle_size || 68)}" oninput="onSettingsField('logo_circle_size',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">The preview changes while you drag. Press Save settings to publish it to your customer page.</div></div>
     <div class="field"><label>Logo image size <span id="logo-image-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.logo_image_scale || 1).toFixed(2)}×</span></label><input type="range" min="0.55" max="2" step="0.05" value="${Number(s.logo_image_scale || 1)}" oninput="onSettingsField('logo_image_scale',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">Zoom the logo inside the circle without changing the circle itself.</div></div>
-    <div class="field"><label>Top banner image</label><input value="${escapeHtml(s.hero_image_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('hero_image_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'hero_image_url')">${s.hero_image_url ? `<img id="banner-live-preview" src="${escapeHtml(s.hero_image_url)}" alt="Banner preview" style="display:block;width:100%;aspect-ratio:2/1;object-fit:cover;object-position:center ${Number(s.hero_image_position ?? 68)}%;border:1px solid #E1D9C8;border-radius:12px;margin-top:10px;">` : ""}</div>
-    <div class="field"><label>Banner crop position <span id="banner-position-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.hero_image_position ?? 68)}%</span></label><input type="range" min="0" max="100" step="1" value="${Number(s.hero_image_position ?? 68)}" oninput="onSettingsField('hero_image_position',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">This is your crop control: move it until the matcha and hojicha layers show nicely in the preview.</div></div>
+    <div class="field"><label>Move logo left / right <span id="logo-x-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.logo_image_x || 0) > 0 ? "+" : ""}${Number(s.logo_image_x || 0)}%</span></label><input type="range" min="-45" max="45" step="1" value="${Number(s.logo_image_x || 0)}" oninput="onSettingsField('logo_image_x',Number(this.value));updateStorefrontPreview()"></div>
+    <div class="field"><label>Move logo up / down <span id="logo-y-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.logo_image_y || 0) > 0 ? "+" : ""}${Number(s.logo_image_y || 0)}%</span></label><input type="range" min="-45" max="45" step="1" value="${Number(s.logo_image_y || 0)}" oninput="onSettingsField('logo_image_y',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">Move the artwork inside the circle without moving the circle itself.</div></div>
+    <div class="field"><label>Top banner image</label><input value="${escapeHtml(s.hero_image_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('hero_image_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'hero_image_url')">${s.hero_image_url ? `<img id="banner-live-preview" src="${escapeHtml(s.hero_image_url)}" alt="Banner preview" style="display:block;width:100%;aspect-ratio:2/1;object-fit:cover;object-position:${Number(s.hero_image_x ?? 50)}% ${Number(s.hero_image_y ?? s.hero_image_position ?? 68)}%;border:1px solid #E1D9C8;border-radius:12px;margin-top:10px;">` : ""}</div>
+    <div class="field"><label>Banner left / right crop <span id="banner-x-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.hero_image_x ?? 50)}%</span></label><input type="range" min="0" max="100" step="1" value="${Number(s.hero_image_x ?? 50)}" oninput="onSettingsField('hero_image_x',Number(this.value));updateStorefrontPreview()"></div>
+    <div class="field"><label>Banner up / down crop <span id="banner-y-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.hero_image_y ?? s.hero_image_position ?? 68)}%</span></label><input type="range" min="0" max="100" step="1" value="${Number(s.hero_image_y ?? s.hero_image_position ?? 68)}" oninput="onSettingsField('hero_image_y',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">Adjust until the drink layers sit where you want them in the banner.</div></div>
     <div class="field"><label>Banner height <span id="banner-height-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.hero_banner_height || 190)} px</span></label><input type="range" min="130" max="320" step="5" value="${Number(s.hero_banner_height || 190)}" oninput="onSettingsField('hero_banner_height',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">Make the banner taller or shorter.</div></div>
     <div class="field"><label>Store introduction</label><textarea rows="4" placeholder="A short introduction customers see below your collection address." oninput="onSettingsField('store_description', this.value)">${escapeHtml(s.store_description || "")}</textarea><div class="hint" style="text-align:left;margin-top:5px;">Shown on the customer ordering page.</div></div>
     ${field("Top rolling message", "ticker_text", "e.g. PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB")}
@@ -951,7 +977,8 @@ function renderEditOverlay() {
       <div class="field"><label>Name</label><input value="${item.name}" oninput="onEditField('name', this.value)"></div>
       <div class="field"><label>Product group</label><select onchange="onEditGroup(this.value)"><option value="">Other</option>${astate.productGroups.map((group) => `<option value="${group.id}" ${String(item.group_id) === String(group.id) ? "selected" : ""}>${escapeHtml(group.name)}</option>`).join("")}</select><div class="hint" style="text-align:left;margin-top:5px;">Shown as a large group heading on the ordering page.</div></div>
       <div class="field"><label>Description</label><textarea rows="2" oninput="onEditField('description', this.value)">${item.description || ""}</textarea></div>
-      <div class="field"><label>Price (SGD)</label><input type="number" step="0.1" value="${item.price}" oninput="onEditField('price', this.value)"></div>
+      <div class="field"><label>Original price (SGD)</label><input type="number" min="0" step="0.01" value="${item.price}" oninput="onEditField('price', this.value)"></div>
+      <div class="field"><label>Discount price (SGD, optional)</label><input type="number" min="0" step="0.01" value="${item.discount_price ?? ""}" placeholder="Leave blank if there is no sale" oninput="onEditField('discount_price', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">Customers will see the original price crossed out and the discount price in green.</div></div>
       <div class="field"><label>Product image</label><input value="${item.image_url || ""}" placeholder="Upload below or paste image URL" oninput="onEditField('image_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'products')">${item.image_url ? `<img src="${escapeHtml(item.image_url)}" alt="Product preview" style="display:block;width:100%;height:150px;object-fit:cover;border:1px solid #E1D9C8;border-radius:12px;margin-top:8px;">` : ""}</div>
       <div class="field"><label>Stock</label><input type="number" value="${item.stock || 0}" oninput="onEditField('stock', this.value)"></div>
       <div class="field" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="bundle-check" ${item.is_bundle ? "checked" : ""} onchange="onEditField('is_bundle', this.checked);render()" style="width:auto;"><label style="margin:0;" for="bundle-check">This is a Bundle of Two</label></div>

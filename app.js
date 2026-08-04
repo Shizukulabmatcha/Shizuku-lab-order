@@ -64,6 +64,16 @@ let paymentCountdownTimer = null;
 
 /* ---------- helpers ---------- */
 function money(n) { return `$${Number(n || 0).toFixed(2)}`; }
+function originalPrice(item) { return Number(item?.price || 0); }
+function salePrice(item) {
+  const original = originalPrice(item);
+  const discount = Number(item?.discount_price);
+  return Number.isFinite(discount) && discount > 0 && discount < original ? discount : original;
+}
+function hasDiscount(item) { return salePrice(item) < originalPrice(item); }
+function productPriceMarkup(item, className = "item-price") {
+  return `<div class="${className}">${hasDiscount(item) ? `<span class="original-price">${money(originalPrice(item))}</span> ` : ""}<span class="discount-price">${money(salePrice(item))}</span></div>`;
+}
 function escapeHtml(value) {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
@@ -178,17 +188,38 @@ function formatPickupTime(minutes) {
   const hour12 = hour24 % 12 || 12;
   return `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
 }
+function pickupMinutesFromToken(token, otherToken) {
+  const text = String(token || "").trim();
+  const amPm = text.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
+  if (amPm) {
+    let hour = Number(amPm[1]);
+    if (amPm[3].toUpperCase() === "PM" && hour !== 12) hour += 12;
+    if (amPm[3].toUpperCase() === "AM" && hour === 12) hour = 0;
+    return hour * 60 + Number(amPm[2] || 0);
+  }
+  const plain = text.match(/^(\d{1,2})(?::(\d{2}))?$/);
+  if (!plain) return null;
+  let hour = Number(plain[1]);
+  const minute = Number(plain[2] || 0);
+  if (hour > 23 || minute > 59) return null;
+  if (hour >= 13) return hour * 60 + minute;
+  // Friendly shorthand in Admin: "10-12" means 10 AM–12 PM,
+  // while "4-6" means 4 PM–6 PM. Full AM/PM always works too.
+  const otherHasMeridiem = /\b(AM|PM)\b/i.test(String(otherToken || ""));
+  if (!otherHasMeridiem && hour >= 1 && hour <= 6) hour += 12;
+  return hour * 60 + minute;
+}
 function timesFromRange(rangeText) {
   return String(rangeText || "").split("|").map((range) => {
-  const times = String(range || "").split(/\s*[–-]\s*/);
-  const start = minutesFromTime(times[0]);
-  const end = minutesFromTime(times[1]);
-  const interval = Math.max(5, Math.min(120, Number(state.store.pickup_slot_interval_minutes || 30)));
-  if (start == null) return [];
-  if (end == null || end < start) return [formatPickupTime(start)];
-  const values = [];
-  for (let minute = start; minute <= end; minute += interval) values.push(formatPickupTime(minute));
-  return values;
+    const times = String(range || "").split(/\s*[–-]\s*/);
+    const start = pickupMinutesFromToken(times[0], times[1]);
+    const end = pickupMinutesFromToken(times[1], times[0]);
+    const interval = Math.max(5, Math.min(120, Number(state.store.pickup_slot_interval_minutes || 30)));
+    if (start == null) return [];
+    if (end == null || end < start) return [formatPickupTime(start)];
+    const values = [];
+    for (let minute = start; minute <= end; minute += interval) values.push(formatPickupTime(minute));
+    return values;
   }).flat();
 }
 
@@ -228,6 +259,7 @@ async function loadProducts() {
     name: item.name || "Untitled",
     description: item.description || "",
     price: Number(item.price || 0),
+    discount_price: item.discount_price == null ? null : Number(item.discount_price),
     stock: item.stock == null ? null : Number(item.stock),
   }));
 }
@@ -306,7 +338,7 @@ function getSelectedOptionsForProduct(productId) {
   return Object.values(state.selectedOptions).filter((selected) => String(selected.productId) === String(productId));
 }
 function calculateProductPrice(product) {
-  let price = Number(product.price || 0);
+  let price = salePrice(product);
   getSelectedOptionsForProduct(product.id).forEach((selected) => { price += Number(selected.price || 0); });
   return price;
 }
@@ -339,7 +371,7 @@ function addConfiguredProductToCart() {
   }
   state.cart[key] = {
     productId: product.id, productName: product.name, imageUrl: product.image_url || "",
-    unitPrice, basePrice: Number(product.price || 0), qty: (state.cart[key]?.qty || 0) + 1, options: selectedOptions,
+    unitPrice, basePrice: salePrice(product), qty: (state.cart[key]?.qty || 0) + 1, options: selectedOptions,
   };
   state.selectedProduct = null;
   state.selectedOptions = {};
@@ -385,7 +417,7 @@ function addBundleToCart() {
   if (!validateBundleDrink(drink2, state.bundle.drink2Options)) { alert("Please complete the options for Drink 2."); return; }
   const drink1Options = Object.values(state.bundle.drink1Options);
   const drink2Options = Object.values(state.bundle.drink2Options);
-  const unitPrice = Number(bundle.price || 10.50); // bundle stays at its listed price
+  const unitPrice = salePrice(bundle); // bundle stays at its listed price, including any active sale
   const bundleOptions = [
     { drinkNumber: 1, productId: drink1.id, productName: drink1.name, options: drink1Options },
     { drinkNumber: 2, productId: drink2.id, productName: drink2.name, options: drink2Options },
@@ -650,15 +682,18 @@ function storeInfoPanel() {
   const bannerImage = state.store.hero_image_url || state.menu.find((item) => item.image_url)?.image_url || "matcha-latte.jpg";
   const logoUrl = state.store.logo_url || "logo.png";
   const logoCircleSize = Math.max(56, Math.min(150, Number(state.store.logo_circle_size || 68)));
-  const logoImageScale = Math.max(0.55, Math.min(2, Number(state.store.logo_image_scale || 1)));
-  const bannerPosition = Math.max(0, Math.min(100, Number(state.store.hero_image_position ?? 68)));
+  const logoImageScale = Math.max(0.55, Math.min(2.4, Number(state.store.logo_image_scale || 1)));
+  const logoImageX = Math.max(-45, Math.min(45, Number(state.store.logo_image_x || 0)));
+  const logoImageY = Math.max(-45, Math.min(45, Number(state.store.logo_image_y || 0)));
+  const bannerX = Math.max(0, Math.min(100, Number(state.store.hero_image_x ?? 50)));
+  const bannerY = Math.max(0, Math.min(100, Number(state.store.hero_image_y ?? state.store.hero_image_position ?? 68)));
   const bannerHeight = Math.max(130, Math.min(320, Number(state.store.hero_banner_height || 190)));
   const tickerText = escapeHtml(state.store.ticker_text || "PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB");
   const storeDescription = escapeHtml(state.store.store_description || "Little cups, big comfort. Freshly whisked matcha made with care — one cup at a time.");
   return `
     ${state.store.show_ticker === false ? "" : `<div class="promo-ticker"><div class="promo-ticker-track"><span>${tickerText}</span><span>${tickerText}</span><span>${tickerText}</span></div></div>`}
     <div class="store-panel">
-      <div class="store-banner" style="--banner-height:${bannerHeight}px;background-position:center ${bannerPosition}%;background-image:linear-gradient(90deg,rgba(52,69,39,.14),rgba(52,69,39,.05)),url('${escapeHtml(bannerImage)}');"><span class="store-logo-overlap" style="--logo-circle-size:${logoCircleSize}px;"><img src="${escapeHtml(logoUrl)}" style="transform:scale(${logoImageScale});" alt="${escapeHtml(state.store.store_name)} logo"></span></div>
+      <div class="store-banner" style="--banner-height:${bannerHeight}px;background-position:${bannerX}% ${bannerY}%;background-image:linear-gradient(90deg,rgba(52,69,39,.14),rgba(52,69,39,.05)),url('${escapeHtml(bannerImage)}');"><span class="store-logo-overlap" style="--logo-circle-size:${logoCircleSize}px;"><img src="${escapeHtml(logoUrl)}" style="transform:translate(${logoImageX}%,${logoImageY}%) scale(${logoImageScale});" alt="${escapeHtml(state.store.store_name)} logo"></span></div>
       <div class="store-panel-body" style="padding-top:${Math.round(logoCircleSize / 2 + 12)}px;">
         <a class="store-insta" href="https://instagram.com/${encodeURIComponent(igHandle)}" target="_blank" rel="noopener">@${escapeHtml(igHandle)}</a>${whatsappLink}
         <div class="store-dropoff">${escapeHtml(state.store.collection_address || "")}</div>
@@ -709,13 +744,13 @@ function renderMenuCard(item) {
       <div style="padding:11px 11px 12px;display:flex;flex:1;flex-direction:column;">
         <button type="button" style="font:600 13px/1.25 'Work Sans',sans-serif;cursor:pointer;border:0;background:none;padding:0;text-align:left;color:var(--ink);" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} <span style="color:var(--ink);">→</span></button>
         <div style="font-size:10.5px;color:var(--ink);line-height:1.4;margin:5px 0 10px;">${escapeHtml(item.description)}</div>
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:7px;margin-top:auto;"><span style="font-size:12.5px;color:var(--matcha);font-weight:600;">${money(item.price)}</span>${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : `<button class="add-btn" style="padding:6px 10px;font-size:11px;" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:7px;margin-top:auto;">${productPriceMarkup(item, "item-price gallery-price")}${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : `<button class="add-btn" style="padding:6px 10px;font-size:11px;" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}</div>
       </div>
     </div>`;
   return `
     <div class="item-card">
       <img class="item-thumb" src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(item.name)}">
-      <div class="item-info"><button class="item-name" type="button" style="cursor:pointer;border:0;background:none;padding:0;text-align:left;font:inherit;width:100%;color:var(--ink);" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} <span style="color:var(--ink);">→</span></button><div class="item-desc" style="color:var(--ink);">${escapeHtml(item.description)}</div><div class="item-row"><div class="item-price">${money(item.price)}</div>${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : `<button class="add-btn" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}</div></div>
+      <div class="item-info"><button class="item-name" type="button" style="cursor:pointer;border:0;background:none;padding:0;text-align:left;font:inherit;width:100%;color:var(--ink);" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} <span style="color:var(--ink);">→</span></button><div class="item-desc" style="color:var(--ink);">${escapeHtml(item.description)}</div><div class="item-row">${productPriceMarkup(item)}${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : `<button class="add-btn" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}</div></div>
     </div>`;
 }
 function renderMenu() {
@@ -819,7 +854,7 @@ function renderBundle() {
         <div class="item-info product-detail-copy">
           <div class="item-name">${escapeHtml(bundle.name)}</div>
           <div class="item-desc">${escapeHtml(bundle.description || "Choose any two drinks from the selections below.")}</div>
-          <div class="item-price">${money(bundle.price)}</div>
+          ${productPriceMarkup(bundle)}
         </div>
       </div>
       <div class="bundle-section">
@@ -828,7 +863,7 @@ function renderBundle() {
         <div class="bundle-drinks">
           ${drinks.map((drink) => `
             <button type="button" class="slot ${drink1 && String(drink1.id) === String(drink.id) ? "active" : ""}" onclick="selectBundleDrink(1,'${escapeHtml(drink.id)}')">
-              <div><div class="slot-day">${escapeHtml(drink.name)}</div><div class="slot-time">${money(drink.price)}</div></div>
+              <div><div class="slot-day">${escapeHtml(drink.name)}</div><div class="slot-time">${hasDiscount(drink) ? `${money(salePrice(drink))} <span class="original-price">${money(originalPrice(drink))}</span>` : money(salePrice(drink))}</div></div>
             </button>
           `).join("")}
         </div>
@@ -840,7 +875,7 @@ function renderBundle() {
         <div class="bundle-drinks">
           ${drinks.map((drink) => `
             <button type="button" class="slot ${drink2 && String(drink2.id) === String(drink.id) ? "active" : ""}" onclick="selectBundleDrink(2,'${escapeHtml(drink.id)}')">
-              <div><div class="slot-day">${escapeHtml(drink.name)}</div><div class="slot-time">${money(drink.price)}</div></div>
+              <div><div class="slot-day">${escapeHtml(drink.name)}</div><div class="slot-time">${hasDiscount(drink) ? `${money(salePrice(drink))} <span class="original-price">${money(originalPrice(drink))}</span>` : money(salePrice(drink))}</div></div>
             </button>
           `).join("")}
         </div>
@@ -848,7 +883,7 @@ function renderBundle() {
       </div>
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
-      <button class="primary-btn" onclick="addBundleToCart()">Add bundle to cart · ${money(bundle.price)}</button>
+      <button class="primary-btn" onclick="addBundleToCart()">Add bundle to cart · ${money(salePrice(bundle))}</button>
     </div></div>
   `;
 }
