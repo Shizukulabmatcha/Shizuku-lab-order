@@ -217,9 +217,24 @@ async function loadAll() {
 }
 
 async function confirmPayment(id) {
+  const order = astate.orders.find((o) => String(o.id) === String(id));
+  if (!order) return;
+  if (!confirm(`Confirm payment received for ${order.order_number || order.id}?`)) return;
+
+  const previousPaymentStatus = order.payment_status;
+  const previousOrderStatus = order.order_status;
   astate.orders = astate.orders.map((o) => (String(o.id) === String(id) ? { ...o, payment_status: "paid", order_status: "confirmed" } : o));
   render();
-  if (IS_CONFIGURED) await db.from("orders").update({ payment_status: "paid", order_status: "confirmed" }).eq("id", id);
+
+  if (IS_CONFIGURED) {
+    const { error } = await db.from("orders").update({ payment_status: "paid", order_status: "confirmed" }).eq("id", id);
+    if (error) {
+      astate.orders = astate.orders.map((o) => (String(o.id) === String(id) ? { ...o, payment_status: previousPaymentStatus, order_status: previousOrderStatus } : o));
+      render();
+      alert("Could not confirm payment: " + error.message);
+      return;
+    }
+  }
 }
 
 async function openPaymentProof(path) {
@@ -881,8 +896,8 @@ function renderOrders() {
       <div class="divider"></div>
       <div class="row bold"><span class="label">Total</span><span>${money(o.total)}</span></div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center;">
-        ${o.payment_status === "submitted" ? `<button class="small-btn" onclick="confirmPayment('${o.id}')">Confirm payment</button>` : ""}
-        ${o.payment_status === "awaiting_payment" ? `<span class="hint" style="margin:0;">Waiting on customer to pay</span>` : ""}
+        ${(o.payment_status === "submitted" || o.payment_status === "awaiting_payment") ? `<button class="small-btn" onclick="confirmPayment('${o.id}')">✓ Confirm payment</button>` : ""}
+        ${o.payment_status === "awaiting_payment" ? `<span class="hint" style="margin:0;">Check the Instagram DM payment screenshot before confirming.</span>` : ""}
         ${o.payment_status === "paid" && o.order_status === "confirmed" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','preparing')">Start preparing</button>` : ""}
         ${o.payment_status === "paid" && o.order_status === "preparing" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','ready')">Mark ready for collection</button>` : ""}
         ${o.payment_status === "paid" && o.order_status === "ready" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','collected')">Mark collected</button>` : ""}
