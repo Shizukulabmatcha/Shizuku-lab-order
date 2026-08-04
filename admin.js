@@ -33,10 +33,6 @@ const astate = {
   loading: true,
   loadError: null,
   editing: null,
-  knownOrderIds: null,
-  liveOrderPoll: null,
-  liveOrderChannel: null,
-  liveNotice: null,
 };
 
 function money(n) { return `$${Number(n).toFixed(2)}`; }
@@ -125,82 +121,8 @@ async function clearAvailabilityOverride() {
   render();
 }
 
-function rememberOrdersAndAlertIfNeeded(orders) {
-  const currentIds = new Set((orders || []).map((order) => String(order.id)));
-  if (!astate.knownOrderIds) {
-    // The orders already in the dashboard are not "new". Only alert for orders
-    // that arrive after the owner has opened the dashboard.
-    astate.knownOrderIds = currentIds;
-    return false;
-  }
-  const newOrders = (orders || []).filter((order) => !astate.knownOrderIds.has(String(order.id)));
-  astate.knownOrderIds = currentIds;
-  if (!newOrders.length) return false;
-
-  const newest = newOrders.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0];
-  astate.liveNotice = {
-    orderNumber: newest.order_number || `Order ${newest.id}`,
-    customer: newest.customer_name || "A customer",
-    total: Number(newest.total || 0),
-  };
-  showBrowserOrderAlert(newest);
-  return true;
-}
-
-function showBrowserOrderAlert(order) {
-  if (!("Notification" in window) || Notification.permission !== "granted") return;
-  try {
-    new Notification("🍵 New Shizuku Lab order", {
-      body: `${order.order_number || "New order"} · ${order.customer_name || "Customer"} · ${money(order.total || 0)}`,
-      tag: `shizuku-order-${order.id}`,
-    });
-  } catch (_) {
-    // The dashboard banner still appears if this browser does not support a pop-up notification.
-  }
-}
-
-async function enableBrowserAlerts() {
-  if (!("Notification" in window)) {
-    alert("This browser does not support dashboard notifications. Keep the Shizuku admin page open and the in-page alert will still appear.");
-    return;
-  }
-  if (Notification.permission === "denied") {
-    alert("Notifications are blocked for this website. Open your browser's website settings for this admin page and allow Notifications, then try again.");
-    return;
-  }
-  const permission = await Notification.requestPermission();
-  alert(permission === "granted"
-    ? "Browser alerts are on. Keep this dashboard open and you will be alerted when a new order arrives."
-    : "No problem — the dashboard will still show an in-page new-order alert while it is open.");
-  render();
-}
-
-function dismissLiveNotice() { astate.liveNotice = null; render(); }
-
-function stopLiveOrderMonitoring() {
-  if (astate.liveOrderPoll) window.clearInterval(astate.liveOrderPoll);
-  astate.liveOrderPoll = null;
-  if (astate.liveOrderChannel && db) db.removeChannel(astate.liveOrderChannel);
-  astate.liveOrderChannel = null;
-}
-
-function startLiveOrderMonitoring() {
-  if (!db || !astate.unlocked) return;
-  stopLiveOrderMonitoring();
-  // Realtime is immediate when it is available. The small polling fallback means
-  // alerts still work even if Realtime has not been enabled in Supabase.
-  if (typeof db.channel === "function") {
-    astate.liveOrderChannel = db.channel("shizuku-admin-new-orders")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "orders" }, () => loadAll({ silent: true }))
-      .subscribe();
-  }
-  astate.liveOrderPoll = window.setInterval(() => {
-    if (astate.unlocked && !document.hidden) loadAll({ silent: true });
-  }, 30000);
-}
-
-async function loadAll({ silent = false } = {}) {
-  if (!silent) { astate.loading = true; astate.loadError = null; render(); }
+async function loadAll() {
+  astate.loading = true; astate.loadError = null; render();
   if (IS_CONFIGURED) {
     try {
       // try the nested query first (needs FKs orders<-order_items<-order_item_options)
@@ -225,7 +147,6 @@ async function loadAll({ silent = false } = {}) {
         orders = nested.data || [];
       }
       astate.orders = orders;
-      const foundNewOrder = rememberOrdersAndAlertIfNeeded(orders);
 
       const { data: menu, error: mErr } = await db.from("products").select("*").order("category");
       if (mErr) astate.loadError = mErr.message;
@@ -266,7 +187,6 @@ async function loadAll({ silent = false } = {}) {
       if (!astate.selectedAvailabilityDate) astate.selectedAvailabilityDate = localDateText(new Date());
       if (!astate.calendarMonth) astate.calendarMonth = astate.selectedAvailabilityDate.slice(0, 7) + "-01";
       setAvailabilityDraft(astate.selectedAvailabilityDate);
-      if (silent && foundNewOrder) render();
     } catch (e) {
       astate.loadError = (e && e.message) || String(e);
       astate.orders = []; astate.menu = [];
@@ -275,7 +195,7 @@ async function loadAll({ silent = false } = {}) {
     astate.orders = []; astate.menu = [];
   }
   astate.loading = false;
-  if (!silent) render();
+  render();
 }
 
 async function confirmPayment(id) {
@@ -404,26 +324,39 @@ function onSettingsField(key, value) { astate.settingsDraft[key] = value; }
 function updateStorefrontPreview() {
   const circle = document.getElementById("logo-live-preview");
   const logo = document.getElementById("logo-live-preview-image");
-  const welcomeCircle = document.getElementById("welcome-logo-live-preview");
-  const welcomeLogo = document.getElementById("welcome-logo-live-preview-image");
   const banner = document.getElementById("banner-live-preview");
   const circleValue = document.getElementById("logo-circle-value");
   const imageValue = document.getElementById("logo-image-value");
-  const welcomeCircleValue = document.getElementById("welcome-logo-circle-value");
-  const welcomeImageValue = document.getElementById("welcome-logo-image-value");
   const bannerValue = document.getElementById("banner-position-value");
   const heightValue = document.getElementById("banner-height-value");
   if (circle && astate.settingsDraft) circle.style.width = circle.style.height = `${Number(astate.settingsDraft.logo_circle_size || 68)}px`;
   if (logo && astate.settingsDraft) logo.style.transform = `scale(${Number(astate.settingsDraft.logo_image_scale || 1)})`;
-  if (welcomeCircle && astate.settingsDraft) welcomeCircle.style.width = welcomeCircle.style.height = `${Number(astate.settingsDraft.welcome_logo_circle_size || astate.settingsDraft.logo_circle_size || 100)}px`;
-  if (welcomeLogo && astate.settingsDraft) welcomeLogo.style.transform = `scale(${Number(astate.settingsDraft.welcome_logo_image_scale || astate.settingsDraft.logo_image_scale || 1)})`;
   if (banner && astate.settingsDraft) banner.style.objectPosition = `center ${Number(astate.settingsDraft.hero_image_position ?? 68)}%`;
   if (circleValue) circleValue.textContent = `${Number(astate.settingsDraft.logo_circle_size || 68)} px`;
   if (imageValue) imageValue.textContent = `${Number(astate.settingsDraft.logo_image_scale || 1).toFixed(2)}×`;
-  if (welcomeCircleValue) welcomeCircleValue.textContent = `${Number(astate.settingsDraft.welcome_logo_circle_size || astate.settingsDraft.logo_circle_size || 100)} px`;
-  if (welcomeImageValue) welcomeImageValue.textContent = `${Number(astate.settingsDraft.welcome_logo_image_scale || astate.settingsDraft.logo_image_scale || 1).toFixed(2)}×`;
   if (bannerValue) bannerValue.textContent = `${Number(astate.settingsDraft.hero_image_position ?? 68)}%`;
   if (heightValue) heightValue.textContent = `${Number(astate.settingsDraft.hero_banner_height || 190)} px`;
+}
+
+function updateWelcomeLogoPreview() {
+  const frame = document.getElementById("welcome-logo-live-preview");
+  const image = document.getElementById("welcome-logo-live-preview-image");
+  const circleValue = document.getElementById("welcome-logo-circle-value");
+  const imageValue = document.getElementById("welcome-logo-image-value");
+  const xValue = document.getElementById("welcome-logo-x-value");
+  const yValue = document.getElementById("welcome-logo-y-value");
+  if (!astate.settingsDraft) return;
+  const s = astate.settingsDraft;
+  const size = Number(s.welcome_logo_circle_size || s.logo_circle_size || 100);
+  const scale = Number(s.welcome_logo_image_scale || s.logo_image_scale || 1);
+  const x = Number(s.welcome_logo_image_x || 0);
+  const y = Number(s.welcome_logo_image_y || 0);
+  if (frame) frame.style.width = frame.style.height = `${size}px`;
+  if (image) image.style.transform = `translate(${x}%, ${y}%) scale(${scale})`;
+  if (circleValue) circleValue.textContent = `${size} px`;
+  if (imageValue) imageValue.textContent = `${scale.toFixed(2)}×`;
+  if (xValue) xValue.textContent = `${x > 0 ? "+" : ""}${x}%`;
+  if (yValue) yValue.textContent = `${y > 0 ? "+" : ""}${y}%`;
 }
 async function saveSettings() {
   if (!astate.settings) { alert("No store_settings row found — add one in Supabase first."); return; }
@@ -540,7 +473,6 @@ async function checkAdminSession() {
   if (email === String(ADMIN_EMAIL || "").toLowerCase()) {
     astate.unlocked = true;
     await loadAll();
-    startLiveOrderMonitoring();
   } else {
     astate.loginMessage = "This email does not have access to the Shizuku Lab dashboard.";
     await db.auth.signOut();
@@ -550,10 +482,7 @@ async function checkAdminSession() {
 
 async function logoutAdmin() {
   if (db) await db.auth.signOut();
-  stopLiveOrderMonitoring();
   astate.unlocked = false;
-  astate.knownOrderIds = null;
-  astate.liveNotice = null;
   astate.loginMessage = "You have signed out.";
   render();
 }
@@ -574,12 +503,12 @@ function dashboardStyles() {
   return `<style>
     #app.wrap{width:100%;max-width:none!important;margin:0!important;padding:0!important}
     .shop-admin{min-height:100vh;background:#fffaf5;color:#292720;font-family:inherit;display:flex}
-    .shop-admin *{box-sizing:border-box}.shop-admin .admin-side{width:248px;flex:0 0 248px;min-height:100vh;padding:28px 16px;border-right:1px solid #eadfd2;background:#fffdf9;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+    .shop-admin *{box-sizing:border-box}.shop-admin .admin-side{width:248px;flex:0 0 248px;min-height:100vh;padding:28px 16px;border-right:1px solid #eadfd2;background:#fffdf9;position:sticky;top:0;height:100vh}
     .shop-admin .admin-logo{font-family:Georgia,serif;font-size:27px;font-weight:700;line-height:1.05}.shop-admin .admin-caption{margin:6px 8px 32px;color:#75845d;font-size:13px;letter-spacing:.06em}
-    .shop-admin .admin-nav-label{margin:0 8px 10px;color:#877d70;font-size:11px;font-weight:800;letter-spacing:.12em}.shop-admin .admin-nav{display:grid;gap:6px;flex:1;min-height:0;overflow-y:auto;padding:0 1px 10px;scrollbar-width:thin}
+    .shop-admin .admin-nav-label{margin:0 8px 10px;color:#877d70;font-size:11px;font-weight:800;letter-spacing:.12em}.shop-admin .admin-nav{display:grid;gap:6px}
     .shop-admin .admin-nav button{appearance:none;width:100%;border:0;border-radius:14px;background:transparent;padding:13px 14px;color:#504a42;font:600 15px/1.2 inherit;text-align:left;cursor:pointer}.shop-admin .admin-nav button:hover{background:#f5ede2}.shop-admin .admin-nav button.active{background:#263125;color:#fff;box-shadow:0 10px 24px rgba(47,63,36,.16)}
     .shop-admin .admin-nav .nav-icon{display:inline-block;width:27px;color:#fa7439;font-size:18px;text-align:center;margin-right:5px}.shop-admin .admin-nav button.active .nav-icon{color:#ffe4d8}
-    .shop-admin .admin-side-bottom{margin:10px 8px 0;border-top:1px solid #eadfd2;padding:18px 0 0;color:#6b645b;font-size:13px;flex:0 0 auto}.shop-admin .admin-side-bottom a{color:#4d633d;text-decoration:none;font-weight:700}
+    .shop-admin .admin-side-bottom{margin:28px 8px 0;border-top:1px solid #eadfd2;padding:18px 0 0;color:#6b645b;font-size:13px}.shop-admin .admin-side-bottom a{color:#4d633d;text-decoration:none;font-weight:700}
     .shop-admin .admin-main{width:100%;max-width:1500px;margin:0 auto;padding:42px 54px 80px}.shop-admin .admin-top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;border-bottom:1px solid #eadfd2;padding-bottom:26px;margin-bottom:28px}.shop-admin .admin-eyebrow{font-size:12px;font-weight:800;letter-spacing:.12em;color:#ef7138;text-transform:uppercase;margin-bottom:9px}.shop-admin .admin-title{font:700 40px/1.05 Georgia,serif;margin:0;letter-spacing:-.02em}.shop-admin .admin-subtitle{color:#6e6b63;margin:9px 0 0;font-size:16px}.shop-admin .open-shop{border:1px solid #e8d9ca;background:#fff;border-radius:13px;padding:12px 16px;color:#33492c;font:700 14px inherit;white-space:nowrap;cursor:pointer}
     .shop-admin .stat-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:22px}.shop-admin .stat{border:1px solid #eadfd2;border-radius:18px;padding:19px 20px;background:#fff;min-height:120px}.shop-admin .stat:nth-child(1){background:#f0f7e8;border-color:#d7e8c8}.shop-admin .stat:nth-child(2){background:#fff1e7;border-color:#f2d7c4}.shop-admin .stat:nth-child(3){background:#f3efff;border-color:#dfd6ff}.shop-admin .stat-label{display:flex;gap:8px;align-items:center;color:#69675f;font-weight:700;font-size:14px}.shop-admin .stat-icon{font-size:19px}.shop-admin .stat-value{font:700 30px/1 Georgia,serif;margin-top:18px}.shop-admin .stat-help{font-size:13px;color:#756e64;margin-top:7px}
     .shop-admin .dashboard-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(280px,.75fr);gap:20px}.shop-admin .dashboard-card{border:1px solid #eadfd2;border-radius:18px;background:#fff;overflow:hidden}.shop-admin .dashboard-card-head{display:flex;justify-content:space-between;align-items:center;padding:19px 20px;border-bottom:1px solid #eee3d8}.shop-admin .dashboard-card-head h2{font:700 19px/1.1 Georgia,serif;margin:0}.shop-admin .dashboard-card-head span{color:#756e64;font-size:13px}.shop-admin .queue-row{padding:16px 20px;border-bottom:1px solid #f0e7de;cursor:pointer}.shop-admin .queue-row:last-child{border-bottom:0}.shop-admin .queue-row:hover{background:#fffaf6}.shop-admin .queue-top{display:flex;justify-content:space-between;gap:14px;align-items:center}.shop-admin .queue-number{font-family:ui-monospace,monospace;font-size:14px;font-weight:800}.shop-admin .queue-name{color:#6d665d;font-size:14px;margin-top:6px}.shop-admin .queue-amount{font-weight:800}.shop-admin .queue-status{font-size:12px;font-weight:800;padding:6px 9px;border-radius:99px;background:#f5efe7;color:#756950;white-space:nowrap}.shop-admin .dashboard-empty{padding:30px 20px;color:#756e64;text-align:center}.shop-admin .action-list{padding:8px 20px 12px}.shop-admin .action{display:flex;gap:12px;padding:17px 0;border-bottom:1px solid #f0e7de}.shop-admin .action:last-child{border:0}.shop-admin .action-icon{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:#fff0e7;color:#ef7138}.shop-admin .action strong{font-size:14px}.shop-admin .action p{font-size:13px;color:#756e64;line-height:1.4;margin:4px 0 0}
@@ -652,11 +581,8 @@ function renderDashboardTab() {
   const production = nextPickupProduction();
   const insights = customerInsights();
   const highestDailySale = Math.max(...performance.days.map((day) => day.total), 1);
-  const alertButton = ("Notification" in window && Notification.permission === "granted")
-    ? `<button class="open-shop" type="button" onclick="enableBrowserAlerts()">🔔 Browser alerts on</button>`
-    : `<button class="open-shop" type="button" onclick="enableBrowserAlerts()">🔔 Enable new-order alerts</button>`;
   return `
-    <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</h1><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">${alertButton}<a class="open-shop" href="order.html">Open customer shop ↗</a></div></div>
+    <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</h1><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
     <div class="stat-grid">
       <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Revenue this month</div><div class="stat-value">${money(stats.revenue)}</div><div class="stat-help">Paid orders only</div></div>
       <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Orders this month</div><div class="stat-value">${stats.orders}</div><div class="stat-help">${stats.paymentReview ? `${stats.paymentReview} need payment review` : "Everything is up to date"}</div></div>
@@ -921,10 +847,13 @@ function renderSettingsTab() {
     <div class="field"><label>Welcome introduction</label><textarea rows="3" placeholder="A short message shown before customers enter the ordering page." oninput="onSettingsField('welcome_copy', this.value)">${escapeHtml(s.welcome_copy || "")}</textarea></div>
     ${field("Order button text", "welcome_order_button_text", "Enter ordering →")}
     ${field("Website button text", "welcome_website_button_text", "Visit Shizuku Lab website ↗")}
-    <div class="hint" style="text-align:left;margin:-6px 0 14px;">Your Welcome cover uses the same logo you upload below, but you can size it separately here. Leave the website link empty if you only want the ordering button.</div>
-    ${s.logo_url ? `<div class="field"><label>Welcome logo preview</label><div id="welcome-logo-live-preview" style="width:${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)}px;height:${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)}px;border:4px solid #F4EEE3;border-radius:50%;overflow:hidden;background:#fff;display:grid;place-items:center;box-shadow:0 10px 22px rgba(42,42,34,.10);"><img id="welcome-logo-live-preview-image" src="${escapeHtml(s.logo_url)}" alt="Welcome logo preview" style="width:100%;height:100%;object-fit:contain;transform:scale(${Number(s.welcome_logo_image_scale || s.logo_image_scale || 1)});"></div></div>` : `<div class="hint" style="text-align:left;margin:0 0 12px;">Upload your logo below first, then you can preview and adjust it here.</div>`}
-    <div class="field"><label>Welcome logo circle size <span id="welcome-logo-circle-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)} px</span></label><input type="range" min="56" max="220" step="1" value="${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)}" oninput="onSettingsField('welcome_logo_circle_size',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">Changes only the logo on the Welcome cover.</div></div>
-    <div class="field"><label>Welcome logo image size <span id="welcome-logo-image-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.welcome_logo_image_scale || s.logo_image_scale || 1).toFixed(2)}×</span></label><input type="range" min="0.55" max="2.4" step="0.05" value="${Number(s.welcome_logo_image_scale || s.logo_image_scale || 1)}" oninput="onSettingsField('welcome_logo_image_scale',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">Zoom the Welcome logo inside its own circle. It will not change the ordering page logo.</div></div>
+    <div class="field"><label>Welcome logo position</label><select onchange="onSettingsField('welcome_logo_position',this.value)"><option value="left" ${s.welcome_logo_position === "left" ? "selected" : ""}>Left</option><option value="center" ${(!s.welcome_logo_position || s.welcome_logo_position === "center") ? "selected" : ""}>Centre</option><option value="right" ${s.welcome_logo_position === "right" ? "selected" : ""}>Right</option></select><div class="hint" style="text-align:left;margin-top:5px;">Choose where the logo sits on the Welcome cover.</div></div>
+    ${s.logo_url ? `<div class="field"><label>Welcome logo preview</label><div id="welcome-logo-live-preview" style="width:${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)}px;height:${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)}px;border:5px solid #F4EEE3;border-radius:50%;overflow:hidden;background:#fff;display:grid;place-items:center;margin-top:8px;"><img id="welcome-logo-live-preview-image" src="${escapeHtml(s.logo_url)}" alt="Welcome logo preview" style="width:100%;height:100%;object-fit:contain;padding:12px;transform:translate(${Number(s.welcome_logo_image_x || 0)}%, ${Number(s.welcome_logo_image_y || 0)}%) scale(${Number(s.welcome_logo_image_scale || s.logo_image_scale || 1)});"></div></div>` : ""}
+    <div class="field"><label>Welcome logo circle size <span id="welcome-logo-circle-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)} px</span></label><input type="range" min="56" max="220" step="1" value="${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)}" oninput="onSettingsField('welcome_logo_circle_size',Number(this.value));updateWelcomeLogoPreview()"></div>
+    <div class="field"><label>Welcome logo image size <span id="welcome-logo-image-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.welcome_logo_image_scale || s.logo_image_scale || 1).toFixed(2)}×</span></label><input type="range" min="0.55" max="2.4" step="0.05" value="${Number(s.welcome_logo_image_scale || s.logo_image_scale || 1)}" oninput="onSettingsField('welcome_logo_image_scale',Number(this.value));updateWelcomeLogoPreview()"></div>
+    <div class="field"><label>Move Welcome logo left / right <span id="welcome-logo-x-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.welcome_logo_image_x || 0) > 0 ? "+" : ""}${Number(s.welcome_logo_image_x || 0)}%</span></label><input type="range" min="-45" max="45" step="1" value="${Number(s.welcome_logo_image_x || 0)}" oninput="onSettingsField('welcome_logo_image_x',Number(this.value));updateWelcomeLogoPreview()"></div>
+    <div class="field"><label>Move Welcome logo up / down <span id="welcome-logo-y-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.welcome_logo_image_y || 0) > 0 ? "+" : ""}${Number(s.welcome_logo_image_y || 0)}%</span></label><input type="range" min="-45" max="45" step="1" value="${Number(s.welcome_logo_image_y || 0)}" oninput="onSettingsField('welcome_logo_image_y',Number(this.value));updateWelcomeLogoPreview()"><div class="hint" style="text-align:left;margin-top:5px;">Use these two sliders when the artwork in your uploaded logo is not centred.</div></div>
+    <div class="hint" style="text-align:left;margin:-6px 0 14px;">Your Welcome cover uses the same logo you upload below. Leave the website link empty if you only want the ordering button.</div>
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Storefront images</div>
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 16px;"><div style="border:1px solid #E1D9C8;border-radius:13px;padding:12px;background:#fff;"><b style="display:block;margin-bottom:4px;">Logo frame · 1 : 1</b><span class="hint" style="margin:0;text-align:left;">Best upload: square, at least 1000 × 1000 px.</span></div><div style="border:1px solid #E1D9C8;border-radius:13px;padding:12px;background:#fff;"><b style="display:block;margin-bottom:4px;">Banner frame · 2 : 1</b><span class="hint" style="margin:0;text-align:left;">Best upload: landscape, at least 1600 × 800 px.</span></div></div>
@@ -953,24 +882,16 @@ function renderSettingsTab() {
     ${field("Saturday collection time", "saturday_collection_time", "10:00 AM - 12:00 PM")}
     ${field("Sunday collection time", "sunday_collection_time", "10:00 AM - 1:00 PM")}
     <button class="btn-primary" id="settings-save-btn" style="width:100%;margin-top:8px;" onclick="saveSettings()">Save settings</button>
-  `;
-}
-
-function renderNotificationsTab() {
-  const isBrowserReady = ("Notification" in window) && Notification.permission === "granted";
-  return `<section class="dashboard-card" style="padding:20px;max-width:760px;">
-    <div class="dashboard-card-head" style="padding:0 0 16px;"><h2>New-order alerts</h2><span>Choose how you want to be notified</span></div>
-    <div class="order-card" style="margin:0 0 16px;background:#f0f7e8;border-color:#d7e8c8;"><div class="display" style="font-size:20px;margin-bottom:8px;">🔔 Dashboard browser alert</div><div class="hint" style="text-align:left;margin:0 0 14px;">Free and private. While your dashboard is open, you will see a new-order alert here and can also receive a browser pop-up.</div><button class="btn-primary" onclick="enableBrowserAlerts()">${isBrowserReady ? "Browser alerts are on" : "Enable browser alerts"}</button></div>
     <div class="divider"></div>
-    <div class="display" style="font-size:20px;margin:4px 0 8px;">Email alerts (optional)</div>
-    <div class="hint" style="text-align:left;margin:0 0 12px;">Keep this off until you decide to finish the separate Google email setup. Your browser alert above works without Gmail permissions.</div>
+    <div class="display" style="font-size:20px;margin:4px 0 8px;">Order email alerts</div>
+    <div class="hint" style="text-align:left;margin:0 0 12px;">After the one-time Google setup, alerts will be sent to this Gmail when a customer orders or submits payment proof.</div>
     <div class="field"><label>Receive alerts at</label><input type="email" value="${escapeHtml(astate.notificationDraft?.recipient_email || "")}" placeholder="tinghuioh29@gmail.com" oninput="onNotificationField('recipient_email', this.value)"></div>
-    <div class="field"><label>Google Apps Script web app URL</label><input value="${escapeHtml(astate.notificationDraft?.webhook_url || "")}" placeholder="Paste the web app URL after you deploy it" oninput="onNotificationField('webhook_url', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">Only needed if you later choose to activate Gmail alerts.</div></div>
+    <div class="field"><label>Google Apps Script web app URL</label><input value="${escapeHtml(astate.notificationDraft?.webhook_url || "")}" placeholder="Paste the web app URL after you deploy it" oninput="onNotificationField('webhook_url', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">This link is stored privately for the admin only.</div></div>
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${astate.notificationDraft?.enabled ? "checked" : ""} onchange="onNotificationField('enabled', this.checked)"><span><b>Turn on order email alerts</b></span></label>
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${astate.notificationDraft?.alert_new_order !== false ? "checked" : ""} onchange="onNotificationField('alert_new_order', this.checked)"><span>Notify me when a new order is placed</span></label>
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${astate.notificationDraft?.alert_payment_proof !== false ? "checked" : ""} onchange="onNotificationField('alert_payment_proof', this.checked)"><span>Notify me when payment proof is uploaded</span></label>
     <button class="btn-primary" id="notification-save-btn" style="width:100%;margin-top:0;" onclick="saveNotificationSettings()">Save notification settings</button>
-  </section>`;
+  `;
 }
 
 function renderFaqTab() {
@@ -1061,21 +982,20 @@ function render() {
     ["customers", "◉", "Customers"],
     ["availability", "◷", "Availability"],
     ["faq", "?", "FAQ"],
-    ["notifications", "🔔", "Notifications"],
     ["settings", "⚙", "Store settings"],
   ];
-  const tabTitle = { orders: "Orders", menu: "Products", promos: "Promos", rewards: "Rewards", customers: "Customers", availability: "Availability", faq: "FAQ", notifications: "Notifications", settings: "Store settings" };
-  const tabSubtitle = { orders: "Review payments and manage every customer order.", menu: "Keep your drinks, prices and availability up to date.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose browser and optional email alerts for new orders.", settings: "Manage your store details, images, contact information and payment details." };
+  const tabTitle = { orders: "Orders", menu: "Products", promos: "Promos", rewards: "Rewards", customers: "Customers", availability: "Availability", faq: "FAQ", settings: "Store settings" };
+  const tabSubtitle = { orders: "Review payments and manage every customer order.", menu: "Keep your drinks, prices and availability up to date.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", settings: "Manage your store details, images, contact information and payment details." };
   const page = astate.tab === "dashboard" ? renderDashboardTab() : `
     <div class="admin-top"><div><div class="admin-eyebrow">Shizuku Lab admin</div><h1 class="tab-page-title">${tabTitle[astate.tab] || "Dashboard"}</h1><p class="tab-page-subtitle">${tabSubtitle[astate.tab] || ""}</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
     <div class="admin-content">
-      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : renderSettingsTab()}
+      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : renderSettingsTab()}
     </div>`;
   app.innerHTML = `
     ${dashboardStyles()}
     <div class="shop-admin">
       <aside class="admin-side"><div class="admin-logo">${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</div><div class="admin-caption">SHOP ADMIN</div><div class="admin-nav-label">MAIN</div><nav class="admin-nav">${nav.map(([tab, icon, label]) => `<button class="${astate.tab === tab ? "active" : ""}" onclick="setTab('${tab}')"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="admin-side-bottom"><button class="link-btn" onclick="logoutAdmin()">Sign out</button></div></aside>
-      <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}${astate.liveNotice ? `<div class="setup-banner" style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-color:#9bb780;background:#f0f7e8;color:#314427;"><span><b>🍵 New order received</b><br>${escapeHtml(astate.liveNotice.orderNumber)} · ${escapeHtml(astate.liveNotice.customer)} · ${money(astate.liveNotice.total)}</span><button class="btn-secondary" style="padding:8px 12px;flex:0 0 auto;" onclick="dismissLiveNotice()">Dismiss</button></div>` : ""}${page}</main>
+      <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}${page}</main>
     </div>
     ${renderEditOverlay()}
   `;
