@@ -150,7 +150,7 @@ async function loadOpeningOverrides() {
   if (!IS_CONFIGURED) return;
   const today = formatDateForDatabase(new Date());
   const until = new Date();
-  until.setDate(until.getDate() + Math.max(7, Number(state.store.order_advance_days || 14)) + 7);
+  until.setDate(until.getDate() + Math.max(7, Number(state.store.order_advance_days ?? 14)) + 7);
   const { data, error } = await db.from("store_opening_overrides")
     .select("*")
     .gte("collection_date", today)
@@ -215,7 +215,7 @@ function timesFromRange(rangeText) {
     const times = String(range || "").split(/\s*[–-]\s*/);
     const start = pickupMinutesFromToken(times[0], times[1]);
     const end = pickupMinutesFromToken(times[1], times[0]);
-    const interval = Math.max(5, Math.min(120, Number(state.store.pickup_slot_interval_minutes || 30)));
+    const interval = Math.max(5, Math.min(120, Number(state.store.pickup_slot_interval_minutes ?? 30)));
     if (start == null) return [];
     if (end == null || end < start) return [formatPickupTime(start)];
     const values = [];
@@ -227,8 +227,8 @@ function timesFromRange(rangeText) {
 function computeSlots() {
   const now = new Date();
   const weekly = new Map(getWeekendConfig().map((item) => [item.day, item]));
-  const maxDays = Math.max(0, Math.min(60, Number(state.store.order_advance_days || 14)));
-  const noticeHours = Math.max(0, Number(state.store.minimum_order_notice_hours || 0));
+  const maxDays = Math.max(0, Math.min(60, Number(state.store.order_advance_days ?? 14)));
+  const noticeHours = Math.max(0, Number(state.store.minimum_order_notice_hours ?? 0));
   const earliest = new Date(now.getTime() + noticeHours * 60 * 60 * 1000);
   const slots = [];
   for (let offset = 0; offset <= maxDays; offset++) {
@@ -272,7 +272,7 @@ async function loadProductGroups() {
 }
 async function loadOptions() {
   const [groupsResult, optionsResult, mappingResult] = await Promise.all([
-    db.from("option_groups").select("*").order("id"),
+    db.from("option_groups").select("*").order("sort_order").order("id"),
     db.from("options").select("*").eq("is_available", true).order("option_group_id").order("id"),
     db.from("product_option_groups").select("product_id, option_group_id"),
   ]);
