@@ -153,9 +153,14 @@ async function loadAll() {
       }
       astate.orders = orders;
 
-      const { data: menu, error: mErr } = await db.from("products").select("*").order("category");
-      if (mErr) astate.loadError = mErr.message;
-      astate.menu = menu || [];
+      let menuResult = await db.from("products").select("*").order("sort_order").order("id");
+      // Keep Admin usable until the one-time product sorting SQL is run.
+      if (menuResult.error && /sort_order/i.test(menuResult.error.message || "")) {
+        console.warn("products.sort_order is not installed yet; using the current product order temporarily.");
+        menuResult = await db.from("products").select("*").order("category").order("id");
+      }
+      if (menuResult.error) astate.loadError = menuResult.error.message;
+      astate.menu = menuResult.data || [];
 
       const { data: groups, error: groupError } = await db.from("product_groups").select("*").order("sort_order").order("name");
       if (groupError) console.warn("Could not load product groups:", groupError.message);
@@ -272,7 +277,7 @@ async function cancelOrder(id) {
 /* ---- menu (products) CRUD — unchanged from before ---- */
 function newMenuItem() {
   const firstGroup = astate.productGroups[0];
-  astate.editing = { id: null, enabled_option_group_ids: [], group_id: firstGroup?.id || null, category: firstGroup?.name || "Signature", name: "", description: "", price: 0, discount_price: null, image_url: "", is_available: true, is_bundle: false, bundle_product_ids: [], stock: 0 };
+  astate.editing = { id: null, enabled_option_group_ids: [], group_id: firstGroup?.id || null, category: firstGroup?.name || "Signature", name: "", description: "", price: 0, discount_price: null, image_url: "", is_available: true, is_bundle: false, bundle_product_ids: [], stock: 0, sort_order: astate.menu.length + 1 };
   render();
 }
 function editMenuItem(id) {
@@ -418,6 +423,10 @@ function endAdminDrag() {
     const map = new Map(astate.optionGroups.map((item, index) => [String(item.id ?? `new-${index}`), item]));
     astate.optionGroups = orderedKeys.map((key) => map.get(key)).filter(Boolean);
     astate.optionGroups.forEach((item, index) => { item.sort_order = index + 1; });
+  } else if (scope === 'products') {
+    const map = new Map(astate.menu.map((item) => [String(item.id), item]));
+    astate.menu = orderedKeys.map((key) => map.get(key)).filter(Boolean);
+    astate.menu.forEach((item, index) => { item.sort_order = index + 1; });
   }
   ghost.remove();
   row.classList.remove('admin-drag-source');
@@ -974,6 +983,27 @@ function renderOrders() {
   `).join("");
 }
 
+async function saveProductOrder() {
+  if (!IS_CONFIGURED) { alert("Connect Supabase to save the product order."); return; }
+  const button = document.getElementById("save-product-order-btn");
+  if (button) { button.textContent = "Saving…"; button.disabled = true; }
+  try {
+    for (let index = 0; index < astate.menu.length; index++) {
+      const product = astate.menu[index];
+      const sortOrder = index + 1;
+      const { error } = await db.from("products").update({ sort_order: sortOrder }).eq("id", product.id);
+      if (error) throw error;
+      product.sort_order = sortOrder;
+    }
+    alert("Product order saved.");
+  } catch (error) {
+    alert("Could not save product order: " + ((error && error.message) || String(error)));
+  } finally {
+    if (button) { button.textContent = "Save product order"; button.disabled = false; }
+    render();
+  }
+}
+
 function renderMenuTab() {
   return `
     <section class="dashboard-card" style="padding:20px;margin-bottom:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Product groups</h2><span>These become the big headings on the ordering page</span></div>
@@ -981,21 +1011,30 @@ function renderMenuTab() {
       <div class="btn-row" style="margin-top:14px;"><button class="btn-secondary" onclick="addProductGroup()">+ Add group</button><button class="btn-primary" onclick="saveProductGroups()">Save groups</button></div>
     </section>
     ${renderDrinkOptionsManager()}
-    ${astate.menu.map((item) => `
-      <div class="order-card">
-        <div class="order-top">
-          <div>
-            <div style="font-size:14px;font-weight:600;">${item.name}</div>
-            <div class="order-meta">${item.category || "Other"} · ${item.is_bundle ? "Bundle · " : ""}${item.is_available ? "Visible" : "Hidden"} · ${Number(item.discount_price) > 0 && Number(item.discount_price) < Number(item.price) ? `${money(item.discount_price)} (was ${money(item.price)})` : money(item.price)}</div>
-          </div>
-          <div style="display:flex;gap:10px;">
-            <button class="link-btn" onclick="editMenuItem('${item.id}')">Edit</button>
-            <button class="link-danger" onclick="deleteMenuItem('${item.id}')">Delete</button>
+    <section class="dashboard-card" style="padding:20px;margin-bottom:20px;">
+      <div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Products</h2><span>Drag the six-dot handle to change the ordering-page sequence</span></div>
+      <div class="admin-sortable-list">${astate.menu.map((item, index) => `
+        <div class="admin-sortable-item admin-product-sort-row order-card" data-sort-scope="products" data-sort-key="${escapeHtml(String(item.id))}">
+          ${dragHandle("products", index)}
+          <div class="admin-sortable-content">
+            <div class="order-top">
+              <div>
+                <div style="font-size:14px;font-weight:600;">${item.name}</div>
+                <div class="order-meta">${item.category || "Other"} · ${item.is_bundle ? "Bundle · " : ""}${item.is_available ? "Visible" : "Hidden"} · ${Number(item.discount_price) > 0 && Number(item.discount_price) < Number(item.price) ? `${money(item.discount_price)} (was ${money(item.price)})` : money(item.price)}</div>
+              </div>
+              <div style="display:flex;gap:10px;">
+                <button class="link-btn" onclick="editMenuItem('${item.id}')">Edit</button>
+                <button class="link-danger" onclick="deleteMenuItem('${item.id}')">Delete</button>
+              </div>
+            </div>
           </div>
         </div>
+      `).join("")}</div>
+      <div class="btn-row" style="margin-top:14px;">
+        <button class="btn-secondary" onclick="newMenuItem()">+ Add menu item</button>
+        <button class="btn-primary" id="save-product-order-btn" onclick="saveProductOrder()">Save product order</button>
       </div>
-    `).join("")}
-    <button class="small-btn" style="width:100%;margin-top:4px;" onclick="newMenuItem()">+ Add menu item</button>
+    </section>
   `;
 }
 
