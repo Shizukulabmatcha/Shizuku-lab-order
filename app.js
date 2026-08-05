@@ -271,8 +271,13 @@ async function loadProductGroups() {
   state.productGroups = data || [];
 }
 async function loadOptions() {
-  const [groupsResult, optionsResult, mappingResult] = await Promise.all([
-    db.from("option_groups").select("*").order("sort_order").order("id"),
+  let groupsResult = await db.from("option_groups").select("*").order("sort_order").order("id");
+  // Keep the customer shop working even before the one-time drag-sort SQL is run.
+  if (groupsResult.error && /sort_order/i.test(groupsResult.error.message || "")) {
+    console.warn("option_groups.sort_order is not installed yet; using ID order temporarily.");
+    groupsResult = await db.from("option_groups").select("*").order("id");
+  }
+  const [optionsResult, mappingResult] = await Promise.all([
     db.from("options").select("*").eq("is_available", true).order("option_group_id").order("id"),
     db.from("product_option_groups").select("product_id, option_group_id"),
   ]);

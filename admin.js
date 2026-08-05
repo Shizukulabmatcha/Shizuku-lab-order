@@ -161,13 +161,16 @@ async function loadAll() {
       if (groupError) console.warn("Could not load product groups:", groupError.message);
       astate.productGroups = groups || [];
 
-      const [{ data: optionGroups, error: optionGroupError }, { data: options, error: optionsError }] = await Promise.all([
-        db.from("option_groups").select("*").order("id"),
-        db.from("options").select("*").order("option_group_id").order("id"),
-      ]);
-      if (optionGroupError) console.warn("Could not load drink option groups:", optionGroupError.message);
+      let optionGroupsResult = await db.from("option_groups").select("*").order("sort_order").order("id");
+      // Keep Admin usable before the one-time drag-sort SQL is run.
+      if (optionGroupsResult.error && /sort_order/i.test(optionGroupsResult.error.message || "")) {
+        console.warn("option_groups.sort_order is not installed yet; using ID order temporarily.");
+        optionGroupsResult = await db.from("option_groups").select("*").order("id");
+      }
+      const { data: options, error: optionsError } = await db.from("options").select("*").order("option_group_id").order("id");
+      if (optionGroupsResult.error) console.warn("Could not load drink option groups:", optionGroupsResult.error.message);
       if (optionsError) console.warn("Could not load drink options:", optionsError.message);
-      astate.optionGroups = optionGroups || [];
+      astate.optionGroups = optionGroupsResult.data || [];
       astate.options = options || [];
       const { data: productOptionGroups, error: productOptionGroupsError } = await db.from("product_option_groups").select("product_id, option_group_id");
       if (productOptionGroupsError) console.warn("Could not load product option mappings:", productOptionGroupsError.message);
@@ -363,6 +366,69 @@ async function deleteMenuItem(id) {
   if (IS_CONFIGURED) await db.from("products").delete().eq("id", id);
 }
 
+
+let adminDragState = null;
+function startAdminDrag(event, scope, index) {
+  if (event.button != null && event.button !== 0) return;
+  event.preventDefault();
+  const handle = event.currentTarget;
+  const row = handle.closest('.admin-sortable-item');
+  if (!row) return;
+  const list = row.parentElement;
+  const rect = row.getBoundingClientRect();
+  const ghost = row.cloneNode(true);
+  ghost.classList.add('admin-drag-ghost');
+  ghost.style.width = `${rect.width}px`;
+  ghost.style.height = `${rect.height}px`;
+  ghost.style.left = `${rect.left}px`;
+  ghost.style.top = `${rect.top}px`;
+  document.body.appendChild(ghost);
+  row.classList.add('admin-drag-source');
+  adminDragState = { scope, row, list, ghost, offsetY: event.clientY - rect.top };
+  handle.setPointerCapture?.(event.pointerId);
+  document.body.classList.add('admin-is-dragging');
+  document.addEventListener('pointermove', moveAdminDrag, { passive:false });
+  document.addEventListener('pointerup', endAdminDrag, { once:true });
+  document.addEventListener('pointercancel', endAdminDrag, { once:true });
+}
+function moveAdminDrag(event) {
+  if (!adminDragState) return;
+  event.preventDefault();
+  const { ghost, list, row, scope } = adminDragState;
+  ghost.style.top = `${event.clientY - adminDragState.offsetY}px`;
+  const candidates = [...list.querySelectorAll(`.admin-sortable-item[data-sort-scope="${scope}"]`)].filter((item) => item !== row);
+  const target = candidates.find((item) => {
+    const r = item.getBoundingClientRect();
+    return event.clientY >= r.top && event.clientY <= r.bottom;
+  });
+  if (!target) return;
+  const r = target.getBoundingClientRect();
+  if (event.clientY < r.top + r.height / 2) list.insertBefore(row, target);
+  else list.insertBefore(row, target.nextSibling);
+}
+function endAdminDrag() {
+  if (!adminDragState) return;
+  const { scope, list, ghost, row } = adminDragState;
+  const orderedKeys = [...list.querySelectorAll(`.admin-sortable-item[data-sort-scope="${scope}"]`)].map((el) => el.dataset.sortKey);
+  if (scope === 'productGroups') {
+    const map = new Map(astate.productGroups.map((item, index) => [String(item.id ?? `new-${index}`), item]));
+    astate.productGroups = orderedKeys.map((key) => map.get(key)).filter(Boolean);
+    astate.productGroups.forEach((item, index) => { item.sort_order = index + 1; });
+  } else if (scope === 'optionGroups') {
+    const map = new Map(astate.optionGroups.map((item, index) => [String(item.id ?? `new-${index}`), item]));
+    astate.optionGroups = orderedKeys.map((key) => map.get(key)).filter(Boolean);
+    astate.optionGroups.forEach((item, index) => { item.sort_order = index + 1; });
+  }
+  ghost.remove();
+  row.classList.remove('admin-drag-source');
+  document.body.classList.remove('admin-is-dragging');
+  document.removeEventListener('pointermove', moveAdminDrag);
+  adminDragState = null;
+  render();
+}
+function dragHandle(scope, index) {
+  return `<button type="button" class="admin-drag-handle" aria-label="Drag to reorder" title="Drag to reorder" onpointerdown="startAdminDrag(event,'${scope}',${index})"><span></span><span></span><span></span><span></span><span></span><span></span></button>`;
+}
 function addProductGroup() { astate.productGroups = [...astate.productGroups, { id: null, name: "", sort_order: astate.productGroups.length, is_visible: true }]; render(); }
 function onGroupField(index, key, value) { astate.productGroups[index][key] = key === "sort_order" ? Number(value || 0) : value; }
 async function deleteProductGroup(index) {
@@ -397,7 +463,7 @@ function drinkOptionsForGroup(groupId) {
   return astate.options.map((option, index) => ({ option, index })).filter(({ option }) => String(option.option_group_id) === String(groupId));
 }
 function addDrinkOptionGroup() {
-  astate.optionGroups = [...astate.optionGroups, { id: null, name: "", required: true, is_visible: true }];
+  astate.optionGroups = [...astate.optionGroups, { id: null, name: "", required: true, is_visible: true, sort_order: astate.optionGroups.length + 1 }];
   render();
 }
 function onDrinkOptionGroupField(index, key, value) {
@@ -421,13 +487,13 @@ async function deleteDrinkOptionGroup(index) {
 async function saveDrinkOptionGroups() {
   const rows = astate.optionGroups.filter((group) => String(group.name || "").trim());
   for (const group of rows) {
-    const fields = { name: String(group.name).trim(), required: !!group.required, is_visible: group.is_visible !== false };
+    const fields = { name: String(group.name).trim(), required: !!group.required, is_visible: group.is_visible !== false, sort_order: Number(group.sort_order || rows.indexOf(group) + 1) };
     const query = group.id ? db.from("option_groups").update(fields).eq("id", group.id).select().single() : db.from("option_groups").insert(fields).select().single();
     const { data, error } = await query;
     if (error) { alert("Could not save drink option group: " + error.message); return; }
     Object.assign(group, data);
   }
-  astate.optionGroups = rows;
+  astate.optionGroups = rows.sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
   alert("Drink option groups saved. You can now add choices below.");
   render();
 }
@@ -467,7 +533,9 @@ function renderDrinkOptionsManager() {
     <div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Drink customisation</h2><span>Manage Ice, Sweetness and any future drink choices</span></div>
     ${astate.optionGroups.length ? astate.optionGroups.map((group, groupIndex) => {
       const choices = drinkOptionsForGroup(group.id);
-      return `<div style="border:1px solid #e7ddd0;border-radius:16px;padding:14px;margin:12px 0;background:#fffdf9;">
+      return `<div class="admin-sortable-item admin-option-group-card" data-sort-scope="optionGroups" data-sort-key="${escapeHtml(String(group.id ?? `new-${groupIndex}`))}">
+        ${dragHandle("optionGroups", groupIndex)}
+        <div class="admin-sortable-content">
         <div style="display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:9px;align-items:center;">
           <input value="${escapeHtml(group.name || "")}" placeholder="e.g. Ice" oninput="onDrinkOptionGroupField(${groupIndex},'name',this.value)">
           <label style="font-size:12px;white-space:nowrap;"><input type="checkbox" style="width:auto;" ${group.required ? "checked" : ""} onchange="onDrinkOptionGroupField(${groupIndex},'required',this.checked)"> Required</label>
@@ -475,7 +543,7 @@ function renderDrinkOptionsManager() {
           <button class="link-danger" style="font-size:12px;" onclick="deleteDrinkOptionGroup(${groupIndex})">Delete</button>
         </div>
         ${group.id ? `<div style="margin-top:12px;">${choices.length ? choices.map(({ option, index }) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 100px auto auto;gap:9px;align-items:center;margin:8px 0;"><input value="${escapeHtml(option.name || "")}" placeholder="e.g. Less Ice" oninput="onDrinkOptionField(${index},'name',this.value)"><input type="number" min="0" step="0.10" value="${Number(option.price || 0)}" title="Extra price" oninput="onDrinkOptionField(${index},'price',this.value)"><label style="font-size:12px;white-space:nowrap;"><input type="checkbox" style="width:auto;" ${option.is_available !== false ? "checked" : ""} onchange="onDrinkOptionField(${index},'is_available',this.checked)"> Show</label><button class="link-danger" style="font-size:12px;" onclick="deleteDrinkOption(${index})">Delete</button></div>`).join("") : `<div class="hint" style="text-align:left;margin:6px 0;">No choices yet.</div>`}<button class="btn-secondary" style="margin-top:6px;" onclick="addDrinkOption('${group.id}')">+ Add choice</button></div>` : `<div class="hint" style="text-align:left;margin:10px 0 0;">Save this new group first, then add choices such as Normal Ice or Less Ice.</div>`}
-      </div>`;
+      </div></div>`;
     }).join("") : `<div class="dashboard-empty">No drink option groups yet. Add Ice or Sweetness below.</div>`}
     <div class="btn-row" style="margin-top:14px;"><button class="btn-secondary" onclick="addDrinkOptionGroup()">+ Add option group</button><button class="btn-primary" onclick="saveDrinkOptionGroups()">Save groups</button><button class="btn-primary" onclick="saveDrinkOptions()">Save choices</button></div>
   </section>`;
@@ -790,7 +858,6 @@ function renderDashboardTab() {
   const insights = customerInsights();
   const highestDailySale = Math.max(...performance.days.map((day) => day.total), 1);
   return `
-    ${astate.newOrderAlert ? `<div class="new-order-alert"><div><strong>New order received</strong><span>${escapeHtml(astate.newOrderAlert.orderNumber)} · ${escapeHtml(astate.newOrderAlert.customer)} · ${money(astate.newOrderAlert.total)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="setTab('orders')">Open order</button><button class="btn-secondary" onclick="dismissNewOrderAlert()">Dismiss</button></div></div>` : ""}
     <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</h1><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
     <div class="stat-grid">
       <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Revenue this month</div><div class="stat-value">${money(stats.revenue)}</div><div class="stat-help">Paid orders only</div></div>
@@ -910,7 +977,7 @@ function renderOrders() {
 function renderMenuTab() {
   return `
     <section class="dashboard-card" style="padding:20px;margin-bottom:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Product groups</h2><span>These become the big headings on the ordering page</span></div>
-      ${astate.productGroups.map((group, index) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 78px auto auto;gap:9px;align-items:center;margin:9px 0;"><input value="${escapeHtml(group.name || "")}" placeholder="e.g. Special" oninput="onGroupField(${index},'name',this.value)"><input type="number" value="${Number(group.sort_order || 0)}" title="Display order" oninput="onGroupField(${index},'sort_order',this.value)"><label style="font-size:12px;white-space:nowrap;"><input type="checkbox" style="width:auto;" ${group.is_visible ? "checked" : ""} onchange="onGroupField(${index},'is_visible',this.checked)"> Show</label><button class="link-danger" style="font-size:12px;" onclick="deleteProductGroup(${index})">Delete</button></div>`).join("")}
+      <div class="admin-sortable-list">${astate.productGroups.map((group, index) => `<div class="admin-sortable-item admin-product-group-row" data-sort-scope="productGroups" data-sort-key="${escapeHtml(String(group.id ?? `new-${index}`))}">${dragHandle("productGroups", index)}<div class="admin-sortable-content admin-product-group-fields"><input value="${escapeHtml(group.name || "")}" placeholder="e.g. Special" oninput="onGroupField(${index},'name',this.value)"><label style="font-size:12px;white-space:nowrap;"><input type="checkbox" style="width:auto;" ${group.is_visible ? "checked" : ""} onchange="onGroupField(${index},'is_visible',this.checked)"> Show</label><button class="link-danger" style="font-size:12px;" onclick="deleteProductGroup(${index})">Delete</button></div></div>`).join("")}</div>
       <div class="btn-row" style="margin-top:14px;"><button class="btn-secondary" onclick="addProductGroup()">+ Add group</button><button class="btn-primary" onclick="saveProductGroups()">Save groups</button></div>
     </section>
     ${renderDrinkOptionsManager()}
@@ -1216,7 +1283,7 @@ function render() {
     ${dashboardStyles()}
     <div class="shop-admin">
       <aside class="admin-side"><div class="admin-logo">${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</div><div class="admin-caption">SHOP ADMIN</div><div class="admin-nav-label">MAIN</div><nav class="admin-nav">${nav.map(([tab, icon, label]) => `<button class="${astate.tab === tab ? "active" : ""}" onclick="setTab('${tab}')"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="admin-side-bottom"><button class="link-btn" onclick="logoutAdmin()">Sign out</button></div></aside>
-      <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}${page}</main>
+      <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}${astate.newOrderAlert ? `<div class="new-order-alert" role="alert"><div><strong>New order received</strong><span>${escapeHtml(astate.newOrderAlert.orderNumber)} · ${escapeHtml(astate.newOrderAlert.customer)} · ${money(astate.newOrderAlert.total)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="setTab('orders')">Open order</button><button class="btn-secondary" onclick="dismissNewOrderAlert()">Dismiss</button></div></div>` : ""}${page}</main>
     </div>
     ${renderEditOverlay()}
   `;
