@@ -50,7 +50,7 @@ const state = {
     saturday_collection_time: "10:00 AM - 12:00 PM",
     sunday_collection_time: "10:00 AM - 1:00 PM",
   },
-  form: { name: "", phone: "", instagram: "", pickupDate: "", slotId: "", collectionPoint: "", notes: "", promoCode: "" },
+  form: { name: "", phone: "", instagram: "", pickupDate: "", slotId: "", notes: "", promoCode: "" },
   promo: null,
   promoMsg: "",
   payment: { transactionReference: "", proofFile: null, expiresAt: null },
@@ -509,7 +509,6 @@ async function submitOrder() {
   if (!f.name.trim()) { alert("Please enter your name."); return; }
   if (!isValidPhone(f.phone)) { alert("Please enter a valid Singapore phone number (for example, 91234567)."); return; }
   if (!f.slotId) { alert("Please select a pickup slot."); return; }
-  if (!f.collectionPoint) { alert("Please select a collection point."); return; }
   if (cartLines().length === 0) { alert("Your cart is empty."); setScreen("menu"); return; }
   const slot = state.slots.find((item) => item.id === f.slotId);
   if (!slot) { alert("Please select a valid pickup slot."); return; }
@@ -526,7 +525,6 @@ async function submitOrder() {
     customer_phone: normalisePhone(f.phone),
     collection_date: slot.date,
     collection_time: slot.time,
-    collection_point: f.collectionPoint,
     instagram: f.instagram ? f.instagram.trim().replace(/^@/, "") : null,
     total,
     payment_status: "awaiting_payment",
@@ -603,11 +601,7 @@ function onPaymentReference(value) {
 
 function onPaymentProof(input) {
   const file = input && input.files && input.files[0];
-  if (!file) {
-    state.payment.proofFile = null;
-    render();
-    return;
-  }
+  if (!file) return;
   if (!String(file.type || "").startsWith("image/")) {
     alert("Please upload an image file for the payment screenshot.");
     input.value = "";
@@ -627,40 +621,24 @@ async function markPaid() {
   const order = state.lastOrder;
   const proofFile = state.payment.proofFile;
   if (!proofFile) { alert("Please upload your payment screenshot before submitting."); return; }
-  const instagramHandle = String(state.store.instagram || "shizukulab.matcha").replace(/^@/, "");
-  const instagramDmUrl = `https://ig.me/m/${encodeURIComponent(instagramHandle)}`;
-  // Open immediately from the customer's tap so mobile browsers do not block
-  // Instagram after the asynchronous screenshot upload finishes.
-  const instagramWindow = window.open("", "_blank");
   if (IS_CONFIGURED && order.id) {
     const safeFileName = String(proofFile.name || "payment-proof.jpg").replace(/[^a-zA-Z0-9._-]/g, "-");
     const filePath = `${state.customerId || "legacy"}/${order.id}/${Date.now()}-${safeFileName}`;
     const { data: upload, error: uploadError } = await db.storage.from("payment-proofs").upload(filePath, proofFile, { contentType: proofFile.type, upsert: false });
-    if (uploadError) {
-      if (instagramWindow) instagramWindow.close();
-      alert("Could not upload your payment screenshot. Please try again.\n\n" + uploadError.message);
-      return;
-    }
+    if (uploadError) { alert("Could not upload your payment screenshot. Please try again.\n\n" + uploadError.message); return; }
     const { error } = await db.rpc("submit_payment_proof", {
       p_order_id: order.id,
       p_transaction_reference: state.payment.transactionReference.trim() || null,
       p_screenshot_path: upload.path,
     });
-    if (error) {
-      if (instagramWindow) instagramWindow.close();
-      alert("Could not update payment status.\n" + error.message);
-      return;
-    }
+    if (error) { alert("Could not update payment status.\n" + error.message); return; }
   }
   state.lastOrder = { ...order, payment_status: "submitted", order_status: "awaiting_confirmation" };
   state.cart = {};
   clearSavedCart();
-  state.form.collectionPoint = "";
   state.payment = { transactionReference: "", proofFile: null, expiresAt: null };
   state.screen = "confirmation";
   render();
-  if (instagramWindow) instagramWindow.location.href = instagramDmUrl;
-  else alert("Payment proof submitted. Please open Instagram and DM us your order number: " + (order.order_number || order.id || ""));
 }
 
 /* ---------- PayNow SGQR generation (EMVCo / SGQR spec) ---------- */
@@ -986,7 +964,7 @@ function renderCart() {
 /* ---------- checkout ---------- */
 function renderCheckout() {
   const f = state.form;
-  const canSubmit = f.name.trim() && isValidPhone(f.phone) && f.slotId && f.collectionPoint;
+  const canSubmit = f.name.trim() && isValidPhone(f.phone) && f.slotId;
   const pickupDates = Array.from(new Map(state.slots.map((slot) => [slot.date, slot.label])).entries());
   const availableTimes = state.slots.filter((slot) => slot.date === f.pickupDate);
   return `
@@ -1006,13 +984,6 @@ function renderCheckout() {
         <select style="width:100%;min-height:74px;padding:14px 18px;border-radius:14px;border:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-size:18px;" ${f.pickupDate ? "" : "disabled"} onchange="onFormInput('slotId', this.value)">
           <option value="">${f.pickupDate ? "Select a time" : "Select a date first"}</option>
           ${availableTimes.map((slot) => `<option value="${escapeHtml(slot.id)}" ${f.slotId === slot.id ? "selected" : ""}>${escapeHtml(slot.time)}</option>`).join("")}
-        </select>
-      </div>
-      <div class="field"><label>Collection point <span style="color:#B33;">*</span></label>
-        <select required aria-required="true" style="width:100%;min-height:74px;padding:14px 18px;border-radius:14px;border:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-size:18px;" onchange="onFormInput('collectionPoint', this.value)">
-          <option value="">Select a collection point</option>
-          <option value="Blk 130A" ${f.collectionPoint === "Blk 130A" ? "selected" : ""}>Blk 130A</option>
-          <option value="Near Creamier" ${f.collectionPoint === "Near Creamier" ? "selected" : ""}>Near Creamier</option>
         </select>
       </div>
       <div class="field"><label>Notes (optional)</label><textarea id="f-notes" rows="2" placeholder="Less ice, allergies, etc." oninput="onFormInput('notes', this.value)">${escapeHtml(f.notes)}</textarea></div>
@@ -1050,7 +1021,7 @@ function renderCheckout() {
 function onFormInput(key, value) {
   state.form[key] = value;
   if (state.screen !== "checkout") return;
-  const canSubmit = state.form.name.trim() && isValidPhone(state.form.phone) && state.form.slotId && state.form.collectionPoint;
+  const canSubmit = state.form.name.trim() && isValidPhone(state.form.phone) && state.form.slotId;
   const button = document.getElementById("checkout-btn");
   if (button) { button.toggleAttribute("disabled", !canSubmit); button.textContent = `Continue to payment · ${money(orderTotal())}`; }
   if (key === "slotId") render();
@@ -1121,7 +1092,6 @@ function renderPayment() {
         <div class="divider"></div>
         <div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(order.order_number || order.id || "")}</span></div>
         <div class="row bold"><span class="label">Amount</span><span>${money(order.total)}</span></div>
-        <div class="row"><span class="label">Collection point</span><span>${escapeHtml(order.collection_point || "—")}</span></div>
         <div class="ref-note">Enter <b>${escapeHtml(order.order_number || order.id || "")}</b> as the payment reference.</div>
       </div>
       <div class="summary-card" style="margin-top:16px;">
@@ -1131,14 +1101,14 @@ function renderPayment() {
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Payment screenshot <span style="color:#B33;">*</span></label>
-          <input type="file" accept="image/*,.heic,.heif" required aria-required="true" onchange="onPaymentProof(this)">
-          <div class="hint" style="margin-top:8px;">${state.payment.proofFile ? `Selected: <b>${escapeHtml(state.payment.proofFile.name)}</b>` : "Required — upload a clear screenshot of your successful PayNow payment. If you opened this page inside Facebook or Instagram, please allow photo access when prompted."}</div>
+          <input type="file" accept="image/*" onchange="onPaymentProof(this)">
+          <div class="hint" style="margin-top:8px;">${state.payment.proofFile ? `Selected: <b>${escapeHtml(state.payment.proofFile.name)}</b>` : "Upload a clear screenshot of your successful PayNow payment."}</div>
         </div>
       </div>
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
-      <button class="primary-btn" ${state.payment.proofFile ? "" : "disabled"} onclick="markPaid()">Submit proof &amp; open Instagram DM</button>
-      <div class="hint" style="margin-top:8px;margin-bottom:0;">After submitting, please send us your order number on Instagram so we can verify your payment promptly.</div>
+      <button class="primary-btn" ${state.payment.proofFile ? "" : "disabled"} onclick="markPaid()">Submit payment proof</button>
+      <div class="hint" style="margin-top:8px;margin-bottom:0;">We'll confirm your order once payment is verified.</div>
     </div></div>
   `;
 }
@@ -1157,7 +1127,6 @@ function renderConfirmation() {
         <div class="mono code-text">${escapeHtml(order.order_number || order.id || "")}</div>
         <div class="divider"></div>
         <div class="row"><span class="label">Pickup</span><span>${escapeHtml(order.collection_date || "")} · ${escapeHtml(order.collection_time || "")}</span></div>
-        <div class="row"><span class="label">Collection point</span><span>${escapeHtml(order.collection_point || "—")}</span></div>
         <div class="row"><span class="label">Status</span><span>Payment sent — pending confirmation</span></div>
         <div class="row"><span class="label">Total</span><span>${money(order.total)}</span></div>
       </div>
