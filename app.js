@@ -625,17 +625,30 @@ async function markPaid() {
   const order = state.lastOrder;
   const proofFile = state.payment.proofFile;
   if (!proofFile) { alert("Please upload your payment screenshot before submitting."); return; }
+  const instagramHandle = String(state.store.instagram || "shizukulab.matcha").replace(/^@/, "");
+  const instagramDmUrl = `https://ig.me/m/${encodeURIComponent(instagramHandle)}`;
+  // Open immediately from the customer's tap so mobile browsers do not block
+  // Instagram after the asynchronous screenshot upload finishes.
+  const instagramWindow = window.open("", "_blank");
   if (IS_CONFIGURED && order.id) {
     const safeFileName = String(proofFile.name || "payment-proof.jpg").replace(/[^a-zA-Z0-9._-]/g, "-");
     const filePath = `${state.customerId || "legacy"}/${order.id}/${Date.now()}-${safeFileName}`;
     const { data: upload, error: uploadError } = await db.storage.from("payment-proofs").upload(filePath, proofFile, { contentType: proofFile.type, upsert: false });
-    if (uploadError) { alert("Could not upload your payment screenshot. Please try again.\n\n" + uploadError.message); return; }
+    if (uploadError) {
+      if (instagramWindow) instagramWindow.close();
+      alert("Could not upload your payment screenshot. Please try again.\n\n" + uploadError.message);
+      return;
+    }
     const { error } = await db.rpc("submit_payment_proof", {
       p_order_id: order.id,
       p_transaction_reference: state.payment.transactionReference.trim() || null,
       p_screenshot_path: upload.path,
     });
-    if (error) { alert("Could not update payment status.\n" + error.message); return; }
+    if (error) {
+      if (instagramWindow) instagramWindow.close();
+      alert("Could not update payment status.\n" + error.message);
+      return;
+    }
   }
   state.lastOrder = { ...order, payment_status: "submitted", order_status: "awaiting_confirmation" };
   state.cart = {};
@@ -643,6 +656,8 @@ async function markPaid() {
   state.payment = { transactionReference: "", proofFile: null, expiresAt: null };
   state.screen = "confirmation";
   render();
+  if (instagramWindow) instagramWindow.location.href = instagramDmUrl;
+  else alert("Payment proof submitted. Please open Instagram and DM us your order number: " + (order.order_number || order.id || ""));
 }
 
 /* ---------- PayNow SGQR generation (EMVCo / SGQR spec) ---------- */
@@ -1076,8 +1091,6 @@ function renderPayment() {
   const paymentExpired = paymentSecondsLeft() === 0;
   const paynowName = state.store.paynow_name || state.store.store_name || "Shizuku Lab";
   const paynowNumber = state.store.paynow_number || "";
-  const instagramHandle = String(state.store.instagram || "shizukulab.matcha").replace(/^@/, "");
-  const instagramDmUrl = `https://ig.me/m/${encodeURIComponent(instagramHandle)}`;
   let qrHtml;
   try {
     qrHtml = paynowNumber ? `<div class="qr-box ${paymentExpired ? "qr-expired" : ""}">${payNowQrSvg(order.total, order.order_number, state.payment.expiresAt)}</div>` : null;
@@ -1113,10 +1126,8 @@ function renderPayment() {
       </div>
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
-      <button class="primary-btn" ${state.payment.proofFile ? "" : "disabled"} onclick="markPaid()">Submit payment proof</button>
-      <div class="hint" style="margin-top:8px;margin-bottom:0;">We'll confirm your order once payment is verified.</div>
-      <a class="primary-btn" href="${instagramDmUrl}" target="_blank" rel="noopener" style="display:flex;align-items:center;justify-content:center;text-decoration:none;margin-top:12px;">Open Instagram DM · Send screenshot</a>
-      <div class="hint" style="margin-top:8px;margin-bottom:0;">Instagram will open in a new tab or app.</div>
+      <button class="primary-btn" ${state.payment.proofFile ? "" : "disabled"} onclick="markPaid()">Submit proof &amp; open Instagram DM</button>
+      <div class="hint" style="margin-top:8px;margin-bottom:0;">After submitting, please send us your order number on Instagram so we can verify your payment promptly.</div>
     </div></div>
   `;
 }
