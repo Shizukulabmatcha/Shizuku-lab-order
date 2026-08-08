@@ -601,7 +601,11 @@ function onPaymentReference(value) {
 
 function onPaymentProof(input) {
   const file = input && input.files && input.files[0];
-  if (!file) return;
+  if (!file) {
+    state.payment.proofFile = null;
+    render();
+    return;
+  }
   if (!String(file.type || "").startsWith("image/")) {
     alert("Please upload an image file for the payment screenshot.");
     input.value = "";
@@ -1101,8 +1105,8 @@ function renderPayment() {
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Payment screenshot <span style="color:#B33;">*</span></label>
-          <input type="file" accept="image/*" onchange="onPaymentProof(this)">
-          <div class="hint" style="margin-top:8px;">${state.payment.proofFile ? `Selected: <b>${escapeHtml(state.payment.proofFile.name)}</b>` : "Upload a clear screenshot of your successful PayNow payment."}</div>
+          <input type="file" accept="image/*,.heic,.heif" required aria-required="true" onchange="onPaymentProof(this)">
+          <div class="hint" style="margin-top:8px;">${state.payment.proofFile ? `Selected: <b>${escapeHtml(state.payment.proofFile.name)}</b>` : "Required — upload a clear screenshot of your successful PayNow payment. If you opened this page inside Facebook or Instagram, please allow photo access when prompted."}</div>
         </div>
       </div>
     </div>

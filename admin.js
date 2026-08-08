@@ -637,7 +637,9 @@ async function saveNotificationSettings() {
     alert_new_order: !!draft.alert_new_order,
     alert_payment_proof: !!draft.alert_payment_proof,
   };
-  const { data, error } = await db.from("notification_settings").upsert(fields, { onConflict: "id" }).select().single();
+  // Update the existing row so the private webhook secret (configured only in
+  // Supabase) is never overwritten by values coming from the browser.
+  const { data, error } = await db.from("notification_settings").update(fields).eq("id", 1).select().single();
   if (button) { button.textContent = "Save notification settings"; button.disabled = false; }
   if (error) { alert("Could not save notification settings: " + error.message); return; }
   astate.notificationSettings = data;
