@@ -585,10 +585,18 @@ async function submitOrder() {
     }
 
     if (state.promo) {
-      try {
-        await db.from("promo_redemptions").insert({ code: state.promo.code, phone: normalisePhone(f.phone), order_id: order.id });
+      const { error: redemptionError } = await db.from("promo_redemptions").insert({ code: state.promo.code, phone: normalisePhone(f.phone), order_id: order.id });
+      if (redemptionError) {
+        const fullTotal = cartTotal();
+        const { error: totalError } = await db.from("orders").update({ total: fullTotal }).eq("id", order.id);
+        if (totalError) throw totalError;
+        order.total = fullTotal;
+        state.promo = null;
+        state.promoMsg = "This phone number has already used that promo code.";
+        alert("This phone number has already used that promo code. The order total has been returned to the normal price.");
+      } else {
         await db.from("promo_codes").update({ used_count: (Number(state.promo.used_count) || 0) + 1 }).eq("id", state.promo.id);
-      } catch (e) { /* non-fatal — order already placed */ }
+      }
     }
 
     state.lastOrder = { ...order, items: cartLines().map((line) => ({ ...line })), slot };
@@ -1125,6 +1133,7 @@ function renderPayment() {
         <div class="divider"></div>
         <div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(order.order_number || order.id || "")}</span></div>
         <div class="row bold"><span class="label">Amount</span><span>${money(order.total)}</span></div>
+        ${paynowNumber ? `<div class="ref-note" style="color:var(--matcha);"><b>Payment amount is pre-filled in the QR and cannot be edited.</b></div>` : ""}
         <div class="row"><span class="label">Collection point</span><span>${escapeHtml(order.collection_point || "—")}</span></div>
         <div class="ref-note">Enter <b>${escapeHtml(order.order_number || order.id || "")}</b> as the payment reference.</div>
       </div>

@@ -18,6 +18,8 @@ const astate = {
   realtimeChannel: null,
   newOrderAlert: null,
   promos: [],
+  promoRedemptions: [],
+  expandedPromoCode: null,
   customerNotes: {},
   loyaltySettings: null,
   loyaltyDraft: null,
@@ -196,19 +198,22 @@ async function loadAll() {
       const { data: overrides, error: availabilityError } = await db.from("store_opening_overrides").select("*").order("collection_date");
       if (availabilityError) console.warn("Could not load store availability:", availabilityError.message);
       astate.openingOverrides = overrides || [];
-      const [{ data: promos, error: promoError }, { data: notes, error: notesError }, { data: loyaltySettings, error: loyaltySettingsError }, { data: loyaltyRows, error: loyaltyRowsError }, { data: notificationSettings, error: notificationError }] = await Promise.all([
+      const [{ data: promos, error: promoError }, { data: redemptions, error: redemptionError }, { data: notes, error: notesError }, { data: loyaltySettings, error: loyaltySettingsError }, { data: loyaltyRows, error: loyaltyRowsError }, { data: notificationSettings, error: notificationError }] = await Promise.all([
         db.from("promo_codes").select("*").order("created_at", { ascending: false }),
+        db.from("promo_redemptions").select("*"),
         db.from("customer_notes").select("*"),
         db.from("loyalty_settings").select("*").eq("id", 1).maybeSingle(),
         db.from("customer_loyalty").select("*"),
         db.from("notification_settings").select("*").eq("id", 1).maybeSingle(),
       ]);
       if (promoError) console.warn("Could not load promo codes:", promoError.message);
+      if (redemptionError) console.warn("Could not load promo redemptions:", redemptionError.message);
       if (notesError) console.warn("Could not load customer notes:", notesError.message);
       if (loyaltySettingsError) console.warn("Could not load loyalty settings:", loyaltySettingsError.message);
       if (loyaltyRowsError) console.warn("Could not load loyalty balances:", loyaltyRowsError.message);
       if (notificationError) console.warn("Could not load notification settings:", notificationError.message);
       astate.promos = promos || [];
+      astate.promoRedemptions = redemptions || [];
       astate.customerNotes = Object.fromEntries((notes || []).map((note) => [note.customer_key, note.note || ""]));
       astate.loyaltySettings = loyaltySettings || { id: 1, enabled: false, reward_type: "stamps", stamps_required: 10, minimum_spend: 5, points_per_dollar: 1, points_required: 50, reward_description: "A free drink is on us." };
       astate.loyaltyDraft = { ...astate.loyaltySettings };
@@ -943,6 +948,10 @@ function editOrder(id) {
   const order = astate.orders.find((item) => String(item.id) === String(id));
   if (!order) return;
   astate.editingOrder = JSON.parse(JSON.stringify(order));
+  const redemption = astate.promoRedemptions.find((row) => String(row.order_id) === String(order.id));
+  const subtotal = (order.order_items || []).reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+  astate.editingOrder._promoCode = redemption?.code || null;
+  astate.editingOrder._originalPromoDiscount = redemption ? Math.max(0, subtotal - Number(order.total || 0)) : 0;
   render();
 }
 function closeOrderEditor() { astate.editingOrder = null; render(); }
@@ -953,9 +962,10 @@ function editOrderItem(index, key, value) {
   if (key === "quantity" || key === "unit_price") item[key] = Math.max(0, Number(value || 0));
   else item[key] = value;
   item.subtotal = Number(item.quantity || 0) * Number(item.unit_price || 0);
-  astate.editingOrder.total = (astate.editingOrder.order_items || []).filter((row) => !row._removed).reduce((sum, row) => sum + Number(row.subtotal || 0), 0);
+  recalculateEditedOrder();
 }
-function recalculateEditedOrder() { if (astate.editingOrder) astate.editingOrder.total = (astate.editingOrder.order_items || []).filter((row) => !row._removed).reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.unit_price || 0), 0); }
+function editedOrderDiscount(order, subtotal) { if (!order?._promoCode) return 0; const promo = astate.promos.find((item) => String(item.code).toUpperCase() === String(order._promoCode).toUpperCase()); if (!promo) return Math.min(subtotal, Number(order._originalPromoDiscount || 0)); return Math.min(subtotal, promo.discount_type === "percent" ? subtotal * Number(promo.discount_value || 0) / 100 : Number(promo.discount_value || 0)); }
+function recalculateEditedOrder() { if (!astate.editingOrder) return; const subtotal = (astate.editingOrder.order_items || []).filter((row) => !row._removed).reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.unit_price || 0), 0); astate.editingOrder.total = Math.max(0, subtotal - editedOrderDiscount(astate.editingOrder, subtotal)); }
 function addOrderItem() {
   const product = astate.menu.find((item) => item.is_available !== false) || astate.menu[0];
   if (!product || !astate.editingOrder) return;
@@ -976,7 +986,8 @@ async function saveEditedOrder() {
   if (!order) return;
   const activeItems = (order.order_items || []).filter((item) => !item._removed && Number(item.quantity) > 0);
   if (!activeItems.length) return alert("An order must contain at least one item.");
-  const total = activeItems.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0);
+  const subtotal = activeItems.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0);
+  const total = Math.max(0, subtotal - editedOrderDiscount(order, subtotal));
   const fields = { customer_name: String(order.customer_name || "").trim(), customer_phone: String(order.customer_phone || "").trim(), instagram: String(order.instagram || "").trim(), collection_date: order.collection_date || null, collection_time: order.collection_time || null, collection_point: order.collection_point || null, notes: String(order.notes || "").trim() || null, total };
   const button = document.getElementById("save-edited-order"); if (button) { button.disabled = true; button.textContent = "Saving…"; }
   try {
@@ -1043,7 +1054,11 @@ function renderOrders() {
   </section>`;
   if (astate.orders.length === 0) return controls + `<div class="empty">No orders yet.</div>`;
   if (orders.length === 0) return controls + `<div class="empty">No orders match this search or filter.</div>`;
-  return controls + orders.map((o) => `
+  return controls + orders.map((o) => {
+    const redemption = astate.promoRedemptions.find((row) => String(row.order_id) === String(o.id));
+    const subtotal = (o.order_items || []).reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+    const discount = redemption ? Math.max(0, subtotal - Number(o.total || 0)) : 0;
+    return `
     <div class="order-card">
       <div class="order-top">
         <div class="mono">${o.order_number || o.id}</div>
@@ -1063,6 +1078,7 @@ function renderOrders() {
       ${o.payment_transaction_reference ? `<div class="ref-note">PayNow transaction reference: <b>${escapeHtml(o.payment_transaction_reference)}</b></div>` : ""}
       ${o.payment_screenshot_url ? `<div style="margin-top:8px;"><button class="small-btn" onclick='openPaymentProof(${JSON.stringify(o.payment_screenshot_url)})'>View payment screenshot</button></div>` : ""}
       <div class="divider"></div>
+      ${redemption ? `<div class="row"><span class="label">Subtotal</span><span>${money(subtotal)}</span></div><div class="row" style="color:#A36D1E;"><span class="label">Promo code · <b>${escapeHtml(redemption.code)}</b></span><span>−${money(discount)}</span></div>` : ""}
       <div class="row bold"><span class="label">Total</span><span>${money(o.total)}</span></div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center;">
         <button class="btn-secondary" onclick="editOrder('${o.id}')">Edit order</button>
@@ -1073,8 +1089,8 @@ function renderOrders() {
         ${o.payment_status === "paid" && o.order_status === "ready" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','collected')">Mark collected</button>` : ""}
         ${o.order_status !== "cancelled" && o.order_status !== "collected" ? `<button class="link-danger" onclick="cancelOrder('${o.id}')">Cancel order</button>` : ""}
       </div>
-    </div>
-  `).join("");
+    </div>`;
+  }).join("");
 }
 
 async function saveProductOrder() {
@@ -1158,9 +1174,18 @@ async function removePromo(id) {
   if (error) return alert("Could not delete promo: " + error.message);
   astate.promos = astate.promos.filter((promo) => String(promo.id) !== String(id)); render();
 }
+function togglePromoUses(code) { astate.expandedPromoCode = astate.expandedPromoCode === code ? null : code; render(); }
 function renderPromosTab() {
   const d = astate.promoDraft;
-  return `<div class="dashboard-grid" style="grid-template-columns:minmax(290px,.72fr) minmax(400px,1.28fr);align-items:start;"><section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>New promo code</h2></div><div class="field"><label>Code</label><input value="${escapeHtml(d.code)}" placeholder="WELCOME10" style="text-transform:uppercase" oninput="onPromoField('code',this.value);this.value=this.value.toUpperCase()"></div><div class="field"><label>Discount type</label><select onchange="onPromoField('discount_type',this.value)"><option value="fixed" ${d.discount_type === "fixed" ? "selected" : ""}>Dollar off ($)</option><option value="percent" ${d.discount_type === "percent" ? "selected" : ""}>Percent off (%)</option></select></div><div class="field"><label>Discount value</label><input type="number" min="0.01" step="0.01" value="${escapeHtml(d.discount_value)}" placeholder="1.00" oninput="onPromoField('discount_value',this.value)"></div><div class="field"><label>Minimum spend (optional)</label><input type="number" min="0" step="0.01" value="${escapeHtml(d.minimum_spend)}" placeholder="0.00" oninput="onPromoField('minimum_spend',this.value)"></div><div class="field"><label>Usage limit (optional)</label><input type="number" min="1" value="${escapeHtml(d.usage_limit)}" placeholder="No limit" oninput="onPromoField('usage_limit',this.value)"></div><div class="field"><label>End date (optional)</label><input type="date" value="${escapeHtml(d.valid_until)}" oninput="onPromoField('valid_until',this.value)"></div><div class="btn-row"><button class="btn-secondary" onclick="clearPromoDraft()">Clear</button><button class="btn-primary" id="create-promo-btn" onclick="createPromo()">Create promo</button></div></section><section class="dashboard-card"><div class="dashboard-card-head"><h2>Promo codes</h2><span>${astate.promos.length} total</span></div>${astate.promos.length ? astate.promos.map((promo) => { const exhausted = promo.usage_limit != null && Number(promo.used_count || 0) >= Number(promo.usage_limit); const active = promo.is_active && !exhausted; return `<div class="queue-row"><div class="queue-top"><div><div class="queue-number">${escapeHtml(promo.code)}</div><div class="queue-name">${promo.discount_type === "percent" ? `${escapeHtml(promo.discount_value)}% off` : `${money(promo.discount_value)} off`} · min. ${money(promo.minimum_spend || 0)}</div></div><div class="queue-status" style="background:${active ? "#e6f5df" : "#f5e8e4"};color:${active ? "#28753a" : "#a33c28"};">${active ? "LIVE" : exhausted ? "USED UP" : "PAUSED"}</div></div><div style="display:flex;gap:12px;align-items:center;margin-top:12px;"><span class="hint" style="margin:0;text-align:left;">${Number(promo.used_count || 0)} used${promo.usage_limit != null ? ` / ${promo.usage_limit}` : ""}${promo.valid_until ? ` · ends ${escapeHtml(promo.valid_until)}` : ""}</span><span style="margin-left:auto;display:flex;gap:8px;"><button class="link-btn" onclick="setPromoActive('${promo.id}',${!promo.is_active})">${promo.is_active ? "Pause" : "Make live"}</button><button class="link-danger" onclick="removePromo('${promo.id}')">Delete</button></span></div></div>`; }).join("") : `<div class="dashboard-empty">No promo codes yet.</div>`}</section></div>`;
+  const form = `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>New promo code</h2></div><div class="field"><label>Code</label><input value="${escapeHtml(d.code)}" placeholder="WELCOME10" style="text-transform:uppercase" oninput="onPromoField('code',this.value);this.value=this.value.toUpperCase()"></div><div class="field"><label>Discount type</label><select onchange="onPromoField('discount_type',this.value)"><option value="fixed" ${d.discount_type === "fixed" ? "selected" : ""}>Dollar off ($)</option><option value="percent" ${d.discount_type === "percent" ? "selected" : ""}>Percent off (%)</option></select></div><div class="field"><label>Discount value</label><input type="number" min="0.01" step="0.01" value="${escapeHtml(d.discount_value)}" placeholder="1.00" oninput="onPromoField('discount_value',this.value)"></div><div class="field"><label>Minimum spend (optional)</label><input type="number" min="0" step="0.01" value="${escapeHtml(d.minimum_spend)}" placeholder="0.00" oninput="onPromoField('minimum_spend',this.value)"></div><div class="field"><label>Usage limit (optional)</label><input type="number" min="1" value="${escapeHtml(d.usage_limit)}" placeholder="No limit" oninput="onPromoField('usage_limit',this.value)"></div><div class="field"><label>End date (optional)</label><input type="date" value="${escapeHtml(d.valid_until)}" oninput="onPromoField('valid_until',this.value)"></div><div class="btn-row"><button class="btn-secondary" onclick="clearPromoDraft()">Clear</button><button class="btn-primary" id="create-promo-btn" onclick="createPromo()">Create promo</button></div></section>`;
+  const list = `<section class="dashboard-card"><div class="dashboard-card-head"><h2>Promo codes</h2><span>${astate.promos.length} total</span></div>${astate.promos.length ? astate.promos.map((promo) => {
+    const uses = astate.promoRedemptions.filter((row) => String(row.code || "").toUpperCase() === String(promo.code || "").toUpperCase());
+    const exhausted = promo.usage_limit != null && uses.length >= Number(promo.usage_limit);
+    const active = promo.is_active && !exhausted;
+    const expanded = astate.expandedPromoCode === promo.code;
+    return `<div class="queue-row" style="cursor:default"><div class="queue-top"><div><div class="queue-number">${escapeHtml(promo.code)}</div><div class="queue-name">${promo.discount_type === "percent" ? `${escapeHtml(promo.discount_value)}% off` : `${money(promo.discount_value)} off`} · min. ${money(promo.minimum_spend || 0)}</div></div><div class="queue-status" style="background:${active ? "#e6f5df" : "#f5e8e4"};color:${active ? "#28753a" : "#a33c28"};">${active ? "LIVE" : exhausted ? "USED UP" : "PAUSED"}</div></div><div style="display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap"><button class="link-btn" onclick="togglePromoUses('${escapeHtml(promo.code)}')">${uses.length} used · ${expanded ? "Hide customers" : "View customers"}</button><span class="hint" style="margin:0">${promo.usage_limit != null ? `limit ${promo.usage_limit}` : "No total limit"}${promo.valid_until ? ` · ends ${escapeHtml(String(promo.valid_until).slice(0,10))}` : ""}</span><span style="margin-left:auto;display:flex;gap:8px"><button class="link-btn" onclick="setPromoActive('${promo.id}',${!promo.is_active})">${promo.is_active ? "Pause" : "Make live"}</button><button class="link-danger" onclick="removePromo('${promo.id}')">Delete</button></span></div>${expanded ? `<div style="margin-top:14px;border-top:1px solid #eee3d8;padding-top:8px">${uses.length ? uses.map((use) => { const order = astate.orders.find((item) => String(item.id) === String(use.order_id)); return `<div class="row" style="padding:9px 0;border-bottom:1px solid #f3ebe2"><span><b>${escapeHtml(order?.customer_name || "Customer")}</b><br><span class="hint" style="margin:0">${escapeHtml(use.phone || order?.customer_phone || "—")} · ${escapeHtml(order?.order_number || "Order")}</span></span><span class="hint" style="margin:0">${use.created_at ? new Date(use.created_at).toLocaleString() : "Used"}</span></div>`; }).join("") : `<div class="hint" style="padding:10px 0">Nobody has used this code yet.</div>`}</div>` : ""}</div>`;
+  }).join("") : `<div class="dashboard-empty">No promo codes yet.</div>`}</section>`;
+  return `<div class="dashboard-grid" style="grid-template-columns:minmax(290px,.72fr) minmax(400px,1.28fr);align-items:start">${form}${list}</div>`;
 }
 
 /* ---- customers ---- */
@@ -1395,7 +1420,9 @@ function renderEditOverlay() {
 function renderOrderEditor() {
   const order = astate.editingOrder;
   const items = order.order_items || [];
-  return `<div class="overlay"><div class="overlay-card" style="max-width:720px;max-height:88vh;overflow-y:auto"><div class="display overlay-title" style="font-size:20px">Edit ${escapeHtml(order.order_number || "order")}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="field"><label>Customer name</label><input value="${escapeHtml(order.customer_name || "")}" oninput="editOrderField('customer_name',this.value)"></div><div class="field"><label>Phone</label><input value="${escapeHtml(order.customer_phone || "")}" oninput="editOrderField('customer_phone',this.value)"></div><div class="field"><label>Instagram</label><input value="${escapeHtml(order.instagram || "")}" oninput="editOrderField('instagram',this.value)"></div><div class="field"><label>Collection date</label><input type="date" value="${escapeHtml(order.collection_date || "")}" oninput="editOrderField('collection_date',this.value)"></div><div class="field"><label>Collection time</label><input value="${escapeHtml(order.collection_time || "")}" oninput="editOrderField('collection_time',this.value)"></div><div class="field"><label>Collection point</label><select onchange="editOrderField('collection_point',this.value)"><option value="Blk 130A" ${order.collection_point === "Blk 130A" ? "selected" : ""}>Blk 130A</option><option value="Near Creamier" ${order.collection_point === "Near Creamier" ? "selected" : ""}>Near Creamier</option></select></div></div><div class="divider"></div><div class="order-top"><b>Order items</b><button class="link-btn" onclick="addOrderItem()">+ Add item</button></div>${items.map((item,index) => item._removed ? "" : `<div style="border:1px solid #e8ded1;border-radius:13px;padding:12px;margin:10px 0"><div class="field"><label>Product</label><select onchange="chooseOrderItemProduct(${index},this.value)">${astate.menu.map((product) => `<option value="${product.id}" ${String(product.id) === String(item.product_id) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div><div style="display:grid;grid-template-columns:1fr 1fr auto;gap:9px;align-items:end"><div class="field" style="margin:0"><label>Quantity</label><input type="number" min="1" value="${Number(item.quantity || 1)}" oninput="editOrderItem(${index},'quantity',this.value)"></div><div class="field" style="margin:0"><label>Unit price ($)</label><input type="number" min="0" step="0.01" value="${Number(item.unit_price || 0)}" oninput="editOrderItem(${index},'unit_price',this.value)"></div><button class="link-danger" onclick="removeOrderItem(${index})">Remove</button></div>${(item.order_item_options || []).length ? `<div class="hint" style="text-align:left;margin-top:8px">Options: ${item.order_item_options.map((option) => escapeHtml(option.option_name)).join(", ")}</div>` : ""}</div>`).join("")}<div class="row bold" style="margin:14px 0"><span>Total</span><span>${money((items || []).filter((item) => !item._removed).reduce((sum,item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0),0))}</span></div><div class="field"><label>Customer notes</label><textarea rows="3" oninput="editOrderField('notes',this.value)">${escapeHtml(order.notes || "")}</textarea></div><div class="btn-row"><button class="btn-secondary" onclick="closeOrderEditor()">Cancel</button><button class="btn-primary" id="save-edited-order" onclick="saveEditedOrder()">Save order</button></div></div></div>`;
+  const subtotal = (items || []).filter((item) => !item._removed).reduce((sum,item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0),0);
+  const discount = editedOrderDiscount(order, subtotal);
+  return `<div class="overlay"><div class="overlay-card" style="max-width:720px;max-height:88vh;overflow-y:auto"><div class="display overlay-title" style="font-size:20px">Edit ${escapeHtml(order.order_number || "order")}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="field"><label>Customer name</label><input value="${escapeHtml(order.customer_name || "")}" oninput="editOrderField('customer_name',this.value)"></div><div class="field"><label>Phone</label><input value="${escapeHtml(order.customer_phone || "")}" oninput="editOrderField('customer_phone',this.value)"></div><div class="field"><label>Instagram</label><input value="${escapeHtml(order.instagram || "")}" oninput="editOrderField('instagram',this.value)"></div><div class="field"><label>Collection date</label><input type="date" value="${escapeHtml(order.collection_date || "")}" oninput="editOrderField('collection_date',this.value)"></div><div class="field"><label>Collection time</label><input value="${escapeHtml(order.collection_time || "")}" oninput="editOrderField('collection_time',this.value)"></div><div class="field"><label>Collection point</label><select onchange="editOrderField('collection_point',this.value)"><option value="Blk 130A" ${order.collection_point === "Blk 130A" ? "selected" : ""}>Blk 130A</option><option value="Near Creamier" ${order.collection_point === "Near Creamier" ? "selected" : ""}>Near Creamier</option></select></div></div><div class="divider"></div><div class="order-top"><b>Order items</b><button class="link-btn" onclick="addOrderItem()">+ Add item</button></div>${items.map((item,index) => item._removed ? "" : `<div style="border:1px solid #e8ded1;border-radius:13px;padding:12px;margin:10px 0"><div class="field"><label>Product</label><select onchange="chooseOrderItemProduct(${index},this.value)">${astate.menu.map((product) => `<option value="${product.id}" ${String(product.id) === String(item.product_id) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div><div style="display:grid;grid-template-columns:1fr 1fr auto;gap:9px;align-items:end"><div class="field" style="margin:0"><label>Quantity</label><input type="number" min="1" value="${Number(item.quantity || 1)}" oninput="editOrderItem(${index},'quantity',this.value)"></div><div class="field" style="margin:0"><label>Unit price ($)</label><input type="number" min="0" step="0.01" value="${Number(item.unit_price || 0)}" oninput="editOrderItem(${index},'unit_price',this.value)"></div><button class="link-danger" onclick="removeOrderItem(${index})">Remove</button></div>${(item.order_item_options || []).length ? `<div class="hint" style="text-align:left;margin-top:8px">Options: ${item.order_item_options.map((option) => escapeHtml(option.option_name)).join(", ")}</div>` : ""}</div>`).join("")}<div class="row"><span>Subtotal</span><span>${money(subtotal)}</span></div>${order._promoCode ? `<div class="row" style="color:#A36D1E"><span>Promo · ${escapeHtml(order._promoCode)}</span><span>−${money(discount)}</span></div>` : ""}<div class="row bold" style="margin:8px 0 14px"><span>Total</span><span>${money(Math.max(0,subtotal-discount))}</span></div><div class="field"><label>Customer notes</label><textarea rows="3" oninput="editOrderField('notes',this.value)">${escapeHtml(order.notes || "")}</textarea></div><div class="btn-row"><button class="btn-secondary" onclick="closeOrderEditor()">Cancel</button><button class="btn-primary" id="save-edited-order" onclick="saveEditedOrder()">Save order</button></div></div></div>`;
 }
 
 function render() {
