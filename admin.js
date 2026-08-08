@@ -637,9 +637,7 @@ async function saveNotificationSettings() {
     alert_new_order: !!draft.alert_new_order,
     alert_payment_proof: !!draft.alert_payment_proof,
   };
-  // Update the existing row so the private webhook secret (configured only in
-  // Supabase) is never overwritten by values coming from the browser.
-  const { data, error } = await db.from("notification_settings").update(fields).eq("id", 1).select().single();
+  const { data, error } = await db.from("notification_settings").upsert(fields, { onConflict: "id" }).select().single();
   if (button) { button.textContent = "Save notification settings"; button.disabled = false; }
   if (error) { alert("Could not save notification settings: " + error.message); return; }
   astate.notificationSettings = data;
@@ -961,7 +959,6 @@ function renderOrders() {
       </div>
       <div class="order-meta">${o.customer_name || ""} · ${o.customer_phone || ""}${o.instagram ? " · @" + o.instagram : ""}</div>
       <div class="order-meta">Pickup: ${o.collection_date || ""} ${o.collection_time || ""}</div>
-      <div class="order-meta">Collection point: <b>${escapeHtml(o.collection_point || "—")}</b></div>
       <div class="order-meta">Order status: <b style="color:${ORDER_COLOR[o.order_status] || "inherit"}">${ORDER_LABEL[o.order_status] || o.order_status || "—"}</b></div>
       <div style="margin-top:8px;">
         ${(o.order_items || []).map((it) => `
@@ -975,7 +972,7 @@ function renderOrders() {
       <div class="divider"></div>
       <div class="row bold"><span class="label">Total</span><span>${money(o.total)}</span></div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center;">
-        ${o.order_status !== "cancelled" && (o.payment_status === "submitted" || o.payment_status === "awaiting_payment") ? `<button class="small-btn" onclick="confirmPayment('${o.id}')">✓ Confirm payment</button>` : ""}
+        ${(o.payment_status === "submitted" || o.payment_status === "awaiting_payment") ? `<button class="small-btn" onclick="confirmPayment('${o.id}')">✓ Confirm payment</button>` : ""}
         ${o.payment_status === "awaiting_payment" ? `<span class="hint" style="margin:0;">Check the Instagram DM payment screenshot before confirming.</span>` : ""}
         ${o.payment_status === "paid" && o.order_status === "confirmed" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','preparing')">Start preparing</button>` : ""}
         ${o.payment_status === "paid" && o.order_status === "preparing" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','ready')">Mark ready for collection</button>` : ""}
