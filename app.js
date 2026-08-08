@@ -50,12 +50,13 @@ const state = {
     saturday_collection_time: "10:00 AM - 12:00 PM",
     sunday_collection_time: "10:00 AM - 1:00 PM",
   },
-  form: { name: "", phone: "", instagram: "", pickupDate: "", slotId: "", notes: "", promoCode: "" },
+  form: { name: "", phone: "", instagram: "", pickupDate: "", slotId: "", collectionPoint: "", notes: "", promoCode: "" },
   promo: null,
   promoMsg: "",
   payment: { transactionReference: "", proofFile: null, expiresAt: null },
   customerId: null,
   tracking: { orderNumber: "", phone: "", order: null, message: "", loading: false },
+  loyalty: { phone: "", account: null, message: "", loading: false },
   lastOrder: null,
   loading: true,
   loadError: null,
@@ -292,6 +293,9 @@ async function init() {
   state.loadError = null;
   state.slots = computeSlots();
 
+  const requestedScreen = new URLSearchParams(window.location.search).get("screen");
+  if (requestedScreen === "track" || requestedScreen === "loyalty") state.screen = requestedScreen;
+
   if (!IS_CONFIGURED) { state.loading = false; render(); return; }
 
   try {
@@ -509,6 +513,7 @@ async function submitOrder() {
   if (!f.name.trim()) { alert("Please enter your name."); return; }
   if (!isValidPhone(f.phone)) { alert("Please enter a valid Singapore phone number (for example, 91234567)."); return; }
   if (!f.slotId) { alert("Please select a pickup slot."); return; }
+  if (!f.collectionPoint) { alert("Please select a collection point."); return; }
   if (cartLines().length === 0) { alert("Your cart is empty."); setScreen("menu"); return; }
   const slot = state.slots.find((item) => item.id === f.slotId);
   if (!slot) { alert("Please select a valid pickup slot."); return; }
@@ -525,6 +530,7 @@ async function submitOrder() {
     customer_phone: normalisePhone(f.phone),
     collection_date: slot.date,
     collection_time: slot.time,
+    collection_point: f.collectionPoint,
     instagram: f.instagram ? f.instagram.trim().replace(/^@/, "") : null,
     total,
     payment_status: "awaiting_payment",
@@ -601,7 +607,11 @@ function onPaymentReference(value) {
 
 function onPaymentProof(input) {
   const file = input && input.files && input.files[0];
-  if (!file) return;
+  if (!file) {
+    state.payment.proofFile = null;
+    render();
+    return;
+  }
   if (!String(file.type || "").startsWith("image/")) {
     alert("Please upload an image file for the payment screenshot.");
     input.value = "";
@@ -621,24 +631,40 @@ async function markPaid() {
   const order = state.lastOrder;
   const proofFile = state.payment.proofFile;
   if (!proofFile) { alert("Please upload your payment screenshot before submitting."); return; }
+  const instagramHandle = String(state.store.instagram || "shizukulab.matcha").replace(/^@/, "");
+  const instagramDmUrl = `https://ig.me/m/${encodeURIComponent(instagramHandle)}`;
+  // Open immediately from the customer's tap so mobile browsers do not block
+  // Instagram after the asynchronous screenshot upload finishes.
+  const instagramWindow = window.open("", "_blank");
   if (IS_CONFIGURED && order.id) {
     const safeFileName = String(proofFile.name || "payment-proof.jpg").replace(/[^a-zA-Z0-9._-]/g, "-");
     const filePath = `${state.customerId || "legacy"}/${order.id}/${Date.now()}-${safeFileName}`;
     const { data: upload, error: uploadError } = await db.storage.from("payment-proofs").upload(filePath, proofFile, { contentType: proofFile.type, upsert: false });
-    if (uploadError) { alert("Could not upload your payment screenshot. Please try again.\n\n" + uploadError.message); return; }
+    if (uploadError) {
+      if (instagramWindow) instagramWindow.close();
+      alert("Could not upload your payment screenshot. Please try again.\n\n" + uploadError.message);
+      return;
+    }
     const { error } = await db.rpc("submit_payment_proof", {
       p_order_id: order.id,
       p_transaction_reference: state.payment.transactionReference.trim() || null,
       p_screenshot_path: upload.path,
     });
-    if (error) { alert("Could not update payment status.\n" + error.message); return; }
+    if (error) {
+      if (instagramWindow) instagramWindow.close();
+      alert("Could not update payment status.\n" + error.message);
+      return;
+    }
   }
   state.lastOrder = { ...order, payment_status: "submitted", order_status: "awaiting_confirmation" };
   state.cart = {};
   clearSavedCart();
+  state.form.collectionPoint = "";
   state.payment = { transactionReference: "", proofFile: null, expiresAt: null };
   state.screen = "confirmation";
   render();
+  if (instagramWindow) instagramWindow.location.href = instagramDmUrl;
+  else alert("Payment proof submitted. Please open Instagram and DM us your order number: " + (order.order_number || order.id || ""));
 }
 
 /* ---------- PayNow SGQR generation (EMVCo / SGQR spec) ---------- */
@@ -964,7 +990,7 @@ function renderCart() {
 /* ---------- checkout ---------- */
 function renderCheckout() {
   const f = state.form;
-  const canSubmit = f.name.trim() && isValidPhone(f.phone) && f.slotId;
+  const canSubmit = f.name.trim() && isValidPhone(f.phone) && f.slotId && f.collectionPoint;
   const pickupDates = Array.from(new Map(state.slots.map((slot) => [slot.date, slot.label])).entries());
   const availableTimes = state.slots.filter((slot) => slot.date === f.pickupDate);
   return `
@@ -984,6 +1010,13 @@ function renderCheckout() {
         <select style="width:100%;min-height:74px;padding:14px 18px;border-radius:14px;border:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-size:18px;" ${f.pickupDate ? "" : "disabled"} onchange="onFormInput('slotId', this.value)">
           <option value="">${f.pickupDate ? "Select a time" : "Select a date first"}</option>
           ${availableTimes.map((slot) => `<option value="${escapeHtml(slot.id)}" ${f.slotId === slot.id ? "selected" : ""}>${escapeHtml(slot.time)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field"><label>Collection point <span style="color:#B33;">*</span></label>
+        <select required aria-required="true" style="width:100%;min-height:74px;padding:14px 18px;border-radius:14px;border:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-size:18px;" onchange="onFormInput('collectionPoint', this.value)">
+          <option value="">Select a collection point</option>
+          <option value="Blk 130A" ${f.collectionPoint === "Blk 130A" ? "selected" : ""}>Blk 130A</option>
+          <option value="Near Creamier" ${f.collectionPoint === "Near Creamier" ? "selected" : ""}>Near Creamier</option>
         </select>
       </div>
       <div class="field"><label>Notes (optional)</label><textarea id="f-notes" rows="2" placeholder="Less ice, allergies, etc." oninput="onFormInput('notes', this.value)">${escapeHtml(f.notes)}</textarea></div>
@@ -1021,7 +1054,7 @@ function renderCheckout() {
 function onFormInput(key, value) {
   state.form[key] = value;
   if (state.screen !== "checkout") return;
-  const canSubmit = state.form.name.trim() && isValidPhone(state.form.phone) && state.form.slotId;
+  const canSubmit = state.form.name.trim() && isValidPhone(state.form.phone) && state.form.slotId && state.form.collectionPoint;
   const button = document.getElementById("checkout-btn");
   if (button) { button.toggleAttribute("disabled", !canSubmit); button.textContent = `Continue to payment · ${money(orderTotal())}`; }
   if (key === "slotId") render();
@@ -1092,6 +1125,7 @@ function renderPayment() {
         <div class="divider"></div>
         <div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(order.order_number || order.id || "")}</span></div>
         <div class="row bold"><span class="label">Amount</span><span>${money(order.total)}</span></div>
+        <div class="row"><span class="label">Collection point</span><span>${escapeHtml(order.collection_point || "—")}</span></div>
         <div class="ref-note">Enter <b>${escapeHtml(order.order_number || order.id || "")}</b> as the payment reference.</div>
       </div>
       <div class="summary-card" style="margin-top:16px;">
@@ -1101,14 +1135,14 @@ function renderPayment() {
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Payment screenshot <span style="color:#B33;">*</span></label>
-          <input type="file" accept="image/*" onchange="onPaymentProof(this)">
-          <div class="hint" style="margin-top:8px;">${state.payment.proofFile ? `Selected: <b>${escapeHtml(state.payment.proofFile.name)}</b>` : "Upload a clear screenshot of your successful PayNow payment."}</div>
+          <input type="file" accept="image/*,.heic,.heif" required aria-required="true" onchange="onPaymentProof(this)">
+          <div class="hint" style="margin-top:8px;">${state.payment.proofFile ? `Selected: <b>${escapeHtml(state.payment.proofFile.name)}</b>` : "Required — upload a clear screenshot of your successful PayNow payment. If you opened this page inside Facebook or Instagram, please allow photo access when prompted."}</div>
         </div>
       </div>
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
-      <button class="primary-btn" ${state.payment.proofFile ? "" : "disabled"} onclick="markPaid()">Submit payment proof</button>
-      <div class="hint" style="margin-top:8px;margin-bottom:0;">We'll confirm your order once payment is verified.</div>
+      <button class="primary-btn" ${state.payment.proofFile ? "" : "disabled"} onclick="markPaid()">Submit proof &amp; open Instagram DM</button>
+      <div class="hint" style="margin-top:8px;margin-bottom:0;">After submitting, please send us your order number on Instagram so we can verify your payment promptly.</div>
     </div></div>
   `;
 }
@@ -1127,6 +1161,7 @@ function renderConfirmation() {
         <div class="mono code-text">${escapeHtml(order.order_number || order.id || "")}</div>
         <div class="divider"></div>
         <div class="row"><span class="label">Pickup</span><span>${escapeHtml(order.collection_date || "")} · ${escapeHtml(order.collection_time || "")}</span></div>
+        <div class="row"><span class="label">Collection point</span><span>${escapeHtml(order.collection_point || "—")}</span></div>
         <div class="row"><span class="label">Status</span><span>Payment sent — pending confirmation</span></div>
         <div class="row"><span class="label">Total</span><span>${money(order.total)}</span></div>
       </div>
@@ -1166,7 +1201,7 @@ function renderTrackOrder() {
   return `
     ${header()}
     <div class="screen">
-      <button class="back-link" onclick="setScreen('menu')">${ICONS.back} Back to menu</button>
+      <button class="back-link" onclick="window.location.href='index.html'">${ICONS.back} Back to welcome</button>
       <div class="display" style="font-size:23px;margin:4px 0 6px;">Track my order</div>
       <div class="hint" style="text-align:left;line-height:1.5;">Enter the order number and phone number you used at checkout.</div>
       <div class="summary-card" style="margin-top:16px;">
@@ -1176,6 +1211,54 @@ function renderTrackOrder() {
         ${t.message ? `<div class="ref-note" style="color:#B33333;">${escapeHtml(t.message)}</div>` : ""}
       </div>
       ${t.order ? `<div class="summary-card" style="margin-top:16px;"><div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(t.order.order_number)}</span></div><div class="row"><span class="label">Pickup</span><span>${escapeHtml(t.order.collection_date || "")} · ${escapeHtml(t.order.collection_time || "")}</span></div><div class="divider"></div><div class="center" style="padding:12px 0 8px;"><div style="display:inline-flex;width:54px;height:54px;align-items:center;justify-content:center;background:var(--matcha);color:var(--cream);border-radius:999px;font-size:24px;">✓</div><div class="display" style="font-size:20px;margin-top:12px;">${escapeHtml(status.title)}</div><div class="hint" style="margin:8px 0 14px;line-height:1.5;">${escapeHtml(status.note)}</div></div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:4px 0 2px;">${stages.map((stage, index) => `<div style="text-align:center;"><div style="height:6px;border-radius:99px;background:${index <= status.step ? "var(--matcha)" : "var(--line)"};"></div><div style="font-size:9px;color:var(--muted);line-height:1.25;margin-top:6px;">${stage}</div></div>`).join("")}</div></div>` : ""}
+    </div>`;
+}
+
+/* ---------- customer loyalty ---------- */
+async function findLoyalty() {
+  const loyalty = state.loyalty;
+  const phone = normalisePhone(loyalty.phone);
+  if (!isValidPhone(phone)) {
+    loyalty.message = "Enter the Singapore phone number used at checkout.";
+    loyalty.account = null;
+    render();
+    return;
+  }
+  loyalty.loading = true;
+  loyalty.message = "";
+  loyalty.account = null;
+  render();
+  const { data, error } = await db.rpc("check_shizuku_loyalty", { p_phone: phone });
+  loyalty.loading = false;
+  if (error) loyalty.message = "We couldn’t check your rewards right now. Please try again shortly.";
+  else if (!data) loyalty.message = "We couldn’t find a rewards account for that phone number.";
+  else if (data.enabled === false) loyalty.message = "The Shizuku rewards programme is currently unavailable.";
+  else loyalty.account = data;
+  render();
+}
+
+function renderLoyalty() {
+  const loyalty = state.loyalty;
+  const account = loyalty.account;
+  const pointsMode = account?.reward_type === "points";
+  const value = Number(pointsMode ? account?.points : account?.stamps) || 0;
+  const goal = Math.max(1, Number(pointsMode ? account?.points_required : account?.stamps_required) || 1);
+  const progress = Math.min(100, Math.max(0, (value / goal) * 100));
+  const dots = !pointsMode && account
+    ? Array.from({ length: Math.min(goal, 20) }, (_, index) => `<div style="aspect-ratio:1;border:2px solid ${index < value ? "#dcebd8" : "rgba(241,247,234,.48)"};background:${index < value ? "rgba(220,235,216,.2)" : "transparent"};border-radius:50%;display:grid;place-items:center;color:#eaf4e5;font-size:13px;">${index < value ? "★" : "☆"}</div>`).join("")
+    : "";
+  return `
+    ${header()}
+    <div class="screen">
+      <button class="back-link" onclick="window.location.href='index.html'">${ICONS.back} Back to welcome</button>
+      <div class="display" style="font-size:23px;margin:4px 0 6px;">Check my loyalty</div>
+      <div class="hint" style="text-align:left;line-height:1.5;">Use the same phone number entered when you placed your order.</div>
+      <div class="summary-card" style="margin-top:16px;">
+        <div class="field" style="margin-bottom:0;"><label>Phone number</label><input value="${escapeHtml(loyalty.phone)}" placeholder="Singapore phone number" inputmode="tel" oninput="this.value=cleanPhoneInput(this.value);state.loyalty.phone=this.value"></div>
+        <button class="primary-btn" style="margin-top:16px;" ${loyalty.loading ? "disabled" : ""} onclick="findLoyalty()">${loyalty.loading ? "Checking…" : "Check loyalty"}</button>
+        ${loyalty.message ? `<div class="ref-note" style="color:#B33333;">${escapeHtml(loyalty.message)}</div>` : ""}
+      </div>
+      ${account ? `<div style="margin-top:16px;padding:24px;background:linear-gradient(135deg,#1e473e,#294c44 55%,#19362f);border-radius:20px;color:#f9f4e8;box-shadow:0 14px 30px rgba(30,71,62,.18);"><div style="font-size:10px;font-weight:800;letter-spacing:.15em;color:#b7d2bb;">SHIZUKU LAB · MEMBER</div><div class="display" style="font-size:25px;margin-top:9px;color:#f9f4e8;">Shizuku Club</div>${pointsMode ? `<div style="font:700 48px/1 Georgia,serif;margin:24px 0 8px;">${value} <span style="font:600 15px/1 inherit;color:#cce0ca;">points</span></div><div style="height:9px;background:rgba(255,255,255,.2);border-radius:99px;margin:18px 0;overflow:hidden;"><div style="height:100%;width:${progress}%;background:#cae4b3;border-radius:99px;"></div></div><div style="font-size:12px;color:#d6e4d4;">${value} / ${goal} points</div>` : `<div style="margin:22px 0 17px;display:grid;grid-template-columns:repeat(5,1fr);gap:8px;">${dots}</div><div style="font-size:12px;color:#d6e4d4;">${value} / ${goal} stamps</div>`}<div style="border-top:1px solid rgba(255,255,255,.2);margin:20px 0 16px;"></div><div style="font-size:10px;font-weight:800;letter-spacing:.12em;color:#b7d2bb;">NEXT REWARD</div><div style="font-size:15px;font-weight:700;margin-top:6px;">${escapeHtml(account.reward_description || "A free drink is on us.")}</div><div style="margin-top:15px;font-size:13px;color:#d6e4d4;">Rewards ready: <b style="color:#fff;">${Number(account.rewards_available || 0)}</b></div></div>` : ""}
     </div>`;
 }
 
@@ -1193,6 +1276,7 @@ function render() {
   else if (state.screen === "payment") html = renderPayment();
   else if (state.screen === "confirmation") html = renderConfirmation();
   else if (state.screen === "track") html = renderTrackOrder();
+  else if (state.screen === "loyalty") html = renderLoyalty();
   else html = renderMenu();
   app.innerHTML = html;
   if (state.screen === "payment") startPaymentCountdown();
