@@ -50,7 +50,7 @@ const state = {
     saturday_collection_time: "10:00 AM - 12:00 PM",
     sunday_collection_time: "10:00 AM - 1:00 PM",
   },
-  form: { name: "", phone: "", instagram: "", pickupDate: "", slotId: "", notes: "", promoCode: "" },
+  form: { name: "", phone: "", instagram: "", pickupDate: "", slotId: "", collectionPoint: "", notes: "", promoCode: "" },
   promo: null,
   promoMsg: "",
   payment: { transactionReference: "", proofFile: null, expiresAt: null },
@@ -509,6 +509,7 @@ async function submitOrder() {
   if (!f.name.trim()) { alert("Please enter your name."); return; }
   if (!isValidPhone(f.phone)) { alert("Please enter a valid Singapore phone number (for example, 91234567)."); return; }
   if (!f.slotId) { alert("Please select a pickup slot."); return; }
+  if (!f.collectionPoint) { alert("Please select a collection point."); return; }
   if (cartLines().length === 0) { alert("Your cart is empty."); setScreen("menu"); return; }
   const slot = state.slots.find((item) => item.id === f.slotId);
   if (!slot) { alert("Please select a valid pickup slot."); return; }
@@ -525,6 +526,7 @@ async function submitOrder() {
     customer_phone: normalisePhone(f.phone),
     collection_date: slot.date,
     collection_time: slot.time,
+    collection_point: f.collectionPoint,
     instagram: f.instagram ? f.instagram.trim().replace(/^@/, "") : null,
     total,
     payment_status: "awaiting_payment",
@@ -653,6 +655,7 @@ async function markPaid() {
   state.lastOrder = { ...order, payment_status: "submitted", order_status: "awaiting_confirmation" };
   state.cart = {};
   clearSavedCart();
+  state.form.collectionPoint = "";
   state.payment = { transactionReference: "", proofFile: null, expiresAt: null };
   state.screen = "confirmation";
   render();
@@ -983,7 +986,7 @@ function renderCart() {
 /* ---------- checkout ---------- */
 function renderCheckout() {
   const f = state.form;
-  const canSubmit = f.name.trim() && isValidPhone(f.phone) && f.slotId;
+  const canSubmit = f.name.trim() && isValidPhone(f.phone) && f.slotId && f.collectionPoint;
   const pickupDates = Array.from(new Map(state.slots.map((slot) => [slot.date, slot.label])).entries());
   const availableTimes = state.slots.filter((slot) => slot.date === f.pickupDate);
   return `
@@ -1003,6 +1006,13 @@ function renderCheckout() {
         <select style="width:100%;min-height:74px;padding:14px 18px;border-radius:14px;border:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-size:18px;" ${f.pickupDate ? "" : "disabled"} onchange="onFormInput('slotId', this.value)">
           <option value="">${f.pickupDate ? "Select a time" : "Select a date first"}</option>
           ${availableTimes.map((slot) => `<option value="${escapeHtml(slot.id)}" ${f.slotId === slot.id ? "selected" : ""}>${escapeHtml(slot.time)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field"><label>Collection point <span style="color:#B33;">*</span></label>
+        <select required aria-required="true" style="width:100%;min-height:74px;padding:14px 18px;border-radius:14px;border:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-size:18px;" onchange="onFormInput('collectionPoint', this.value)">
+          <option value="">Select a collection point</option>
+          <option value="Blk 130A" ${f.collectionPoint === "Blk 130A" ? "selected" : ""}>Blk 130A</option>
+          <option value="Near Creamier" ${f.collectionPoint === "Near Creamier" ? "selected" : ""}>Near Creamier</option>
         </select>
       </div>
       <div class="field"><label>Notes (optional)</label><textarea id="f-notes" rows="2" placeholder="Less ice, allergies, etc." oninput="onFormInput('notes', this.value)">${escapeHtml(f.notes)}</textarea></div>
@@ -1040,7 +1050,7 @@ function renderCheckout() {
 function onFormInput(key, value) {
   state.form[key] = value;
   if (state.screen !== "checkout") return;
-  const canSubmit = state.form.name.trim() && isValidPhone(state.form.phone) && state.form.slotId;
+  const canSubmit = state.form.name.trim() && isValidPhone(state.form.phone) && state.form.slotId && state.form.collectionPoint;
   const button = document.getElementById("checkout-btn");
   if (button) { button.toggleAttribute("disabled", !canSubmit); button.textContent = `Continue to payment · ${money(orderTotal())}`; }
   if (key === "slotId") render();
@@ -1111,6 +1121,7 @@ function renderPayment() {
         <div class="divider"></div>
         <div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(order.order_number || order.id || "")}</span></div>
         <div class="row bold"><span class="label">Amount</span><span>${money(order.total)}</span></div>
+        <div class="row"><span class="label">Collection point</span><span>${escapeHtml(order.collection_point || "—")}</span></div>
         <div class="ref-note">Enter <b>${escapeHtml(order.order_number || order.id || "")}</b> as the payment reference.</div>
       </div>
       <div class="summary-card" style="margin-top:16px;">
@@ -1146,6 +1157,7 @@ function renderConfirmation() {
         <div class="mono code-text">${escapeHtml(order.order_number || order.id || "")}</div>
         <div class="divider"></div>
         <div class="row"><span class="label">Pickup</span><span>${escapeHtml(order.collection_date || "")} · ${escapeHtml(order.collection_time || "")}</span></div>
+        <div class="row"><span class="label">Collection point</span><span>${escapeHtml(order.collection_point || "—")}</span></div>
         <div class="row"><span class="label">Status</span><span>Payment sent — pending confirmation</span></div>
         <div class="row"><span class="label">Total</span><span>${money(order.total)}</span></div>
       </div>
