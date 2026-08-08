@@ -1076,6 +1076,8 @@ function renderPayment() {
   const paymentExpired = paymentSecondsLeft() === 0;
   const paynowName = state.store.paynow_name || state.store.store_name || "Shizuku Lab";
   const paynowNumber = state.store.paynow_number || "";
+  const instagramHandle = String(state.store.instagram || "shizukulab.matcha").replace(/^@/, "");
+  const instagramDmUrl = `https://ig.me/m/${encodeURIComponent(instagramHandle)}`;
   let qrHtml;
   try {
     qrHtml = paynowNumber ? `<div class="qr-box ${paymentExpired ? "qr-expired" : ""}">${payNowQrSvg(order.total, order.order_number, state.payment.expiresAt)}</div>` : null;
@@ -1113,6 +1115,8 @@ function renderPayment() {
     <div class="sticky-bar"><div class="sticky-bar-inner">
       <button class="primary-btn" ${state.payment.proofFile ? "" : "disabled"} onclick="markPaid()">Submit payment proof</button>
       <div class="hint" style="margin-top:8px;margin-bottom:0;">We'll confirm your order once payment is verified.</div>
+      <a class="primary-btn" href="${instagramDmUrl}" target="_blank" rel="noopener" style="display:flex;align-items:center;justify-content:center;text-decoration:none;margin-top:12px;">Open Instagram DM · Send screenshot</a>
+      <div class="hint" style="margin-top:8px;margin-bottom:0;">Instagram will open in a new tab or app.</div>
     </div></div>
   `;
 }
