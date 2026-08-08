@@ -35,6 +35,12 @@ const astate = {
   calendarMonth: null,
   orderFilter: "all",
   orderSearch: "",
+  inventory: [],
+  recipes: [],
+  inventoryReady: true,
+  inventoryDraft: null,
+  recipeProductId: null,
+  editingOrder: null,
   loading: true,
   loadError: null,
   editing: null,
@@ -209,6 +215,13 @@ async function loadAll() {
       astate.customerLoyalty = Object.fromEntries((loyaltyRows || []).map((row) => [row.customer_key, row]));
       astate.notificationSettings = notificationSettings || { id: 1, recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true };
       astate.notificationDraft = { ...astate.notificationSettings };
+      const [inventoryResult, recipeResult] = await Promise.all([
+        db.from("inventory_items").select("*").order("name"),
+        db.from("product_recipes").select("*").order("product_id"),
+      ]);
+      astate.inventoryReady = !inventoryResult.error && !recipeResult.error;
+      astate.inventory = inventoryResult.data || [];
+      astate.recipes = recipeResult.data || [];
       if (!astate.selectedAvailabilityDate) astate.selectedAvailabilityDate = localDateText(new Date());
       if (!astate.calendarMonth) astate.calendarMonth = astate.selectedAvailabilityDate.slice(0, 7) + "-01";
       setAvailabilityDraft(astate.selectedAvailabilityDate);
@@ -637,7 +650,9 @@ async function saveNotificationSettings() {
     alert_new_order: !!draft.alert_new_order,
     alert_payment_proof: !!draft.alert_payment_proof,
   };
-  const { data, error } = await db.from("notification_settings").upsert(fields, { onConflict: "id" }).select().single();
+  // Update the existing row so the private webhook secret (configured only in
+  // Supabase) is never overwritten by values coming from the browser.
+  const { data, error } = await db.from("notification_settings").update(fields).eq("id", 1).select().single();
   if (button) { button.textContent = "Save notification settings"; button.disabled = false; }
   if (error) { alert("Could not save notification settings: " + error.message); return; }
   astate.notificationSettings = data;
@@ -922,6 +937,83 @@ function renderLogin() {
 
 function setOrderFilter(filter) { astate.orderFilter = filter; render(); }
 function setOrderSearch(value) { astate.orderSearch = value; render(); }
+
+/* ---- order editing ---- */
+function editOrder(id) {
+  const order = astate.orders.find((item) => String(item.id) === String(id));
+  if (!order) return;
+  astate.editingOrder = JSON.parse(JSON.stringify(order));
+  render();
+}
+function closeOrderEditor() { astate.editingOrder = null; render(); }
+function editOrderField(key, value) { if (astate.editingOrder) astate.editingOrder[key] = value; }
+function editOrderItem(index, key, value) {
+  const item = astate.editingOrder?.order_items?.[index];
+  if (!item) return;
+  if (key === "quantity" || key === "unit_price") item[key] = Math.max(0, Number(value || 0));
+  else item[key] = value;
+  item.subtotal = Number(item.quantity || 0) * Number(item.unit_price || 0);
+  astate.editingOrder.total = (astate.editingOrder.order_items || []).filter((row) => !row._removed).reduce((sum, row) => sum + Number(row.subtotal || 0), 0);
+}
+function recalculateEditedOrder() { if (astate.editingOrder) astate.editingOrder.total = (astate.editingOrder.order_items || []).filter((row) => !row._removed).reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.unit_price || 0), 0); }
+function addOrderItem() {
+  const product = astate.menu.find((item) => item.is_available !== false) || astate.menu[0];
+  if (!product || !astate.editingOrder) return;
+  astate.editingOrder.order_items.push({ id: null, product_id: product.id, product_name: product.name, quantity: 1, unit_price: Number(product.discount_price || product.price || 0), subtotal: Number(product.discount_price || product.price || 0), order_item_options: [] });
+  editOrderItem(astate.editingOrder.order_items.length - 1, "quantity", 1);
+  render();
+}
+function chooseOrderItemProduct(index, productId) {
+  const product = astate.menu.find((item) => String(item.id) === String(productId));
+  const item = astate.editingOrder?.order_items?.[index];
+  if (!product || !item) return;
+  item.product_id = product.id; item.product_name = product.name; item.unit_price = Number(product.discount_price || product.price || 0); item.order_item_options = [];
+  editOrderItem(index, "quantity", item.quantity || 1); render();
+}
+function removeOrderItem(index) { const item = astate.editingOrder?.order_items?.[index]; if (!item) return; if (item.id) item._removed = true; else astate.editingOrder.order_items.splice(index, 1); recalculateEditedOrder(); render(); }
+async function saveEditedOrder() {
+  const order = astate.editingOrder;
+  if (!order) return;
+  const activeItems = (order.order_items || []).filter((item) => !item._removed && Number(item.quantity) > 0);
+  if (!activeItems.length) return alert("An order must contain at least one item.");
+  const total = activeItems.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0);
+  const fields = { customer_name: String(order.customer_name || "").trim(), customer_phone: String(order.customer_phone || "").trim(), instagram: String(order.instagram || "").trim(), collection_date: order.collection_date || null, collection_time: order.collection_time || null, collection_point: order.collection_point || null, notes: String(order.notes || "").trim() || null, total };
+  const button = document.getElementById("save-edited-order"); if (button) { button.disabled = true; button.textContent = "Saving…"; }
+  try {
+    const { error: orderError } = await db.from("orders").update(fields).eq("id", order.id); if (orderError) throw orderError;
+    for (const item of order.order_items || []) {
+      if (item._removed && item.id) { const { error } = await db.from("order_items").delete().eq("id", item.id); if (error) throw error; continue; }
+      if (item._removed || Number(item.quantity) <= 0) continue;
+      const payload = { product_id: item.product_id, product_name: item.product_name, quantity: Number(item.quantity), unit_price: Number(item.unit_price), subtotal: Number(item.quantity) * Number(item.unit_price) };
+      if (item.id) { const { error } = await db.from("order_items").update(payload).eq("id", item.id); if (error) throw error; }
+      else { const { error } = await db.from("order_items").insert({ ...payload, order_id: order.id }); if (error) throw error; }
+    }
+    if (order.payment_status === "paid") await db.rpc("reconcile_shizuku_order_inventory", { p_order_id: order.id });
+    astate.editingOrder = null; await loadAll(); alert("Order updated.");
+  } catch (error) { alert("Could not update order: " + (error?.message || error)); if (button) { button.disabled = false; button.textContent = "Save order"; } }
+}
+
+/* ---- inventory and food cost ---- */
+function newInventoryItem() { astate.inventoryDraft = { id: null, name: "", unit: "g", stock_quantity: 0, low_stock_level: 0, pack_size: 1, pack_cost: 0, supplier: "" }; render(); }
+function editInventoryItem(id) { const item = astate.inventory.find((row) => String(row.id) === String(id)); astate.inventoryDraft = item ? { ...item } : null; render(); }
+function inventoryField(key, value) { if (!astate.inventoryDraft) return; astate.inventoryDraft[key] = ["stock_quantity","low_stock_level","pack_size","pack_cost"].includes(key) ? Math.max(0, Number(value || 0)) : value; }
+async function saveInventoryItem() { const d = astate.inventoryDraft; if (!d || !String(d.name).trim()) return alert("Enter the ingredient name."); const payload = { name: String(d.name).trim(), unit: String(d.unit || "g").trim(), stock_quantity: Number(d.stock_quantity || 0), low_stock_level: Number(d.low_stock_level || 0), pack_size: Math.max(.0001, Number(d.pack_size || 1)), pack_cost: Number(d.pack_cost || 0), supplier: String(d.supplier || "").trim() || null }; const result = d.id ? await db.from("inventory_items").update(payload).eq("id", d.id).select().single() : await db.from("inventory_items").insert(payload).select().single(); if (result.error) return alert("Could not save ingredient: " + result.error.message); astate.inventoryDraft = null; await loadAll(); }
+async function deleteInventoryItem(id) { if (!confirm("Delete this ingredient and its recipe links?")) return; const { error } = await db.from("inventory_items").delete().eq("id", id); if (error) return alert(error.message); await loadAll(); }
+function setRecipeProduct(id) { astate.recipeProductId = id; render(); }
+async function addRecipeIngredient(inventoryId) { if (!astate.recipeProductId || !inventoryId) return; const { error } = await db.from("product_recipes").upsert({ product_id: astate.recipeProductId, inventory_item_id: inventoryId, quantity_used: 0 }, { onConflict: "product_id,inventory_item_id" }); if (error) return alert(error.message); await loadAll(); }
+async function updateRecipeQuantity(id, value) { const { error } = await db.from("product_recipes").update({ quantity_used: Math.max(0, Number(value || 0)) }).eq("id", id); if (error) return alert(error.message); const row = astate.recipes.find((item) => String(item.id) === String(id)); if (row) row.quantity_used = Math.max(0, Number(value || 0)); render(); }
+async function deleteRecipeRow(id) { const { error } = await db.from("product_recipes").delete().eq("id", id); if (error) return alert(error.message); astate.recipes = astate.recipes.filter((row) => String(row.id) !== String(id)); render(); }
+function ingredientUnitCost(item) { return Number(item?.pack_cost || 0) / Math.max(.0001, Number(item?.pack_size || 1)); }
+function productFoodCost(productId) { return astate.recipes.filter((row) => String(row.product_id) === String(productId)).reduce((sum, row) => sum + Number(row.quantity_used || 0) * ingredientUnitCost(astate.inventory.find((item) => String(item.id) === String(row.inventory_item_id))), 0); }
+function renderInventoryTab() {
+  if (!astate.inventoryReady) return `<section class="dashboard-card"><div class="dashboard-empty"><b>Inventory setup is not installed yet.</b><br><br>Run <code>supabase-inventory-food-cost.sql</code> once in Supabase SQL Editor, then refresh this page.</div></section>`;
+  const productId = astate.recipeProductId || astate.menu[0]?.id; if (!astate.recipeProductId && productId) astate.recipeProductId = productId;
+  const selectedProduct = astate.menu.find((item) => String(item.id) === String(productId));
+  const recipeRows = astate.recipes.filter((row) => String(row.product_id) === String(productId));
+  const cost = productFoodCost(productId); const sellingPrice = Number(selectedProduct?.discount_price || selectedProduct?.price || 0); const percentage = sellingPrice > 0 ? cost / sellingPrice * 100 : 0;
+  return `<div class="stat-grid"><div class="stat"><div class="stat-label">Ingredients</div><div class="stat-value">${astate.inventory.length}</div><div class="stat-help">${astate.inventory.filter((item) => Number(item.stock_quantity) <= Number(item.low_stock_level)).length} low-stock item(s)</div></div><div class="stat"><div class="stat-label">Selected food cost</div><div class="stat-value">${money(cost)}</div><div class="stat-help">Recipe cost per serving</div></div><div class="stat"><div class="stat-label">Food-cost %</div><div class="stat-value">${percentage.toFixed(1)}%</div><div class="stat-help">Selling price ${money(sellingPrice)}</div></div></div><div class="dashboard-grid"><section class="dashboard-card"><div class="dashboard-card-head"><h2>Inventory stock</h2><button class="btn-primary" onclick="newInventoryItem()">+ Ingredient</button></div>${astate.inventory.length ? astate.inventory.map((item) => `<div class="queue-row"><div class="queue-top"><div><b>${escapeHtml(item.name)}</b><div class="queue-name">${escapeHtml(item.supplier || "No supplier")} · ${money(item.pack_cost)} / ${escapeHtml(item.pack_size)} ${escapeHtml(item.unit)}</div></div><div style="text-align:right"><b style="color:${Number(item.stock_quantity) <= Number(item.low_stock_level) ? "#B33333" : "inherit"}">${Number(item.stock_quantity)} ${escapeHtml(item.unit)}</b><div style="margin-top:7px"><button class="link-btn" onclick="editInventoryItem('${item.id}')">Edit</button> <button class="link-danger" onclick="deleteInventoryItem('${item.id}')">Delete</button></div></div></div></div>`).join("") : `<div class="dashboard-empty">Add matcha, milk, syrup, cups and other ingredients.</div>`}</section><section class="dashboard-card"><div class="dashboard-card-head"><h2>Food cost recipe</h2><span>${money(cost)} per serving</span></div><div style="padding:20px"><div class="field"><label>Product</label><select onchange="setRecipeProduct(this.value)">${astate.menu.map((product) => `<option value="${product.id}" ${String(product.id) === String(productId) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div>${recipeRows.map((row) => { const ingredient = astate.inventory.find((item) => String(item.id) === String(row.inventory_item_id)); const lineCost = Number(row.quantity_used || 0) * ingredientUnitCost(ingredient); return `<div style="display:grid;grid-template-columns:1fr 105px 70px;gap:8px;align-items:end;margin:10px 0"><div><b>${escapeHtml(ingredient?.name || "Ingredient")}</b><div class="hint" style="text-align:left;margin:3px 0 0">${money(lineCost)}</div></div><div><label style="font-size:11px">Use (${escapeHtml(ingredient?.unit || "unit")})</label><input type="number" min="0" step="0.01" value="${Number(row.quantity_used || 0)}" onchange="updateRecipeQuantity('${row.id}',this.value)"></div><button class="link-danger" onclick="deleteRecipeRow('${row.id}')">Remove</button></div>`; }).join("")}<div class="field" style="margin-top:18px"><label>Add ingredient</label><select onchange="if(this.value){addRecipeIngredient(this.value);this.value=''}"><option value="">Choose ingredient…</option>${astate.inventory.filter((item) => !recipeRows.some((row) => String(row.inventory_item_id) === String(item.id))).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></div><div class="ref-note">Food cost = recipe quantity × ingredient unit cost. Stock is deducted automatically when payment is confirmed.</div></div></section></div>${astate.inventoryDraft ? renderInventoryEditor() : ""}`;
+}
+function renderInventoryEditor() { const d = astate.inventoryDraft; return `<div class="overlay"><div class="overlay-card" style="max-height:85vh;overflow:auto"><div class="display overlay-title" style="font-size:19px">${d.id ? "Edit ingredient" : "New ingredient"}</div><div class="field"><label>Name</label><input value="${escapeHtml(d.name)}" oninput="inventoryField('name',this.value)"></div><div class="field"><label>Unit</label><select onchange="inventoryField('unit',this.value)">${["g","ml","pc","pack","bottle"].map((unit) => `<option ${d.unit === unit ? "selected" : ""}>${unit}</option>`).join("")}</select></div><div class="field"><label>Current stock</label><input type="number" min="0" step="0.01" value="${d.stock_quantity}" oninput="inventoryField('stock_quantity',this.value)"></div><div class="field"><label>Low-stock alert at</label><input type="number" min="0" step="0.01" value="${d.low_stock_level}" oninput="inventoryField('low_stock_level',this.value)"></div><div class="field"><label>Purchased pack size</label><input type="number" min="0.0001" step="0.01" value="${d.pack_size}" oninput="inventoryField('pack_size',this.value)"></div><div class="field"><label>Pack cost ($)</label><input type="number" min="0" step="0.01" value="${d.pack_cost}" oninput="inventoryField('pack_cost',this.value)"></div><div class="field"><label>Supplier</label><input value="${escapeHtml(d.supplier || "")}" oninput="inventoryField('supplier',this.value)"></div><div class="btn-row"><button class="btn-secondary" onclick="astate.inventoryDraft=null;render()">Cancel</button><button class="btn-primary" onclick="saveInventoryItem()">Save ingredient</button></div></div></div>`; }
 function orderMatchesFilter(order, filter) {
   if (filter === "payment") return order.payment_status === "submitted";
   if (filter === "awaiting") return order.payment_status === "awaiting_payment";
@@ -959,6 +1051,7 @@ function renderOrders() {
       </div>
       <div class="order-meta">${o.customer_name || ""} · ${o.customer_phone || ""}${o.instagram ? " · @" + o.instagram : ""}</div>
       <div class="order-meta">Pickup: ${o.collection_date || ""} ${o.collection_time || ""}</div>
+      <div class="order-meta">Collection point: <b>${escapeHtml(o.collection_point || "—")}</b></div>
       <div class="order-meta">Order status: <b style="color:${ORDER_COLOR[o.order_status] || "inherit"}">${ORDER_LABEL[o.order_status] || o.order_status || "—"}</b></div>
       <div style="margin-top:8px;">
         ${(o.order_items || []).map((it) => `
@@ -972,7 +1065,8 @@ function renderOrders() {
       <div class="divider"></div>
       <div class="row bold"><span class="label">Total</span><span>${money(o.total)}</span></div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center;">
-        ${(o.payment_status === "submitted" || o.payment_status === "awaiting_payment") ? `<button class="small-btn" onclick="confirmPayment('${o.id}')">✓ Confirm payment</button>` : ""}
+        <button class="btn-secondary" onclick="editOrder('${o.id}')">Edit order</button>
+        ${o.order_status !== "cancelled" && (o.payment_status === "submitted" || o.payment_status === "awaiting_payment") ? `<button class="small-btn" onclick="confirmPayment('${o.id}')">✓ Confirm payment</button>` : ""}
         ${o.payment_status === "awaiting_payment" ? `<span class="hint" style="margin:0;">Check the Instagram DM payment screenshot before confirming.</span>` : ""}
         ${o.payment_status === "paid" && o.order_status === "confirmed" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','preparing')">Start preparing</button>` : ""}
         ${o.payment_status === "paid" && o.order_status === "preparing" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','ready')">Mark ready for collection</button>` : ""}
@@ -1266,6 +1360,7 @@ function renderAvailabilityTab() {
 }
 
 function renderEditOverlay() {
+  if (astate.editingOrder) return renderOrderEditor();
   if (!astate.editing) return "";
   const item = astate.editing;
   return `
@@ -1295,6 +1390,12 @@ function renderEditOverlay() {
   </div>`;
 }
 
+function renderOrderEditor() {
+  const order = astate.editingOrder;
+  const items = order.order_items || [];
+  return `<div class="overlay"><div class="overlay-card" style="max-width:720px;max-height:88vh;overflow-y:auto"><div class="display overlay-title" style="font-size:20px">Edit ${escapeHtml(order.order_number || "order")}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="field"><label>Customer name</label><input value="${escapeHtml(order.customer_name || "")}" oninput="editOrderField('customer_name',this.value)"></div><div class="field"><label>Phone</label><input value="${escapeHtml(order.customer_phone || "")}" oninput="editOrderField('customer_phone',this.value)"></div><div class="field"><label>Instagram</label><input value="${escapeHtml(order.instagram || "")}" oninput="editOrderField('instagram',this.value)"></div><div class="field"><label>Collection date</label><input type="date" value="${escapeHtml(order.collection_date || "")}" oninput="editOrderField('collection_date',this.value)"></div><div class="field"><label>Collection time</label><input value="${escapeHtml(order.collection_time || "")}" oninput="editOrderField('collection_time',this.value)"></div><div class="field"><label>Collection point</label><select onchange="editOrderField('collection_point',this.value)"><option value="Blk 130A" ${order.collection_point === "Blk 130A" ? "selected" : ""}>Blk 130A</option><option value="Near Creamier" ${order.collection_point === "Near Creamier" ? "selected" : ""}>Near Creamier</option></select></div></div><div class="divider"></div><div class="order-top"><b>Order items</b><button class="link-btn" onclick="addOrderItem()">+ Add item</button></div>${items.map((item,index) => item._removed ? "" : `<div style="border:1px solid #e8ded1;border-radius:13px;padding:12px;margin:10px 0"><div class="field"><label>Product</label><select onchange="chooseOrderItemProduct(${index},this.value)">${astate.menu.map((product) => `<option value="${product.id}" ${String(product.id) === String(item.product_id) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div><div style="display:grid;grid-template-columns:1fr 1fr auto;gap:9px;align-items:end"><div class="field" style="margin:0"><label>Quantity</label><input type="number" min="1" value="${Number(item.quantity || 1)}" oninput="editOrderItem(${index},'quantity',this.value)"></div><div class="field" style="margin:0"><label>Unit price ($)</label><input type="number" min="0" step="0.01" value="${Number(item.unit_price || 0)}" oninput="editOrderItem(${index},'unit_price',this.value)"></div><button class="link-danger" onclick="removeOrderItem(${index})">Remove</button></div>${(item.order_item_options || []).length ? `<div class="hint" style="text-align:left;margin-top:8px">Options: ${item.order_item_options.map((option) => escapeHtml(option.option_name)).join(", ")}</div>` : ""}</div>`).join("")}<div class="row bold" style="margin:14px 0"><span>Total</span><span>${money((items || []).filter((item) => !item._removed).reduce((sum,item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0),0))}</span></div><div class="field"><label>Customer notes</label><textarea rows="3" oninput="editOrderField('notes',this.value)">${escapeHtml(order.notes || "")}</textarea></div><div class="btn-row"><button class="btn-secondary" onclick="closeOrderEditor()">Cancel</button><button class="btn-primary" id="save-edited-order" onclick="saveEditedOrder()">Save order</button></div></div></div>`;
+}
+
 function render() {
   const app = document.getElementById("app");
   if (!astate.unlocked) { app.innerHTML = renderLogin(); return; }
@@ -1303,6 +1404,7 @@ function render() {
     ["dashboard", "▦", "Dashboard"],
     ["orders", "▣", "Orders"],
     ["menu", "◇", "Products"],
+    ["inventory", "▤", "Inventory & cost"],
     ["promos", "✦", "Promos"],
     ["rewards", "♧", "Rewards"],
     ["customers", "◉", "Customers"],
@@ -1311,12 +1413,12 @@ function render() {
     ["notifications", "🔔", "Notifications"],
     ["settings", "⚙", "Store settings"],
   ];
-  const tabTitle = { orders: "Orders", menu: "Products", promos: "Promos", rewards: "Rewards", customers: "Customers", availability: "Availability", faq: "FAQ", notifications: "Notifications", settings: "Store settings" };
-  const tabSubtitle = { orders: "Review payments and manage every customer order.", menu: "Keep your drinks, prices and availability up to date.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose where you receive new-order alerts.", settings: "Manage your store details, images, contact information and payment details." };
+  const tabTitle = { orders: "Orders", menu: "Products", inventory: "Inventory & food cost", promos: "Promos", rewards: "Rewards", customers: "Customers", availability: "Availability", faq: "FAQ", notifications: "Notifications", settings: "Store settings" };
+  const tabSubtitle = { orders: "Review payments and edit every customer order.", menu: "Keep your drinks, prices and availability up to date.", inventory: "Track ingredient stock and calculate each product's food cost.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose where you receive new-order alerts.", settings: "Manage your store details, images, contact information and payment details." };
   const page = astate.tab === "dashboard" ? renderDashboardTab() : `
     <div class="admin-top"><div><div class="admin-eyebrow">Shizuku Lab admin</div><h1 class="tab-page-title">${tabTitle[astate.tab] || "Dashboard"}</h1><p class="tab-page-subtitle">${tabSubtitle[astate.tab] || ""}</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
     <div class="admin-content">
-      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : renderSettingsTab()}
+      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "inventory" ? renderInventoryTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : renderSettingsTab()}
     </div>`;
   app.innerHTML = `
     ${dashboardStyles()}
