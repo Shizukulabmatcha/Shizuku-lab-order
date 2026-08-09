@@ -42,6 +42,9 @@ const astate = {
   inventoryReady: true,
   inventoryDraft: null,
   recipeProductId: null,
+  recipeDraftProductId: null,
+  recipeDraft: null,
+  recipeDirty: false,
   editingOrder: null,
   loading: true,
   loadError: null,
@@ -1023,19 +1026,125 @@ function editInventoryItem(id) { const item = astate.inventory.find((row) => Str
 function inventoryField(key, value) { if (!astate.inventoryDraft) return; astate.inventoryDraft[key] = ["stock_quantity","low_stock_level","pack_size","pack_cost"].includes(key) ? Math.max(0, Number(value || 0)) : value; }
 async function saveInventoryItem() { const d = astate.inventoryDraft; if (!d || !String(d.name).trim()) return alert("Enter the ingredient name."); const payload = { name: String(d.name).trim(), unit: String(d.unit || "g").trim(), stock_quantity: Number(d.stock_quantity || 0), low_stock_level: Number(d.low_stock_level || 0), pack_size: Math.max(.0001, Number(d.pack_size || 1)), pack_cost: Number(d.pack_cost || 0), supplier: String(d.supplier || "").trim() || null }; const result = d.id ? await db.from("inventory_items").update(payload).eq("id", d.id).select().single() : await db.from("inventory_items").insert(payload).select().single(); if (result.error) return alert("Could not save ingredient: " + result.error.message); astate.inventoryDraft = null; await loadAll(); }
 async function deleteInventoryItem(id) { if (!confirm("Delete this ingredient and its recipe links?")) return; const { error } = await db.from("inventory_items").delete().eq("id", id); if (error) return alert(error.message); await loadAll(); }
-function setRecipeProduct(id) { astate.recipeProductId = id; render(); }
-async function addRecipeIngredient(inventoryId) { if (!astate.recipeProductId || !inventoryId) return; const { error } = await db.from("product_recipes").upsert({ product_id: astate.recipeProductId, inventory_item_id: inventoryId, quantity_used: 0 }, { onConflict: "product_id,inventory_item_id" }); if (error) return alert(error.message); await loadAll(); }
-async function updateRecipeQuantity(id, value) { const { error } = await db.from("product_recipes").update({ quantity_used: Math.max(0, Number(value || 0)) }).eq("id", id); if (error) return alert(error.message); const row = astate.recipes.find((item) => String(item.id) === String(id)); if (row) row.quantity_used = Math.max(0, Number(value || 0)); render(); }
-async function deleteRecipeRow(id) { const { error } = await db.from("product_recipes").delete().eq("id", id); if (error) return alert(error.message); astate.recipes = astate.recipes.filter((row) => String(row.id) !== String(id)); render(); }
+function beginRecipeDraft(productId) {
+  astate.recipeDraftProductId = productId;
+  astate.recipeDraft = astate.recipes.filter((row) => String(row.product_id) === String(productId)).map((row) => ({ ...row, draft_id: String(row.id) }));
+  astate.recipeDirty = false;
+}
+function activeRecipeRows(productId) {
+  if (String(astate.recipeDraftProductId) === String(productId) && Array.isArray(astate.recipeDraft)) return astate.recipeDraft;
+  return astate.recipes.filter((row) => String(row.product_id) === String(productId));
+}
+function setRecipeProduct(id) {
+  if (astate.recipeDirty && !confirm("You have unsaved food-cost changes. Discard them and switch product?")) { render(); return; }
+  astate.recipeProductId = id;
+  beginRecipeDraft(id);
+  render();
+}
+function addRecipeIngredient(inventoryId) {
+  if (!astate.recipeProductId || !inventoryId) return;
+  if (!Array.isArray(astate.recipeDraft)) beginRecipeDraft(astate.recipeProductId);
+  if (astate.recipeDraft.some((row) => String(row.inventory_item_id) === String(inventoryId))) return;
+  astate.recipeDraft.push({
+    draft_id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    product_id: astate.recipeProductId,
+    inventory_item_id: inventoryId,
+    quantity_used: 0,
+  });
+  astate.recipeDirty = true;
+  render();
+}
+function updateRecipeQuantity(id, value) {
+  const row = (astate.recipeDraft || []).find((item) => String(item.draft_id) === String(id));
+  if (!row) return;
+  row.quantity_used = Math.max(0, Number(value || 0));
+  astate.recipeDirty = true;
+  updateRecipePreview();
+}
+function deleteRecipeRow(id) {
+  astate.recipeDraft = (astate.recipeDraft || []).filter((row) => String(row.draft_id) !== String(id));
+  astate.recipeDirty = true;
+  render();
+}
+async function saveProductRecipe() {
+  const productId = astate.recipeProductId;
+  if (!productId || !Array.isArray(astate.recipeDraft)) return;
+  const button = document.getElementById("save-food-cost-btn");
+  if (button) { button.disabled = true; button.textContent = "Saving…"; }
+  const recipe = astate.recipeDraft.map((row) => ({ inventory_item_id: row.inventory_item_id, quantity_used: Math.max(0, Number(row.quantity_used || 0)) }));
+  const { error } = await db.rpc("save_shizuku_product_recipe", { p_product_id: String(productId), p_recipe: recipe });
+  if (error) {
+    if (button) { button.disabled = false; button.textContent = "Save food cost"; }
+    return alert("Could not save food cost: " + error.message + "\n\nRun the latest supabase-customer-product-stock.sql once if this is the first time using the Save button.");
+  }
+  astate.recipeDraft = null;
+  astate.recipeDraftProductId = null;
+  astate.recipeDirty = false;
+  await loadAll();
+  alert("Food cost saved.");
+}
 function ingredientUnitCost(item) { return Number(item?.pack_cost || 0) / Math.max(.0001, Number(item?.pack_size || 1)); }
-function productFoodCost(productId) { return astate.recipes.filter((row) => String(row.product_id) === String(productId)).reduce((sum, row) => sum + Number(row.quantity_used || 0) * ingredientUnitCost(astate.inventory.find((item) => String(item.id) === String(row.inventory_item_id))), 0); }
+function productFoodCost(productId) { return activeRecipeRows(productId).reduce((sum, row) => sum + Number(row.quantity_used || 0) * ingredientUnitCost(astate.inventory.find((item) => String(item.id) === String(row.inventory_item_id))), 0); }
+function updateRecipePreview() {
+  const productId = astate.recipeProductId;
+  const selectedProduct = astate.menu.find((item) => String(item.id) === String(productId));
+  const cost = productFoodCost(productId);
+  const sellingPrice = Number(selectedProduct?.discount_price || selectedProduct?.price || 0);
+  const percentage = sellingPrice > 0 ? cost / sellingPrice * 100 : 0;
+  const costValue = document.getElementById("selected-food-cost-value");
+  const percentValue = document.getElementById("selected-food-cost-percent");
+  const headerValue = document.getElementById("recipe-cost-header");
+  if (costValue) costValue.textContent = money(cost);
+  if (percentValue) percentValue.textContent = `${percentage.toFixed(1)}%`;
+  if (headerValue) headerValue.textContent = `${money(cost)} per serving`;
+  (astate.recipeDraft || []).forEach((row) => {
+    const ingredient = astate.inventory.find((item) => String(item.id) === String(row.inventory_item_id));
+    const line = document.getElementById(`recipe-line-cost-${row.draft_id}`);
+    if (line) line.textContent = money(Number(row.quantity_used || 0) * ingredientUnitCost(ingredient));
+  });
+}
 function renderInventoryTab() {
   if (!astate.inventoryReady) return `<section class="dashboard-card"><div class="dashboard-empty"><b>Inventory setup is not installed yet.</b><br><br>Run <code>supabase-inventory-food-cost.sql</code> once in Supabase SQL Editor, then refresh this page.</div></section>`;
-  const productId = astate.recipeProductId || astate.menu[0]?.id; if (!astate.recipeProductId && productId) astate.recipeProductId = productId;
+  const productId = astate.recipeProductId || astate.menu[0]?.id;
+  if (!astate.recipeProductId && productId) astate.recipeProductId = productId;
+  if (productId && (String(astate.recipeDraftProductId) !== String(productId) || !Array.isArray(astate.recipeDraft))) beginRecipeDraft(productId);
   const selectedProduct = astate.menu.find((item) => String(item.id) === String(productId));
-  const recipeRows = astate.recipes.filter((row) => String(row.product_id) === String(productId));
-  const cost = productFoodCost(productId); const sellingPrice = Number(selectedProduct?.discount_price || selectedProduct?.price || 0); const percentage = sellingPrice > 0 ? cost / sellingPrice * 100 : 0;
-  return `<div class="stat-grid"><div class="stat"><div class="stat-label">Ingredients</div><div class="stat-value">${astate.inventory.length}</div><div class="stat-help">${astate.inventory.filter((item) => Number(item.stock_quantity) <= Number(item.low_stock_level)).length} low-stock item(s)</div></div><div class="stat"><div class="stat-label">Selected food cost</div><div class="stat-value">${money(cost)}</div><div class="stat-help">Recipe cost per serving</div></div><div class="stat"><div class="stat-label">Food-cost %</div><div class="stat-value">${percentage.toFixed(1)}%</div><div class="stat-help">Selling price ${money(sellingPrice)}</div></div></div><div class="dashboard-grid"><section class="dashboard-card"><div class="dashboard-card-head"><h2>Inventory stock</h2><button class="btn-primary" onclick="newInventoryItem()">+ Ingredient</button></div>${astate.inventory.length ? astate.inventory.map((item) => `<div class="queue-row"><div class="queue-top"><div><b>${escapeHtml(item.name)}</b><div class="queue-name">${escapeHtml(item.supplier || "No supplier")} · ${money(item.pack_cost)} / ${escapeHtml(item.pack_size)} ${escapeHtml(item.unit)}</div></div><div style="text-align:right"><b style="color:${Number(item.stock_quantity) <= Number(item.low_stock_level) ? "#B33333" : "inherit"}">${Number(item.stock_quantity)} ${escapeHtml(item.unit)}</b><div style="margin-top:7px"><button class="link-btn" onclick="editInventoryItem('${item.id}')">Edit</button> <button class="link-danger" onclick="deleteInventoryItem('${item.id}')">Delete</button></div></div></div></div>`).join("") : `<div class="dashboard-empty">Add matcha, milk, syrup, cups and other ingredients.</div>`}</section><section class="dashboard-card"><div class="dashboard-card-head"><h2>Food cost recipe</h2><span>${money(cost)} per serving</span></div><div style="padding:20px"><div class="field"><label>Product</label><select onchange="setRecipeProduct(this.value)">${astate.menu.map((product) => `<option value="${product.id}" ${String(product.id) === String(productId) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div>${recipeRows.map((row) => { const ingredient = astate.inventory.find((item) => String(item.id) === String(row.inventory_item_id)); const lineCost = Number(row.quantity_used || 0) * ingredientUnitCost(ingredient); return `<div style="display:grid;grid-template-columns:1fr 105px 70px;gap:8px;align-items:end;margin:10px 0"><div><b>${escapeHtml(ingredient?.name || "Ingredient")}</b><div class="hint" style="text-align:left;margin:3px 0 0">${money(lineCost)}</div></div><div><label style="font-size:11px">Use (${escapeHtml(ingredient?.unit || "unit")})</label><input type="number" min="0" step="0.01" value="${Number(row.quantity_used || 0)}" onchange="updateRecipeQuantity('${row.id}',this.value)"></div><button class="link-danger" onclick="deleteRecipeRow('${row.id}')">Remove</button></div>`; }).join("")}<div class="field" style="margin-top:18px"><label>Add ingredient</label><select onchange="if(this.value){addRecipeIngredient(this.value);this.value=''}"><option value="">Choose ingredient…</option>${astate.inventory.filter((item) => !recipeRows.some((row) => String(row.inventory_item_id) === String(item.id))).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></div><div class="ref-note">Food cost = recipe quantity × ingredient unit cost. Stock is deducted automatically when payment is confirmed.</div></div></section></div>${astate.inventoryDraft ? renderInventoryEditor() : ""}`;
+  const recipeRows = activeRecipeRows(productId);
+  const cost = productFoodCost(productId);
+  const sellingPrice = Number(selectedProduct?.discount_price || selectedProduct?.price || 0);
+  const percentage = sellingPrice > 0 ? cost / sellingPrice * 100 : 0;
+  const inventoryHtml = astate.inventory.length ? astate.inventory.map((item) => `
+    <div class="queue-row"><div class="queue-top"><div><b>${escapeHtml(item.name)}</b>
+      <div class="queue-name">${escapeHtml(item.supplier || "No supplier")} · ${money(item.pack_cost)} / ${escapeHtml(item.pack_size)} ${escapeHtml(item.unit)}</div>
+    </div><div style="text-align:right"><b style="color:${Number(item.stock_quantity) <= Number(item.low_stock_level) ? "#B33333" : "inherit"}">${Number(item.stock_quantity)} ${escapeHtml(item.unit)}</b>
+      <div style="margin-top:7px"><button class="link-btn" onclick="editInventoryItem('${item.id}')">Edit</button> <button class="link-danger" onclick="deleteInventoryItem('${item.id}')">Delete</button></div>
+    </div></div></div>`).join("") : `<div class="dashboard-empty">Add matcha, milk, syrup, cups and other ingredients.</div>`;
+  const recipeHtml = recipeRows.map((row) => {
+    const ingredient = astate.inventory.find((item) => String(item.id) === String(row.inventory_item_id));
+    const lineCost = Number(row.quantity_used || 0) * ingredientUnitCost(ingredient);
+    return `<div style="display:grid;grid-template-columns:1fr 105px 70px;gap:8px;align-items:end;margin:10px 0">
+      <div><b>${escapeHtml(ingredient?.name || "Ingredient")}</b><div id="recipe-line-cost-${escapeHtml(row.draft_id)}" class="hint" style="text-align:left;margin:3px 0 0">${money(lineCost)}</div></div>
+      <div><label style="font-size:11px">Use (${escapeHtml(ingredient?.unit || "unit")})</label><input type="number" min="0" step="0.01" value="${Number(row.quantity_used || 0)}" oninput="updateRecipeQuantity('${escapeHtml(row.draft_id)}',this.value)"></div>
+      <button class="link-danger" onclick="deleteRecipeRow('${escapeHtml(row.draft_id)}')">Remove</button>
+    </div>`;
+  }).join("");
+  return `
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-label">Ingredients</div><div class="stat-value">${astate.inventory.length}</div><div class="stat-help">${astate.inventory.filter((item) => Number(item.stock_quantity) <= Number(item.low_stock_level)).length} low-stock item(s)</div></div>
+      <div class="stat"><div class="stat-label">Selected food cost</div><div id="selected-food-cost-value" class="stat-value">${money(cost)}</div><div class="stat-help">Recipe cost per serving</div></div>
+      <div class="stat"><div class="stat-label">Food-cost %</div><div id="selected-food-cost-percent" class="stat-value">${percentage.toFixed(1)}%</div><div class="stat-help">Selling price ${money(sellingPrice)}</div></div>
+    </div>
+    <div class="dashboard-grid">
+      <section class="dashboard-card"><div class="dashboard-card-head"><h2>Inventory stock</h2><button class="btn-primary" onclick="newInventoryItem()">+ Ingredient</button></div>${inventoryHtml}</section>
+      <section class="dashboard-card"><div class="dashboard-card-head"><h2>Food cost recipe</h2><span id="recipe-cost-header">${money(cost)} per serving</span></div>
+        <div style="padding:20px"><div class="field"><label>Product</label><select onchange="setRecipeProduct(this.value)">${astate.menu.map((product) => `<option value="${product.id}" ${String(product.id) === String(productId) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div>
+          ${recipeHtml}
+          <div class="field" style="margin-top:18px"><label>Add ingredient</label><select onchange="if(this.value){addRecipeIngredient(this.value)}"><option value="">Choose ingredient…</option>${astate.inventory.filter((item) => !recipeRows.some((row) => String(row.inventory_item_id) === String(item.id))).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></div>
+          <div class="ref-note">Edit everything first, then save once. Food cost updates instantly without reloading the page.</div>
+          <button id="save-food-cost-btn" class="btn-primary" style="width:100%;margin-top:14px" ${astate.recipeDirty ? "" : "disabled"} onclick="saveProductRecipe()">${astate.recipeDirty ? "Save food cost" : "Saved"}</button>
+        </div>
+      </section>
+    </div>${astate.inventoryDraft ? renderInventoryEditor() : ""}`;
 }
 function renderInventoryEditor() { const d = astate.inventoryDraft; return `<div class="overlay"><div class="overlay-card" style="max-height:85vh;overflow:auto"><div class="display overlay-title" style="font-size:19px">${d.id ? "Edit ingredient" : "New ingredient"}</div><div class="field"><label>Name</label><input value="${escapeHtml(d.name)}" oninput="inventoryField('name',this.value)"></div><div class="field"><label>Unit</label><select onchange="inventoryField('unit',this.value)">${["g","ml","pc","pack","bottle"].map((unit) => `<option ${d.unit === unit ? "selected" : ""}>${unit}</option>`).join("")}</select></div><div class="field"><label>Current stock</label><input type="number" min="0" step="0.01" value="${d.stock_quantity}" oninput="inventoryField('stock_quantity',this.value)"></div><div class="field"><label>Low-stock alert at</label><input type="number" min="0" step="0.01" value="${d.low_stock_level}" oninput="inventoryField('low_stock_level',this.value)"></div><div class="field"><label>Purchased pack size</label><input type="number" min="0.0001" step="0.01" value="${d.pack_size}" oninput="inventoryField('pack_size',this.value)"></div><div class="field"><label>Pack cost ($)</label><input type="number" min="0" step="0.01" value="${d.pack_cost}" oninput="inventoryField('pack_cost',this.value)"></div><div class="field"><label>Supplier</label><input value="${escapeHtml(d.supplier || "")}" oninput="inventoryField('supplier',this.value)"></div><div class="btn-row"><button class="btn-secondary" onclick="astate.inventoryDraft=null;render()">Cancel</button><button class="btn-primary" onclick="saveInventoryItem()">Save ingredient</button></div></div></div>`; }
 function orderMatchesFilter(order, filter) {
@@ -1283,6 +1392,14 @@ function renderSettingsTab() {
   const s = astate.settingsDraft;
   const field = (label, key, placeholder = "") => `
     <div class="field"><label>${label}</label><input value="${s[key] || ""}" placeholder="${placeholder}" oninput="onSettingsField('${key}', this.value)"></div>`;
+  const welcomeFonts = [
+    ["fraunces", "Elegant serif · Fraunces"],
+    ["noto_serif_jp", "Japanese serif · Noto Serif JP"],
+    ["work_sans", "Clean sans · Work Sans"],
+    ["noto_sans_jp", "Japanese sans · Noto Sans JP"],
+    ["georgia", "Classic serif · Georgia"],
+  ];
+  const fontSelect = (label, key, fallback) => `<div class="field"><label>${label}</label><select onchange="onSettingsField('${key}',this.value)">${welcomeFonts.map(([value, name]) => `<option value="${value}" ${(s[key] || fallback) === value ? "selected" : ""}>${name}</option>`).join("")}</select></div>`;
   return `
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Store details</div>
     ${field("Store name", "store_name")}
@@ -1291,12 +1408,14 @@ function renderSettingsTab() {
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Welcome cover</div>
     ${field("Welcome title", "welcome_title", "Welcome to Shizuku Lab")}
+    ${fontSelect("Welcome title font", "welcome_title_font", "fraunces")}
     ${field("Welcome subtitle", "welcome_subtitle", "雫ラボ · CRAFTED DROP BY DROP")}
     <div class="field"><label>Welcome introduction</label><textarea rows="3" placeholder="A short message shown before customers enter the ordering page." oninput="onSettingsField('welcome_copy', this.value)">${escapeHtml(s.welcome_copy || "")}</textarea></div>
     ${field("Order button text", "welcome_order_button_text", "Enter ordering →")}
     ${field("Track order button text", "welcome_track_button_text", "Track order")}
     ${field("Loyalty button text", "welcome_loyalty_button_text", "Check your loyalty")}
     ${field("Website button text", "welcome_website_button_text", "Visit Shizuku Lab website ↗")}
+    ${fontSelect("Welcome body & button font", "welcome_body_font", "work_sans")}
     <div class="field"><label>Welcome logo position</label><select onchange="onSettingsField('welcome_logo_position',this.value)"><option value="left" ${s.welcome_logo_position === "left" ? "selected" : ""}>Left</option><option value="center" ${(!s.welcome_logo_position || s.welcome_logo_position === "center") ? "selected" : ""}>Centre</option><option value="right" ${s.welcome_logo_position === "right" ? "selected" : ""}>Right</option></select><div class="hint" style="text-align:left;margin-top:5px;">Choose where the logo sits on the Welcome cover.</div></div>
     ${s.logo_url ? `<div class="field"><label>Welcome logo preview</label><div id="welcome-logo-live-preview" style="width:${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)}px;height:${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)}px;border:5px solid #F4EEE3;border-radius:50%;overflow:hidden;background:#fff;display:grid;place-items:center;margin-top:8px;"><img id="welcome-logo-live-preview-image" src="${escapeHtml(s.logo_url)}" alt="Welcome logo preview" style="width:100%;height:100%;object-fit:contain;padding:12px;transform:translate(${Number(s.welcome_logo_image_x || 0)}%, ${Number(s.welcome_logo_image_y || 0)}%) scale(${Number(s.welcome_logo_image_scale || s.logo_image_scale || 1)});"></div></div>` : ""}
     <div class="field"><label>Welcome logo circle size <span id="welcome-logo-circle-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)} px</span></label><input type="range" min="56" max="220" step="1" value="${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)}" oninput="onSettingsField('welcome_logo_circle_size',Number(this.value));updateWelcomeLogoPreview()"></div>
