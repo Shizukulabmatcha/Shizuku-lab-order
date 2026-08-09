@@ -1136,12 +1136,11 @@ function renderInventoryTab() {
     </div>
     <div class="dashboard-grid">
       <section class="dashboard-card"><div class="dashboard-card-head"><h2>Inventory stock</h2><button class="btn-primary" onclick="newInventoryItem()">+ Ingredient</button></div>${inventoryHtml}</section>
-      <section class="dashboard-card"><div class="dashboard-card-head"><h2>Food cost recipe</h2><span id="recipe-cost-header">${money(cost)} per serving</span></div>
+      <section class="dashboard-card"><div class="dashboard-card-head"><div><h2>Food cost recipe</h2><span id="recipe-cost-header">${money(cost)} per serving</span></div><button id="save-food-cost-btn" class="btn-primary" ${astate.recipeDirty ? "" : "disabled"} onclick="saveProductRecipe()">Save food cost</button></div>
         <div style="padding:20px"><div class="field"><label>Product</label><select onchange="setRecipeProduct(this.value)">${astate.menu.map((product) => `<option value="${product.id}" ${String(product.id) === String(productId) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div>
           ${recipeHtml}
           <div class="field" style="margin-top:18px"><label>Add ingredient</label><select onchange="if(this.value){addRecipeIngredient(this.value)}"><option value="">Choose ingredient…</option>${astate.inventory.filter((item) => !recipeRows.some((row) => String(row.inventory_item_id) === String(item.id))).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></div>
-          <div class="ref-note">Edit everything first, then save once. Food cost updates instantly without reloading the page.</div>
-          <button id="save-food-cost-btn" class="btn-primary" style="width:100%;margin-top:14px" ${astate.recipeDirty ? "" : "disabled"} onclick="saveProductRecipe()">${astate.recipeDirty ? "Save food cost" : "Saved"}</button>
+          <div class="ref-note">Edit everything first, then press Save food cost once. The preview updates instantly without reloading the page.</div>
         </div>
       </section>
     </div>${astate.inventoryDraft ? renderInventoryEditor() : ""}`;
