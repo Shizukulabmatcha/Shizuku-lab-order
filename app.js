@@ -27,6 +27,7 @@ function clearSavedCart() {
 
 const state = {
   menu: [],
+  stockLevels: {},
   cart: loadSavedCart(),
   screen: "menu",
   activeCategory: "All",
@@ -111,6 +112,25 @@ function getBundleDrinkProducts(bundle = state.selectedProduct) {
     return name.includes("matcha latte") || name.includes("houjicha latte");
   });
 }
+
+function productStock(product) {
+  if (!product) return null;
+  const calculated = state.stockLevels[String(product.id)];
+  if (Number.isFinite(calculated)) return Math.max(0, Math.floor(calculated));
+  if (product.stock != null && Number.isFinite(Number(product.stock)) && Number(product.stock) >= 0) return Math.floor(Number(product.stock));
+  return null;
+}
+function stockLabel(product) {
+  const stock = productStock(product);
+  if (stock == null) return "";
+  return stock <= 0 ? "Sold out" : `${stock} left`;
+}
+function stockMarkup(product) {
+  const label = stockLabel(product);
+  if (!label) return "";
+  return `<span class="stock-badge ${productStock(product) <= 0 ? "sold-out" : ""}">${escapeHtml(label)}</span>`;
+}
+function isSoldOut(product) { return productStock(product) === 0; }
 
 /* ---------- store settings ---------- */
 async function loadStoreSettings() {
@@ -269,6 +289,15 @@ async function loadProducts() {
     stock: item.stock == null ? null : Number(item.stock),
   }));
 }
+async function loadCustomerStockLevels() {
+  const { data, error } = await db.rpc("get_shizuku_product_stock");
+  if (error) {
+    console.warn("Could not load calculated stock levels:", error.message);
+    state.stockLevels = {};
+    return;
+  }
+  state.stockLevels = Object.fromEntries((data || []).map((row) => [String(row.product_id), Number(row.available_quantity)]));
+}
 async function loadProductGroups() {
   const { data, error } = await db.from("product_groups").select("*").eq("is_visible", true).order("sort_order").order("name");
   // The old shop continues to work before the one-time SQL upgrade is run.
@@ -304,7 +333,7 @@ async function init() {
     await loadOpeningOverrides();
     await loadFaq();
     state.slots = computeSlots();
-    await Promise.all([loadProducts(), loadOptions(), loadProductGroups()]);
+    await Promise.all([loadProducts(), loadOptions(), loadProductGroups(), loadCustomerStockLevels()]);
   } catch (error) {
     console.error(error);
     state.loadError = error?.message || String(error);
@@ -357,6 +386,7 @@ function calculateProductPrice(product) {
 function openProductOptions(productId) {
   const product = state.menu.find((item) => String(item.id) === String(productId));
   if (!product) return;
+  if (isSoldOut(product)) { alert("Sorry, this item is sold out."); return; }
   state.selectedProduct = product;
   state.selectedOptions = {};
   if (isBundle(product)) {
@@ -375,9 +405,10 @@ function addConfiguredProductToCart() {
   const optionsKey = selectedOptions.map((option) => String(option.optionId)).sort().join("-");
   const key = `${product.id}__${optionsKey}`;
   const unitPrice = calculateProductPrice(product);
-  if (product.stock != null && product.stock >= 0) {
+  const available = productStock(product);
+  if (available != null) {
     const existingQty = state.cart[key]?.qty || 0;
-    if (existingQty >= product.stock) { alert("Sorry, this item is sold out."); return; }
+    if (existingQty >= available) { alert("Sorry, this item is sold out."); return; }
   }
   state.cart[key] = {
     productId: product.id, productName: product.name, imageUrl: product.image_url || "",
@@ -394,6 +425,7 @@ function addConfiguredProductToCart() {
 function selectBundleDrink(slot, productId) {
   const product = state.menu.find((item) => String(item.id) === String(productId));
   if (!product) return;
+  if (isSoldOut(product)) { alert("Sorry, this drink is sold out."); return; }
   if (slot === 1) { state.bundle.drink1 = product; state.bundle.drink1Options = {}; }
   else { state.bundle.drink2 = product; state.bundle.drink2Options = {}; }
   render();
@@ -423,6 +455,9 @@ function addBundleToCart() {
   const drink1 = state.bundle.drink1, drink2 = state.bundle.drink2;
   if (!drink1) { alert("Please choose Drink 1."); return; }
   if (!drink2) { alert("Please choose Drink 2."); return; }
+  const requiredDrink1 = String(drink1.id) === String(drink2.id) ? 2 : 1;
+  if (productStock(drink1) != null && productStock(drink1) < requiredDrink1) { alert(`Only ${productStock(drink1)} ${drink1.name} left. Please choose another drink.`); return; }
+  if (String(drink1.id) !== String(drink2.id) && productStock(drink2) != null && productStock(drink2) < 1) { alert(`Sorry, ${drink2.name} is sold out.`); return; }
   if (!validateBundleDrink(drink1, state.bundle.drink1Options)) { alert("Please complete the options for Drink 1."); return; }
   if (!validateBundleDrink(drink2, state.bundle.drink2Options)) { alert("Please complete the options for Drink 2."); return; }
   const drink1Options = Object.values(state.bundle.drink1Options);
@@ -451,7 +486,8 @@ function changeCartQty(key, delta) {
   const product = state.menu.find((p) => String(p.id) === String(item.productId));
   if (!product) return;
   const nextQty = Number(item.qty || 0) + delta;
-  if (product.stock != null && product.stock >= 0 && nextQty > product.stock) { alert("Sorry, this item is sold out."); return; }
+  const available = productStock(product);
+  if (available != null && nextQty > available) { alert("Sorry, this item is sold out."); return; }
   item.qty = Math.max(0, nextQty);
   if (item.qty === 0) delete state.cart[key];
   saveCart();
@@ -548,9 +584,11 @@ async function submitOrder() {
     return;
   }
 
+  let createdOrderId = null;
   try {
     const { data: order, error: orderError } = await db.from("orders").insert(orderPayload).select("*").single();
     if (orderError) throw orderError;
+    createdOrderId = order.id;
 
     const orderItemsPayload = cartLines().map((line) => ({
       order_id: order.id, product_id: line.productId, product_name: line.productName,
@@ -604,6 +642,13 @@ async function submitOrder() {
     render();
   } catch (error) {
     console.error("Order submission error:", error);
+    if (createdOrderId) await db.from("orders").delete().eq("id", createdOrderId);
+    if (/only\s+\d+\s+item/i.test(error?.message || "")) {
+      await loadCustomerStockLevels();
+      render();
+      alert("Sorry, there is not enough stock left for one of the items in your cart. Please update your cart and try again.");
+      return;
+    }
     alert("Something went wrong submitting your order. Please try again.\n\n" + (error?.message || String(error)));
   }
 }
@@ -758,7 +803,6 @@ function header({ showCart = false } = {}) {
           <div class="brand-sub">雫ラボ · crafted drop by drop</div>
         </div>
         <div style="display:flex;align-items:center;gap:9px;">
-          <button onclick="setScreen('track')" style="border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--matcha);font:600 13px 'Work Sans',sans-serif;padding:11px 15px;white-space:nowrap;">注文を追跡 · Track order</button>
           ${showCart ? `
             <button class="cart-btn" onclick="setScreen('cart')" aria-label="Cart">
               ${ICONS.bag}
@@ -778,19 +822,24 @@ function header({ showCart = false } = {}) {
 
 /* ---------- menu ---------- */
 function renderMenuCard(item) {
+  const soldOut = isSoldOut(item);
+  const addButton = soldOut
+    ? `<button class="add-btn" disabled>Sold out</button>`
+    : `<button class="add-btn" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`;
   if (state.menuView === "gallery") return `
     <div style="background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;min-width:0;">
       <img src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(item.name)}" style="width:100%;aspect-ratio:1/1;object-fit:cover;background:var(--matcha-bg);">
       <div style="padding:11px 11px 12px;display:flex;flex:1;flex-direction:column;">
-        <button type="button" style="font:600 13px/1.25 'Work Sans',sans-serif;cursor:pointer;border:0;background:none;padding:0;text-align:left;color:var(--ink);" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} <span style="color:var(--ink);">→</span></button>
+        <button type="button" ${soldOut ? "disabled" : ""} style="font:600 13px/1.25 'Work Sans',sans-serif;cursor:pointer;border:0;background:none;padding:0;text-align:left;color:var(--ink);" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} ${soldOut ? "" : `<span style="color:var(--ink);">→</span>`}</button>
         <div style="font-size:10.5px;color:var(--ink);line-height:1.4;margin:5px 0 10px;">${escapeHtml(item.description)}</div>
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:7px;margin-top:auto;">${productPriceMarkup(item, "item-price gallery-price")}${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : `<button class="add-btn" style="padding:6px 10px;font-size:11px;" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}</div>
+        <div class="stock-line">${stockMarkup(item)}</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:7px;margin-top:auto;">${productPriceMarkup(item, "item-price gallery-price")}${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : addButton}</div>
       </div>
     </div>`;
   return `
     <div class="item-card">
       <img class="item-thumb" src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(item.name)}">
-      <div class="item-info"><button class="item-name" type="button" style="cursor:pointer;border:0;background:none;padding:0;text-align:left;font:inherit;width:100%;color:var(--ink);" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} <span style="color:var(--ink);">→</span></button><div class="item-desc" style="color:var(--ink);">${escapeHtml(item.description)}</div><div class="item-row">${productPriceMarkup(item)}${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : `<button class="add-btn" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`}</div></div>
+      <div class="item-info"><button class="item-name" type="button" ${soldOut ? "disabled" : ""} style="cursor:pointer;border:0;background:none;padding:0;text-align:left;font:inherit;width:100%;color:var(--ink);" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} ${soldOut ? "" : `<span style="color:var(--ink);">→</span>`}</button><div class="item-desc" style="color:var(--ink);">${escapeHtml(item.description)}</div><div class="stock-line">${stockMarkup(item)}</div><div class="item-row">${productPriceMarkup(item)}${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : addButton}</div></div>
     </div>`;
 }
 function renderMenu() {
@@ -851,6 +900,7 @@ function renderOptions() {
         <div class="item-info product-detail-copy">
           <div class="item-name">${escapeHtml(product.name)}</div>
           <div class="item-desc">${escapeHtml(product.description)}</div>
+          <div class="stock-line">${stockMarkup(product)}</div>
         </div>
       </div>
       ${state.optionGroups.length === 0 ? `<div class="hint">No customisation options available.</div>` : state.optionGroups.map((group) => {
@@ -874,7 +924,7 @@ function renderOptions() {
       }).join("")}
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
-      <button class="primary-btn" onclick="addConfiguredProductToCart()">Add to cart · ${money(price)}</button>
+      <button class="primary-btn" ${isSoldOut(product) ? "disabled" : ""} onclick="addConfiguredProductToCart()">${isSoldOut(product) ? "Sold out" : `Add to cart · ${money(price)}`}</button>
     </div></div>
   `;
 }
@@ -895,6 +945,7 @@ function renderBundle() {
           <div class="item-name">${escapeHtml(bundle.name)}</div>
           <div class="item-desc">${escapeHtml(bundle.description || "Choose any two drinks from the selections below.")}</div>
           ${productPriceMarkup(bundle)}
+          <div class="stock-line">${stockMarkup(bundle)}</div>
         </div>
       </div>
       <div class="bundle-section">
@@ -902,8 +953,8 @@ function renderBundle() {
         <div class="bundle-subheading">Choose your drink</div>
         <div class="bundle-drinks">
           ${drinks.map((drink) => `
-            <button type="button" class="slot ${drink1 && String(drink1.id) === String(drink.id) ? "active" : ""}" onclick="selectBundleDrink(1,'${escapeHtml(drink.id)}')">
-              <div><div class="slot-day">${escapeHtml(drink.name)}</div><div class="slot-time">${hasDiscount(drink) ? `${money(salePrice(drink))} <span class="original-price">${money(originalPrice(drink))}</span>` : money(salePrice(drink))}</div></div>
+            <button type="button" ${isSoldOut(drink) ? "disabled" : ""} class="slot ${drink1 && String(drink1.id) === String(drink.id) ? "active" : ""}" onclick="selectBundleDrink(1,'${escapeHtml(drink.id)}')">
+              <div><div class="slot-day">${escapeHtml(drink.name)}</div><div class="slot-time">${hasDiscount(drink) ? `${money(salePrice(drink))} <span class="original-price">${money(originalPrice(drink))}</span>` : money(salePrice(drink))} ${stockMarkup(drink)}</div></div>
             </button>
           `).join("")}
         </div>
@@ -914,8 +965,8 @@ function renderBundle() {
         <div class="bundle-subheading">Choose your drink</div>
         <div class="bundle-drinks">
           ${drinks.map((drink) => `
-            <button type="button" class="slot ${drink2 && String(drink2.id) === String(drink.id) ? "active" : ""}" onclick="selectBundleDrink(2,'${escapeHtml(drink.id)}')">
-              <div><div class="slot-day">${escapeHtml(drink.name)}</div><div class="slot-time">${hasDiscount(drink) ? `${money(salePrice(drink))} <span class="original-price">${money(originalPrice(drink))}</span>` : money(salePrice(drink))}</div></div>
+            <button type="button" ${isSoldOut(drink) ? "disabled" : ""} class="slot ${drink2 && String(drink2.id) === String(drink.id) ? "active" : ""}" onclick="selectBundleDrink(2,'${escapeHtml(drink.id)}')">
+              <div><div class="slot-day">${escapeHtml(drink.name)}</div><div class="slot-time">${hasDiscount(drink) ? `${money(salePrice(drink))} <span class="original-price">${money(originalPrice(drink))}</span>` : money(salePrice(drink))} ${stockMarkup(drink)}</div></div>
             </button>
           `).join("")}
         </div>
@@ -923,7 +974,7 @@ function renderBundle() {
       </div>
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
-      <button class="primary-btn" onclick="addBundleToCart()">Add bundle to cart · ${money(salePrice(bundle))}</button>
+      <button class="primary-btn" ${isSoldOut(bundle) ? "disabled" : ""} onclick="addBundleToCart()">${isSoldOut(bundle) ? "Sold out" : `Add bundle to cart · ${money(salePrice(bundle))}`}</button>
     </div></div>
   `;
 }
