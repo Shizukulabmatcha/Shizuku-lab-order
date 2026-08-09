@@ -20,6 +20,7 @@ const astate = {
   promos: [],
   promoRedemptions: [],
   expandedPromoCode: null,
+  editingPromoId: null,
   customerNotes: {},
   loyaltySettings: null,
   loyaltyDraft: null,
@@ -1293,7 +1294,27 @@ function togglePromoProduct(productId, checked) {
   const ids = Array.isArray(astate.promoDraft.applicable_product_ids) ? astate.promoDraft.applicable_product_ids.map(String) : [];
   astate.promoDraft.applicable_product_ids = checked ? [...new Set([...ids, String(productId)])] : ids.filter((id) => id !== String(productId));
 }
-function clearPromoDraft() { astate.promoDraft = { code: "", discount_type: "fixed", discount_value: "", minimum_spend: "", usage_limit: "", valid_until: "", applicable_product_ids: [] }; render(); }
+function clearPromoDraft() {
+  astate.editingPromoId = null;
+  astate.promoDraft = { code: "", discount_type: "fixed", discount_value: "", minimum_spend: "", usage_limit: "", valid_until: "", applicable_product_ids: [] };
+  render();
+}
+function editPromo(id) {
+  const promo = astate.promos.find((item) => String(item.id) === String(id));
+  if (!promo) return;
+  astate.editingPromoId = promo.id;
+  astate.promoDraft = {
+    code: promo.code || "",
+    discount_type: promo.discount_type === "percent" ? "percent" : "fixed",
+    discount_value: promo.discount_value ?? "",
+    minimum_spend: promo.minimum_spend ?? "",
+    usage_limit: promo.usage_limit ?? "",
+    valid_until: promo.valid_until ? String(promo.valid_until).slice(0, 10) : "",
+    applicable_product_ids: Array.isArray(promo.applicable_product_ids) ? promo.applicable_product_ids.map(String) : [],
+  };
+  render();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
 async function createPromo() {
   const draft = astate.promoDraft;
   const code = String(draft.code || "").trim().toUpperCase();
@@ -1301,10 +1322,18 @@ async function createPromo() {
   if (!code) return alert("Enter a promo code.");
   if (!Number.isFinite(value) || value <= 0) return alert("Enter a valid discount amount.");
   const button = document.getElementById("create-promo-btn"); if (button) { button.textContent = "Saving…"; button.disabled = true; }
-  const { data, error } = await db.from("promo_codes").insert({ code, discount_type: draft.discount_type === "percent" ? "percent" : "fixed", discount_value: value, minimum_spend: Number(draft.minimum_spend || 0), usage_limit: draft.usage_limit === "" ? null : Math.max(1, Number(draft.usage_limit)), valid_until: draft.valid_until || null, applicable_product_ids: Array.isArray(draft.applicable_product_ids) ? draft.applicable_product_ids : [], is_active: true }).select().single();
-  if (button) { button.textContent = "Create promo"; button.disabled = false; }
-  if (error) return alert("Could not create promo: " + error.message);
-  astate.promos = [data, ...astate.promos]; clearPromoDraft(); alert("Promo created.");
+  const payload = { discount_type: draft.discount_type === "percent" ? "percent" : "fixed", discount_value: value, minimum_spend: Number(draft.minimum_spend || 0), usage_limit: draft.usage_limit === "" ? null : Math.max(1, Number(draft.usage_limit)), valid_until: draft.valid_until || null, applicable_product_ids: Array.isArray(draft.applicable_product_ids) ? draft.applicable_product_ids : [] };
+  const editingId = astate.editingPromoId;
+  const query = editingId
+    ? db.from("promo_codes").update(payload).eq("id", editingId).select().single()
+    : db.from("promo_codes").insert({ ...payload, code, is_active: true }).select().single();
+  const { data, error } = await query;
+  if (button) { button.textContent = editingId ? "Save changes" : "Create promo"; button.disabled = false; }
+  if (error) return alert(`Could not ${editingId ? "update" : "create"} promo: ` + error.message);
+  if (editingId) astate.promos = astate.promos.map((promo) => String(promo.id) === String(editingId) ? data : promo);
+  else astate.promos = [data, ...astate.promos];
+  clearPromoDraft();
+  alert(editingId ? "Promo updated." : "Promo created.");
 }
 async function setPromoActive(id, is_active) {
   const { error } = await db.from("promo_codes").update({ is_active }).eq("id", id);
@@ -1320,9 +1349,10 @@ async function removePromo(id) {
 function togglePromoUses(code) { astate.expandedPromoCode = astate.expandedPromoCode === code ? null : code; render(); }
 function renderPromosTab() {
   const d = astate.promoDraft;
+  const isEditingPromo = !!astate.editingPromoId;
   const selectedProductIds = Array.isArray(d.applicable_product_ids) ? d.applicable_product_ids.map(String) : [];
   const productChoices = astate.menu.map((product) => `<label class="slot" style="cursor:pointer;gap:9px;margin:0 0 7px;padding:10px 12px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A" ${selectedProductIds.includes(String(product.id)) ? "checked" : ""} onchange="togglePromoProduct('${product.id}',this.checked)"><span>${escapeHtml(product.name)}</span></label>`).join("");
-  const form = `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>New promo code</h2></div><div class="field"><label>Code</label><input value="${escapeHtml(d.code)}" placeholder="WELCOME10" style="text-transform:uppercase" oninput="onPromoField('code',this.value);this.value=this.value.toUpperCase()"></div><div class="field"><label>Discount type</label><select onchange="onPromoField('discount_type',this.value)"><option value="fixed" ${d.discount_type === "fixed" ? "selected" : ""}>Dollar off ($)</option><option value="percent" ${d.discount_type === "percent" ? "selected" : ""}>Percent off (%)</option></select></div><div class="field"><label>Discount value</label><input type="number" min="0.01" step="0.01" value="${escapeHtml(d.discount_value)}" placeholder="1.00" oninput="onPromoField('discount_value',this.value)"></div><div class="field"><label>Minimum spend (optional)</label><input type="number" min="0" step="0.01" value="${escapeHtml(d.minimum_spend)}" placeholder="0.00" oninput="onPromoField('minimum_spend',this.value)"></div><div class="field"><label>Products this promo applies to</label><div class="hint" style="text-align:left;margin:0 0 8px">Leave every product unticked to apply the code to the whole cart.</div><div style="max-height:210px;overflow:auto">${productChoices || `<div class="hint">Add products first.</div>`}</div></div><div class="field"><label>Usage limit (optional)</label><input type="number" min="1" value="${escapeHtml(d.usage_limit)}" placeholder="No limit" oninput="onPromoField('usage_limit',this.value)"></div><div class="field"><label>End date (optional)</label><input type="date" value="${escapeHtml(d.valid_until)}" oninput="onPromoField('valid_until',this.value)"></div><div class="btn-row"><button class="btn-secondary" onclick="clearPromoDraft()">Clear</button><button class="btn-primary" id="create-promo-btn" onclick="createPromo()">Create promo</button></div></section>`;
+  const form = `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>${isEditingPromo ? "Edit promo code" : "New promo code"}</h2></div><div class="field"><label>Code</label><input value="${escapeHtml(d.code)}" placeholder="WELCOME10" style="text-transform:uppercase" ${isEditingPromo ? "readonly" : ""} oninput="onPromoField('code',this.value);this.value=this.value.toUpperCase()">${isEditingPromo ? `<div class="hint" style="text-align:left;margin-top:5px">The code stays unchanged so its customer redemption history remains connected.</div>` : ""}</div><div class="field"><label>Discount type</label><select onchange="onPromoField('discount_type',this.value)"><option value="fixed" ${d.discount_type === "fixed" ? "selected" : ""}>Dollar off ($)</option><option value="percent" ${d.discount_type === "percent" ? "selected" : ""}>Percent off (%)</option></select></div><div class="field"><label>Discount value</label><input type="number" min="0.01" step="0.01" value="${escapeHtml(d.discount_value)}" placeholder="1.00" oninput="onPromoField('discount_value',this.value)"></div><div class="field"><label>Minimum spend (optional)</label><input type="number" min="0" step="0.01" value="${escapeHtml(d.minimum_spend)}" placeholder="0.00" oninput="onPromoField('minimum_spend',this.value)"></div><div class="field"><label>Products this promo applies to</label><div class="hint" style="text-align:left;margin:0 0 8px">Leave every product unticked to apply the code to the whole cart.</div><div style="max-height:210px;overflow:auto">${productChoices || `<div class="hint">Add products first.</div>`}</div></div><div class="field"><label>Usage limit (optional)</label><input type="number" min="1" value="${escapeHtml(d.usage_limit)}" placeholder="No limit" oninput="onPromoField('usage_limit',this.value)"></div><div class="field"><label>End date (optional)</label><input type="date" value="${escapeHtml(d.valid_until)}" oninput="onPromoField('valid_until',this.value)"></div><div class="btn-row"><button class="btn-secondary" onclick="clearPromoDraft()">${isEditingPromo ? "Cancel" : "Clear"}</button><button class="btn-primary" id="create-promo-btn" onclick="createPromo()">${isEditingPromo ? "Save changes" : "Create promo"}</button></div></section>`;
   const list = `<section class="dashboard-card"><div class="dashboard-card-head"><h2>Promo codes</h2><span>${astate.promos.length} total</span></div>${astate.promos.length ? astate.promos.map((promo) => {
     const uses = astate.promoRedemptions.filter((row) => String(row.code || "").toUpperCase() === String(promo.code || "").toUpperCase());
     const exhausted = promo.usage_limit != null && uses.length >= Number(promo.usage_limit);
@@ -1331,7 +1361,7 @@ function renderPromosTab() {
     const applicableIds = Array.isArray(promo.applicable_product_ids) ? promo.applicable_product_ids.map(String) : [];
     const applicableNames = applicableIds.map((id) => astate.menu.find((product) => String(product.id) === id)?.name).filter(Boolean);
     const appliesTo = applicableNames.length ? applicableNames.join(", ") : "All products";
-    return `<div class="queue-row" style="cursor:default"><div class="queue-top"><div><div class="queue-number">${escapeHtml(promo.code)}</div><div class="queue-name">${promo.discount_type === "percent" ? `${escapeHtml(promo.discount_value)}% off` : `${money(promo.discount_value)} off`} · min. ${money(promo.minimum_spend || 0)}</div><div class="queue-name" style="color:#4B5D3A;margin-top:3px">Applies to: ${escapeHtml(appliesTo)}</div></div><div class="queue-status" style="background:${active ? "#e6f5df" : "#f5e8e4"};color:${active ? "#28753a" : "#a33c28"};">${active ? "LIVE" : exhausted ? "USED UP" : "PAUSED"}</div></div><div style="display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap"><button class="link-btn" onclick="togglePromoUses('${escapeHtml(promo.code)}')">${uses.length} used · ${expanded ? "Hide customers" : "View customers"}</button><span class="hint" style="margin:0">${promo.usage_limit != null ? `limit ${promo.usage_limit}` : "No total limit"}${promo.valid_until ? ` · ends ${escapeHtml(String(promo.valid_until).slice(0,10))}` : ""}</span><span style="margin-left:auto;display:flex;gap:8px"><button class="link-btn" onclick="setPromoActive('${promo.id}',${!promo.is_active})">${promo.is_active ? "Pause" : "Make live"}</button><button class="link-danger" onclick="removePromo('${promo.id}')">Delete</button></span></div>${expanded ? `<div style="margin-top:14px;border-top:1px solid #eee3d8;padding-top:8px">${uses.length ? uses.map((use) => { const order = astate.orders.find((item) => String(item.id) === String(use.order_id)); return `<div class="row" style="padding:9px 0;border-bottom:1px solid #f3ebe2"><span><b>${escapeHtml(order?.customer_name || "Customer")}</b><br><span class="hint" style="margin:0">${escapeHtml(use.phone || order?.customer_phone || "—")} · ${escapeHtml(order?.order_number || "Order")}</span></span><span class="hint" style="margin:0">${use.created_at ? new Date(use.created_at).toLocaleString() : "Used"}</span></div>`; }).join("") : `<div class="hint" style="padding:10px 0">Nobody has used this code yet.</div>`}</div>` : ""}</div>`;
+    return `<div class="queue-row" style="cursor:default"><div class="queue-top"><div><div class="queue-number">${escapeHtml(promo.code)}</div><div class="queue-name">${promo.discount_type === "percent" ? `${escapeHtml(promo.discount_value)}% off` : `${money(promo.discount_value)} off`} · min. ${money(promo.minimum_spend || 0)}</div><div class="queue-name" style="color:#4B5D3A;margin-top:3px">Applies to: ${escapeHtml(appliesTo)}</div></div><div class="queue-status" style="background:${active ? "#e6f5df" : "#f5e8e4"};color:${active ? "#28753a" : "#a33c28"};">${active ? "LIVE" : exhausted ? "USED UP" : "PAUSED"}</div></div><div style="display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap"><button class="link-btn" onclick="togglePromoUses('${escapeHtml(promo.code)}')">${uses.length} used · ${expanded ? "Hide customers" : "View customers"}</button><span class="hint" style="margin:0">${promo.usage_limit != null ? `limit ${promo.usage_limit}` : "No total limit"}${promo.valid_until ? ` · ends ${escapeHtml(String(promo.valid_until).slice(0,10))}` : ""}</span><span style="margin-left:auto;display:flex;gap:8px"><button class="link-btn" onclick="editPromo('${promo.id}')">Edit</button><button class="link-btn" onclick="setPromoActive('${promo.id}',${!promo.is_active})">${promo.is_active ? "Pause" : "Make live"}</button><button class="link-danger" onclick="removePromo('${promo.id}')">Delete</button></span></div>${expanded ? `<div style="margin-top:14px;border-top:1px solid #eee3d8;padding-top:8px">${uses.length ? uses.map((use) => { const order = astate.orders.find((item) => String(item.id) === String(use.order_id)); return `<div class="row" style="padding:9px 0;border-bottom:1px solid #f3ebe2"><span><b>${escapeHtml(order?.customer_name || "Customer")}</b><br><span class="hint" style="margin:0">${escapeHtml(use.phone || order?.customer_phone || "—")} · ${escapeHtml(order?.order_number || "Order")}</span></span><span class="hint" style="margin:0">${use.created_at ? new Date(use.created_at).toLocaleString() : "Used"}</span></div>`; }).join("") : `<div class="hint" style="padding:10px 0">Nobody has used this code yet.</div>`}</div>` : ""}</div>`;
   }).join("") : `<div class="dashboard-empty">No promo codes yet.</div>`}</section>`;
   return `<div class="dashboard-grid" style="grid-template-columns:minmax(290px,.72fr) minmax(400px,1.28fr);align-items:start">${form}${list}</div>`;
 }
