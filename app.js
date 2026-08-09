@@ -354,8 +354,27 @@ function cartLines() {
 }
 function cartCount() { return cartLines().reduce((sum, line) => sum + Number(line.qty || 0), 0); }
 function cartTotal() { return cartLines().reduce((sum, line) => sum + Number(line.unitPrice || 0) * Number(line.qty || 0), 0); }
+function promoProductIds(promo) {
+  const value = promo?.applicable_product_ids;
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value === "string") { try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed.map(String) : []; } catch (_) {} }
+  return [];
+}
+function promoEligibleSubtotal(promo) {
+  const ids = promoProductIds(promo);
+  if (!ids.length) return cartTotal();
+  return cartLines().reduce((sum, line) => ids.includes(String(line.productId)) ? sum + Number(line.unitPrice || 0) * Number(line.qty || 0) : sum, 0);
+}
+function promoDiscountAmount(promo) {
+  if (!promo) return 0;
+  const eligible = promoEligibleSubtotal(promo);
+  const amount = String(promo.discount_type).toLowerCase() === "percent"
+    ? eligible * (Number(promo.discount_value || 0) / 100)
+    : Number(promo.discount_value || 0);
+  return Math.min(eligible, Math.max(0, amount));
+}
 function orderTotal() {
-  const discount = state.promo ? Number(state.promo.amount || 0) : 0;
+  const discount = promoDiscountAmount(state.promo);
   return Math.max(0, cartTotal() - discount);
 }
 
@@ -520,7 +539,15 @@ async function applyPromoCode() {
     if (promo.valid_until && new Date(promo.valid_until) < now) { state.promo = null; state.promoMsg = "That promo code has expired."; render(); return; }
 
     const minimumSpend = Number(promo.minimum_spend || 0);
-    if (cartTotal() < minimumSpend) { state.promo = null; state.promoMsg = `Minimum spend is ${money(minimumSpend)}.`; render(); return; }
+    const eligibleSubtotal = promoEligibleSubtotal(promo);
+    const applicableIds = promoProductIds(promo);
+    if (applicableIds.length && eligibleSubtotal <= 0) {
+      const names = applicableIds.map((id) => state.menu.find((item) => String(item.id) === id)?.name).filter(Boolean);
+      state.promo = null;
+      state.promoMsg = `This code only applies to: ${names.join(", ") || "selected products"}.`;
+      render(); return;
+    }
+    if (eligibleSubtotal < minimumSpend) { state.promo = null; state.promoMsg = `Minimum eligible spend is ${money(minimumSpend)}.`; render(); return; }
 
     if (promo.usage_limit != null && Number(promo.used_count || 0) >= Number(promo.usage_limit)) {
       state.promo = null; state.promoMsg = "That code has reached its usage limit."; render(); return;
@@ -531,12 +558,7 @@ async function applyPromoCode() {
       if ((usedByPhone || 0) > 0) { state.promo = null; state.promoMsg = "You've already used this code."; render(); return; }
     } catch (e) { /* best-effort — table may not exist */ }
 
-    let amount = String(promo.discount_type).toLowerCase() === "percent"
-      ? cartTotal() * (Number(promo.discount_value || 0) / 100)
-      : Number(promo.discount_value || 0);
-    amount = Math.min(cartTotal(), Math.max(0, amount));
-
-    state.promo = { id: promo.id, code: promo.code, discount_type: promo.discount_type, discount_value: Number(promo.discount_value || 0), used_count: promo.used_count, amount };
+    state.promo = { id: promo.id, code: promo.code, discount_type: promo.discount_type, discount_value: Number(promo.discount_value || 0), minimum_spend: Number(promo.minimum_spend || 0), used_count: promo.used_count, applicable_product_ids: applicableIds };
     state.promoMsg = `Applied — ${String(promo.discount_type).toLowerCase() === "percent" ? `${promo.discount_value}% off` : `${money(promo.discount_value)} off`}`;
     render();
   } catch (e) {
@@ -555,6 +577,15 @@ async function submitOrder() {
   if (!f.slotId) { alert("Please select a pickup slot."); return; }
   if (!f.collectionPoint) { alert("Please select a collection point."); return; }
   if (cartLines().length === 0) { alert("Your cart is empty."); setScreen("menu"); return; }
+  if (state.promo) {
+    const eligibleSubtotal = promoEligibleSubtotal(state.promo);
+    if (eligibleSubtotal <= 0 || eligibleSubtotal < Number(state.promo.minimum_spend || 0)) {
+      state.promo = null;
+      state.promoMsg = "Your cart changed, so the promo code was removed. Please check your total.";
+      render();
+      return;
+    }
+  }
   const slot = state.slots.find((item) => item.id === f.slotId);
   if (!slot) { alert("Please select a valid pickup slot."); return; }
 
@@ -1109,7 +1140,7 @@ function renderCheckout() {
               : line.options.map((option) => escapeHtml(option.optionName)).join(" · ")
           }</div>` : ""}
         `).join("")}
-        ${state.promo ? `<div class="row"><span class="label">Discount (${escapeHtml(state.promo.code)})</span><span>-${money(state.promo.amount)}</span></div>` : ""}
+        ${state.promo ? `<div class="row"><span class="label">Discount (${escapeHtml(state.promo.code)})</span><span>-${money(promoDiscountAmount(state.promo))}</span></div>` : ""}
         <div class="divider"></div>
         <div class="row bold"><span class="label">Total</span><span>${money(orderTotal())}</span></div>
       </div>

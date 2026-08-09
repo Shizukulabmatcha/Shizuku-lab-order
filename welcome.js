@@ -58,5 +58,40 @@
       link.textContent = data.welcome_website_button_text || "Visit Shizuku Lab website ↗";
       app.querySelector(".welcome-actions").appendChild(link);
     }
+    const announcement = document.getElementById("welcome-announcement");
+    const announcementTitle = document.getElementById("welcome-announcement-title");
+    const announcementMessage = document.getElementById("welcome-announcement-message");
+    const announcementPromo = document.getElementById("welcome-announcement-promo");
+    const announcementCode = document.getElementById("welcome-announcement-code");
+    const announcementCopy = document.getElementById("welcome-announcement-copy");
+    const announcementContinue = document.getElementById("welcome-announcement-continue");
+    const announcementClose = document.getElementById("welcome-announcement-close");
+    const noticeTitle = String(data.announcement_title || "").trim();
+    const noticeMessage = String(data.announcement_message || "").trim();
+    const noticeCode = String(data.announcement_promo_code || "").trim().toUpperCase();
+    const today = new Date().toLocaleDateString("en-CA");
+    const noticeFingerprint = `${today}|${noticeTitle}|${noticeMessage}|${noticeCode}`;
+    let seenNotice = "";
+    try { seenNotice = localStorage.getItem("shizuku-welcome-announcement") || ""; } catch (_) {}
+    if (announcement && data.show_announcement && (noticeTitle || noticeMessage || noticeCode) && seenNotice !== noticeFingerprint) {
+      announcementTitle.textContent = noticeTitle || "A little update";
+      announcementMessage.textContent = noticeMessage;
+      announcementMessage.hidden = !noticeMessage;
+      announcementCode.textContent = noticeCode;
+      announcementPromo.hidden = !noticeCode;
+      announcementContinue.textContent = String(data.announcement_button_text || "Continue").trim() || "Continue";
+      const dismiss = () => {
+        announcement.hidden = true;
+        try { localStorage.setItem("shizuku-welcome-announcement", noticeFingerprint); } catch (_) {}
+      };
+      announcementClose.addEventListener("click", dismiss);
+      announcementContinue.addEventListener("click", dismiss);
+      announcement.addEventListener("click", (event) => { if (event.target === announcement) dismiss(); });
+      announcementCopy.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(noticeCode); announcementCopy.textContent = "Copied"; }
+        catch (_) { announcementCopy.textContent = noticeCode; }
+      });
+      announcement.hidden = false;
+    }
   } catch (_) { /* The order button remains available even when settings are unavailable. */ }
 })();
