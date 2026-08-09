@@ -79,6 +79,10 @@ function productPriceMarkup(item, className = "item-price") {
 function escapeHtml(value) {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
+function safeExternalUrl(value) {
+  const text = String(value || "").trim();
+  return /^https?:\/\//i.test(text) ? text : "";
+}
 function uidCode() { return "SL-" + Math.random().toString(36).slice(2, 8).toUpperCase(); }
 function cleanPhoneInput(value) { return String(value || "").replace(/[^0-9+\-\s]/g, ""); }
 function normalisePhone(value) {
@@ -820,6 +824,13 @@ function header({ showCart = false } = {}) {
   `;
 }
 
+function poweredByFooter() {
+  if (state.store.show_powered_by === false) return "";
+  const text = escapeHtml(state.store.powered_by_text || "Powered by Slow Studio");
+  const url = safeExternalUrl(state.store.powered_by_url);
+  return `<footer class="powered-by-footer">${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${text}</a>` : `<span>${text}</span>`}</footer>`;
+}
+
 /* ---------- menu ---------- */
 function renderMenuCard(item) {
   const soldOut = isSoldOut(item);
@@ -1338,7 +1349,7 @@ function render() {
   else if (state.screen === "track") html = renderTrackOrder();
   else if (state.screen === "loyalty") html = renderLoyalty();
   else html = renderMenu();
-  app.innerHTML = html;
+  app.innerHTML = `${html}${poweredByFooter()}`;
   if (state.screen === "payment") startPaymentCountdown();
 }
 

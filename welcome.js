@@ -8,7 +8,7 @@
   };
   if (typeof IS_CONFIGURED === "undefined" || !IS_CONFIGURED || typeof db === "undefined") return;
   try {
-    const { data, error } = await db.from("store_settings").select("store_name,logo_url,website_url,welcome_title,welcome_subtitle,welcome_copy,welcome_order_button_text,welcome_track_button_text,welcome_loyalty_button_text,welcome_website_button_text,welcome_title_font,welcome_body_font,welcome_logo_circle_size,welcome_logo_image_scale,welcome_logo_position,welcome_logo_image_x,welcome_logo_image_y,logo_circle_size,logo_image_scale").limit(1).maybeSingle();
+    const { data, error } = await db.from("store_settings").select("*").limit(1).maybeSingle();
     if (error || !data) return;
     const app = document.getElementById("welcome-app");
     const logoFrame = app.querySelector(".welcome-logo-frame");
@@ -19,6 +19,7 @@
     const orderButton = app.querySelector(".welcome-enter");
     const trackButton = app.querySelector(".welcome-track");
     const loyaltyButton = app.querySelector(".welcome-loyalty");
+    const poweredBy = app.querySelector("#welcome-powered-by");
     app.style.fontFamily = fontStacks[data.welcome_body_font] || fontStacks.work_sans;
     title.style.fontFamily = fontStacks[data.welcome_title_font] || fontStacks.fraunces;
     if (data.logo_url) logo.src = data.logo_url;
@@ -36,6 +37,18 @@
     if (data.welcome_order_button_text) orderButton.textContent = data.welcome_order_button_text;
     if (data.welcome_track_button_text && trackButton) trackButton.textContent = data.welcome_track_button_text;
     if (data.welcome_loyalty_button_text && loyaltyButton) loyaltyButton.textContent = data.welcome_loyalty_button_text;
+    if (poweredBy) {
+      if (data.show_powered_by === false) poweredBy.hidden = true;
+      else {
+        const poweredText = data.powered_by_text || "Powered by Slow Studio";
+        const poweredUrl = /^https?:\/\//i.test(String(data.powered_by_url || "").trim()) ? String(data.powered_by_url).trim() : "";
+        poweredBy.innerHTML = "";
+        const element = document.createElement(poweredUrl ? "a" : "span");
+        element.textContent = poweredText;
+        if (poweredUrl) { element.href = poweredUrl; element.target = "_blank"; element.rel = "noopener noreferrer"; }
+        poweredBy.appendChild(element);
+      }
+    }
     if (data.website_url) {
       const link = document.createElement("a");
       link.className = "welcome-website";

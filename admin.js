@@ -1423,6 +1423,11 @@ function renderSettingsTab() {
     ${field("Instagram (without @)", "instagram")}
     ${field("Shizuku Lab website link (optional)", "website_url", "https://your-brand-website.com")}
     <div class="divider"></div>
+    <div class="display" style="font-size:20px;margin:4px 0 8px;">Powered by footer</div>
+    ${field("Footer text", "powered_by_text", "Powered by Slow Studio")}
+    ${field("Slow Studio link (optional)", "powered_by_url", "https://slow-studio.com")}
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_powered_by !== false ? "checked" : ""} onchange="onSettingsField('show_powered_by', this.checked)"><span><b>Show Powered by Slow Studio</b><br><span class="hint">When a link is entered, customers can click the footer and it opens in a new tab.</span></span></label>
+    <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Welcome cover</div>
     ${field("Welcome title", "welcome_title", "Welcome to Shizuku Lab")}
     ${fontSelect("Welcome title font", "welcome_title_font", "fraunces")}
