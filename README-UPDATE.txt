@@ -28,23 +28,44 @@ If you leave the website link blank, the Welcome page only shows Enter ordering.
 EMAIL NOTIFICATION + REQUIRED PAYMENT SCREENSHOT
 
 Payment screenshot upload is required before a customer can submit payment.
-The database function in supabase-email-notifications.sql also rejects an empty
-screenshot path, so this is enforced beyond the button shown on the website.
+The website submits the order only after the payment screenshot reaches
+Supabase successfully.
 
 To receive an email after a customer uploads payment proof:
 
-1. Open script.google.com and create a new project.
-2. Replace its contents with google-apps-script-email-notifications.gs.
-3. Replace REPLACE_WITH_THE_SAME_LONG_RANDOM_SECRET with a private, long random
-   phrase. Do not share it or put it in app.js/config.js.
-4. Deploy → New deployment → Web app. Execute as Me; access: Anyone. Authorise
-   Gmail access, deploy, then copy the /exec web app URL.
-5. Open supabase-email-notifications.sql. Paste the /exec URL and the exact same
-   private secret into the two marked placeholders.
-6. Run the entire SQL file once in Supabase → SQL Editor.
-7. Place a small test order and upload a screenshot. The notification is sent to
+1. Deploy the Gmail notification code in Google Apps Script as a Web app.
+   Execute as Me; access: Anyone.
+2. Copy its /exec URL, append the matching private ?key= value, and save the
+   complete private URL in Admin → Notifications.
+3. Turn on email alerts and save the notification settings.
+4. Run supabase-email-notifications.sql once in Supabase → SQL Editor. This is
+   the database trigger that calls the Google Web app.
+5. Place a small test order and upload a screenshot. The notification is sent to
    tinghuioh29@gmail.com after the payment proof reaches Supabase successfully.
 
-The email contains the order number, customer, pickup details, total, items,
-options and notes. Open admin.html to view the private payment screenshot and
-confirm the payment.
+The email contains the order number, customer, pickup details, total and notes.
+Open admin.html to view the private payment screenshot and confirm the payment.
+
+CUSTOMER PRODUCT STOCK
+
+1. In Supabase → SQL Editor, run supabase-customer-product-stock.sql once.
+2. Set the starting Stock for every item in Admin → Products.
+3. Customer stock is shown automatically as:
+   Products Stock minus quantities in non-cancelled orders.
+4. Cancelling an order releases its reserved stock automatically.
+5. Sold-out items cannot be ordered. The database also blocks overselling if
+   two customers try to order the last item at the same time.
+
+PRODUCT-SPECIFIC PROMOS + WELCOME ANNOUNCEMENT
+
+1. In Supabase → SQL Editor, run supabase-promo-products-announcement.sql once.
+2. Upload app.js, admin.js, welcome.js, index.html and style.css to GitHub.
+3. In Admin → Promos, tick the products that a new promo code applies to.
+   Leave every product unticked when the promo should apply to the whole cart.
+4. In Admin → Settings → Welcome announcement, add opening hours, a short
+   update and/or a promo code, then turn it on and save settings.
+5. The same announcement appears at most once per customer per day. Editing
+   its content makes the updated announcement eligible to appear again.
+
+The mobile rolling message now keeps moving smoothly even when the phone has
+Reduce Motion enabled.

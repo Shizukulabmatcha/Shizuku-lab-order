@@ -1,34 +1,41 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#f4f0e7">
-  <meta name="shizuku-build" content="3.3">
-  <title>Shizuku Lab — Matcha &amp; Houjicha Studio</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&amp;family=Gloock&amp;family=Noto+Serif+JP:wght@400;500&amp;family=Playfair+Display:ital,wght@0,500;1,500&amp;family=Cormorant+Garamond:wght@500;600&amp;display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=33">
-  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg?v=33">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome · Shizuku Lab</title>
+  <link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <div class="progress" id="progress"></div>
-  <div class="cursor" id="cursor"><img src="assets/chasen-cursor.png" alt=""></div>
-  <header>
-    <a href="#home" class="logo-wrap" aria-label="Shizuku Lab"><span class="logo-mark" id="headerLogo"></span></a>
-    <nav id="nav"></nav>
-    <a class="order-link" id="headerOrder" target="_blank" rel="noopener">Reserve your cup</a>
-    <button class="menu-toggle" id="menuToggle" aria-label="Menu"><span></span><span></span></button>
-  </header>
-  <div class="mobile-nav" id="mobileNav"></div>
-  <main id="site"></main>
-  <div class="drawer-backdrop" id="drawerBackdrop"></div>
-  <aside class="drawer" id="drawer"><button id="drawerClose" aria-label="Close">×</button><div id="drawerContent"></div></aside>
-  <script src="site-data.js?v=33"></script>
-  <script src="site-render.js?v=33"></script>
-  <script src="supabase-config.js?v=33"></script>
-  <script src="website-live.js?v=33"></script>
-  <script src="app.js?v=33"></script>
+<body class="welcome-page">
+  <div class="welcome-announcement" id="welcome-announcement" hidden role="dialog" aria-modal="true" aria-labelledby="welcome-announcement-title">
+    <section class="welcome-announcement-card">
+      <button class="welcome-announcement-close" id="welcome-announcement-close" type="button" aria-label="Close">×</button>
+      <div class="welcome-announcement-kicker">Shizuku Lab update</div>
+      <h2 class="welcome-announcement-title" id="welcome-announcement-title"></h2>
+      <p class="welcome-announcement-message" id="welcome-announcement-message"></p>
+      <div class="welcome-announcement-promo" id="welcome-announcement-promo" hidden>
+        <span class="welcome-announcement-code" id="welcome-announcement-code"></span>
+        <button class="welcome-announcement-copy" id="welcome-announcement-copy" type="button">Copy code</button>
+      </div>
+      <button class="welcome-announcement-continue" id="welcome-announcement-continue" type="button">Continue</button>
+    </section>
+  </div>
+  <main class="welcome-card" id="welcome-app">
+    <div class="welcome-logo-frame"><img class="welcome-logo" src="logo.png" alt="Shizuku Lab logo"></div>
+    <h1 class="welcome-title">Shizuku Lab</h1>
+    <div class="welcome-sub">雫ラボ · CRAFTED DROP BY DROP</div>
+    <p class="welcome-copy">Little cups, big comfort. Freshly whisked matcha, crafted one cup at a time.</p>
+    <div class="welcome-actions">
+      <a class="welcome-enter" href="order.html">Enter ordering →</a>
+      <div class="welcome-tools">
+        <a class="welcome-tool welcome-track" href="order.html?screen=track">Track order</a>
+        <a class="welcome-tool welcome-loyalty" href="order.html?screen=loyalty">Check your loyalty</a>
+      </div>
+    </div>
+    <div class="welcome-powered-by" id="welcome-powered-by"><span>Powered by Slow Studio</span></div>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="welcome.js"></script>
 </body>
 </html>
