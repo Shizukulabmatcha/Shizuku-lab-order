@@ -820,13 +820,26 @@ function salesPerformance() {
   });
   return { topProducts: [...products.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 5), days };
 }
+function pickupTimeMinutes(value) {
+  const match = String(value || "").trim().toUpperCase().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/);
+  if (!match) return Number.MAX_SAFE_INTEGER;
+  let hours = Number(match[1]) % 12;
+  if (match[3] === "PM") hours += 12;
+  return (hours * 60) + Number(match[2] || 0);
+}
+
 function nextPickupProduction() {
   const active = paidOrders().filter((order) => ["confirmed", "preparing", "ready"].includes(order.order_status));
   const dates = [...new Set(active.map((order) => order.collection_date).filter(Boolean))].sort();
   const today = new Date();
   const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
   const date = dates.find((value) => value >= todayKey) || dates[0] || "";
-  const orders = active.filter((order) => order.collection_date === date).sort((a, b) => String(a.collection_time || "").localeCompare(String(b.collection_time || "")));
+  const orders = active
+    .filter((order) => order.collection_date === date)
+    .sort((a, b) => (
+      pickupTimeMinutes(a.collection_time) - pickupTimeMinutes(b.collection_time)
+      || String(a.customer_name || "").localeCompare(String(b.customer_name || ""))
+    ));
   return { date, orders };
 }
 function customerInsights() {
