@@ -84,6 +84,12 @@ const state = {
     show_checkout_instagram: true,
     show_checkout_notes: true,
     payment_instructions: "Scan with your banking app, or PayNow to the account below.",
+    payment_qr_size: 220,
+    payment_compact_layout: false,
+    show_payment_order_details: true,
+    show_payment_transaction_reference: true,
+    show_instagram_payment_help: true,
+    payment_submit_button_text: "Submit payment proof",
     chat_enabled: true,
     chat_heading: "Message us",
     chat_auto_reply: "Thanks for your message. We will reply as soon as possible.",
@@ -838,7 +844,7 @@ async function markPaid() {
   const instagramDmUrl = `https://ig.me/m/${encodeURIComponent(instagramHandle)}`;
   // Open immediately from the customer's tap so mobile browsers do not block
   // Instagram after the asynchronous screenshot upload finishes.
-  const instagramWindow = window.open("", "_blank");
+  const instagramWindow = state.store.show_instagram_payment_help === false ? null : window.open("", "_blank");
   if (IS_CONFIGURED && order.id) {
     const safeFileName = String(proofFile.name || "payment-proof.jpg").replace(/[^a-zA-Z0-9._-]/g, "-");
     const filePath = `${state.customerId || "legacy"}/${order.id}/${Date.now()}-${safeFileName}`;
@@ -868,7 +874,7 @@ async function markPaid() {
   state.screen = "confirmation";
   render();
   if (instagramWindow) instagramWindow.location.href = instagramDmUrl;
-  else alert("Payment proof submitted. Please open Instagram and DM us your order number: " + (order.order_number || order.id || ""));
+  else if (state.store.show_instagram_payment_help !== false) alert("Payment proof submitted. Please open Instagram and DM us your order number: " + (order.order_number || order.id || ""));
 }
 
 /* ---------- PayNow SGQR generation (EMVCo / SGQR spec) ---------- */
@@ -1327,9 +1333,18 @@ function startPaymentCountdown() {
   update();
   if (paymentSecondsLeft() > 0) paymentCountdownTimer = setInterval(update, 1000);
 }
+function leavePaymentPage() {
+  const trackedNumber = state.tracking.order?.order_number;
+  const paymentNumber = state.lastOrder?.order_number;
+  state.screen = trackedNumber && trackedNumber === paymentNumber ? "track" : "menu";
+  render();
+}
 function renderPayment() {
   const order = state.lastOrder;
   if (!order) return renderMenu();
+  if (order.order_status === "cancelled") {
+    return `${header()}<div class="screen"><div class="summary-card" style="text-align:center;"><div class="display" style="font-size:22px;">This order was cancelled</div><div class="hint" style="margin:10px 0 18px;line-height:1.5;">Its stock reservation has been released, so it cannot accept payment.</div><button class="primary-btn" onclick="setScreen('menu')">Place a new order</button></div></div>`;
+  }
   if (!state.payment.expiresAt) state.payment.expiresAt = Date.now() + 15 * 60 * 1000;
   const paymentExpired = paymentSecondsLeft() === 0;
   const paynowName = state.store.paynow_name || state.store.store_name || "Shizuku Lab";
@@ -1344,39 +1359,41 @@ function renderPayment() {
       ? `<div class="qr-box"><img src="${escapeHtml(state.store.paynow_url)}" alt="PayNow QR" style="max-width:220px;width:100%;height:auto;"></div>`
       : `<div class="qr-box"><div class="qr-placeholder"></div></div>`;
   }
+  const paymentQrSize = Math.max(150, Math.min(300, Number(state.store.payment_qr_size || 220)));
+  qrHtml = `<div class="payment-qr-size" style="--payment-qr-size:${paymentQrSize}px;">${qrHtml}</div>`;
   return `
     ${header()}
-    <div class="screen">
+    <div class="screen ${state.store.payment_compact_layout ? "payment-compact" : ""}">
+      <style>.payment-qr-size .qr-box{max-width:var(--payment-qr-size);margin-left:auto;margin-right:auto}.payment-qr-size .qr-box svg,.payment-qr-size .qr-box img{width:100%;height:auto}.payment-compact .summary-card{padding:14px}.payment-compact .qr-box{margin-bottom:8px}.payment-compact .divider{margin:12px 0}.payment-compact .row{padding:5px 0}</style>
+      <button class="back-link" onclick="leavePaymentPage()">${ICONS.back} ${state.tracking.order?.order_number === order.order_number ? "Back to Track Order" : "Back to menu"}</button>
       <div class="summary-card">
         ${qrHtml}
         <div class="hint">${escapeHtml(state.store.payment_instructions || "Scan with your banking app, or PayNow to the account below.")}<br><b>${escapeHtml(paynowName)}</b>${paynowNumber ? `<br>${escapeHtml(paynowNumber)}` : ""}</div>
         <div class="payment-timer" id="paynow-countdown" aria-live="polite">Please complete payment within ${paymentCountdownText()}.</div>
         <button class="btn-secondary refresh-qr-btn" id="refresh-paynow-qr" ${paymentExpired ? "" : "hidden"} onclick="refreshPayNowQr()">Refresh QR · 15 minutes</button>
         <div class="divider"></div>
-        <div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(order.order_number || order.id || "")}</span></div>
-        <div class="row bold"><span class="label">Amount</span><span>${money(order.total)}</span></div>
+        ${state.store.show_payment_order_details === false ? "" : `<div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(order.order_number || order.id || "")}</span></div><div class="row bold"><span class="label">Amount</span><span>${money(order.total)}</span></div>`}
         ${paynowNumber ? `<div class="ref-note" style="color:var(--matcha);"><b>Payment amount is pre-filled in the QR and cannot be edited.</b></div>` : ""}
-        <div class="row"><span class="label">Collection point</span><span>${escapeHtml(order.collection_point || "—")}</span></div>
-        <div class="ref-note">Enter <b>${escapeHtml(order.order_number || order.id || "")}</b> as the payment reference.</div>
+        ${state.store.show_payment_order_details === false ? "" : `<div class="row"><span class="label">Collection point</span><span>${escapeHtml(order.collection_point || "—")}</span></div>`}
+        ${state.store.show_payment_transaction_reference === false ? "" : `<div class="ref-note">Enter <b>${escapeHtml(order.order_number || order.id || "")}</b> as the payment reference.</div>`}
       </div>
       <div class="summary-card" style="margin-top:16px;">
         ${inAppBrowser ? `<div style="padding:14px 16px;margin-bottom:16px;border:1px solid #d8c58e;border-radius:14px;background:#fff8df;color:#5b4b22;font-size:13px;line-height:1.5;"><b>Using Instagram or Facebook?</b><br>Photo access may be blocked by the in-app browser. Please choose <b>Allow all photos/media</b>. If it still fails, do not refresh—send the screenshot through Instagram below. Your order <b>${escapeHtml(order.order_number || order.id || "")}</b> will be restored if this page reloads.</div>` : ""}
-        <div class="field">
+        ${state.store.show_payment_transaction_reference === false ? "" : `<div class="field">
           <label>PayNow transaction reference <span class="hint">(optional)</span></label>
           <input value="${escapeHtml(state.payment.transactionReference)}" placeholder="e.g. 123456789" oninput="onPaymentReference(this.value)">
-        </div>
+        </div>`}
         <div class="field" style="margin-bottom:0;">
           <label>Payment screenshot <span style="color:#B33;">*</span></label>
           <input type="file" accept="image/jpeg,image/png,image/heic,image/heif" required aria-required="true" onchange="onPaymentProof(this)">
           <div class="hint" style="margin-top:8px;">${state.payment.proofFile ? `Selected: <b>${escapeHtml(state.payment.proofFile.name)}</b>` : "Required — upload a clear screenshot of your successful PayNow payment. If you opened this page inside Facebook or Instagram, please allow photo access when prompted."}</div>
         </div>
-        <button type="button" class="btn-secondary" style="width:100%;margin-top:14px;" onclick="openInstagramPaymentHelp()">Upload problem? Send screenshot by Instagram DM</button>
-        <div class="hint" style="margin-top:8px;margin-bottom:0;">We copied your order number where supported. Include it in your message so we can match your payment.</div>
+        ${state.store.show_instagram_payment_help === false ? "" : `<button type="button" class="btn-secondary" style="width:100%;margin-top:14px;" onclick="openInstagramPaymentHelp()">Upload problem? Send screenshot by Instagram DM</button><div class="hint" style="margin-top:8px;margin-bottom:0;">We copied your order number where supported. Include it in your message so we can match your payment.</div>`}
       </div>
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
-      <button class="primary-btn" ${state.payment.proofFile ? "" : "disabled"} onclick="markPaid()">Submit proof &amp; open Instagram DM</button>
-      <div class="hint" style="margin-top:8px;margin-bottom:0;">After submitting, please send us your order number on Instagram so we can verify your payment promptly.</div>
+      <button class="primary-btn" ${state.payment.proofFile ? "" : "disabled"} onclick="markPaid()">${escapeHtml(state.store.payment_submit_button_text || "Submit payment proof")}</button>
+      ${state.store.show_instagram_payment_help === false ? "" : `<div class="hint" style="margin-top:8px;margin-bottom:0;">After submitting, please send us your order number on Instagram so we can verify your payment promptly.</div>`}
     </div></div>
   `;
 }
