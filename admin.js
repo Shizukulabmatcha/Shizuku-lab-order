@@ -63,8 +63,8 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
-const PAY_LABEL = { awaiting_payment: "Awaiting payment", submitted: "Payment sent — pending confirmation", paid: "Paid" };
-const PAY_COLOR = { awaiting_payment: "#B78A2E", submitted: "#B78A2E", paid: "#4B5D3A" };
+const PAY_LABEL = { awaiting_payment: "Awaiting payment", submitted: "Payment sent — pending confirmation", rejected: "Payment proof rejected", paid: "Paid" };
+const PAY_COLOR = { awaiting_payment: "#B78A2E", submitted: "#B78A2E", rejected: "#B33333", paid: "#4B5D3A" };
 const ORDER_LABEL = { pending: "Pending", awaiting_confirmation: "Awaiting confirmation", confirmed: "Confirmed", preparing: "Preparing", ready: "Ready for collection", collected: "Collected", cancelled: "Cancelled" };
 const ORDER_COLOR = { cancelled: "#B33333", preparing: "#A36D1E", ready: "#267A47" };
 
@@ -279,6 +279,18 @@ async function confirmPayment(id) {
       return;
     }
   }
+}
+
+async function rejectPayment(id) {
+  const order = astate.orders.find((item) => String(item.id) === String(id));
+  if (!order) return;
+  const reason = prompt("Tell the customer why the screenshot was rejected:", "The screenshot is unclear. Please upload a clearer payment confirmation.");
+  if (!reason?.trim()) return;
+  const fields = { payment_status: "rejected", order_status: "pending", payment_rejection_reason: reason.trim() };
+  const { error } = await db.from("orders").update(fields).eq("id", id);
+  if (error) { alert("Could not reject payment: " + error.message); return; }
+  astate.orders = astate.orders.map((item) => String(item.id) === String(id) ? { ...item, ...fields } : item);
+  render();
 }
 
 async function openPaymentProof(path) {
@@ -1065,12 +1077,13 @@ function renderLogin() {
 function renderAdminWelcome() {
   const welcomeBrand = escapeHtml(astate.settings?.store_name || "Your Studio");
   const welcomeIcon = escapeHtml(astate.settings?.admin_welcome_icon_url || "slow-studio-icon.svg");
+  const welcomeDurationMs = Math.max(2, Math.min(10, Number(astate.settings?.admin_welcome_duration_seconds || 5))) * 1000;
   if (!astate.welcomeTimer) {
     astate.welcomeTimer = setTimeout(() => {
       astate.welcomePending = false;
       astate.welcomeTimer = null;
       render();
-    }, 1700);
+    }, welcomeDurationMs);
   }
   return `<style>
     @keyframes shizukuWelcomeIn{0%{opacity:0;transform:translateY(18px) scale(.985)}100%{opacity:1;transform:none}}
@@ -1289,6 +1302,13 @@ function orderMatchesFilter(order, filter) {
   if (filter === "cancelled") return order.order_status === "cancelled";
   return true;
 }
+function renderPreparationTab() {
+  const today = localDateText(new Date());
+  const orders = astate.orders.filter((order) => order.collection_date === today && order.payment_status === "paid" && !["cancelled","collected"].includes(order.order_status)).sort((a,b) => String(a.collection_time || "").localeCompare(String(b.collection_time || "")));
+  const totals = new Map();
+  orders.forEach((order) => (order.order_items || []).forEach((item) => totals.set(item.product_name, (totals.get(item.product_name) || 0) + Number(item.quantity || 0))));
+  return `<style>@media print{.admin-side,.admin-top,.no-print{display:none!important}.admin-main{padding:0!important}.prep-print{box-shadow:none!important;border:0!important}}</style><section class="dashboard-card prep-print" style="padding:22px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Today · ${escapeHtml(today)}</h2><div><span>${orders.length} active paid order${orders.length === 1 ? "" : "s"}</span><button class="btn-secondary no-print" style="margin-left:10px;" onclick="window.print()">Print list</button></div></div><div class="display" style="font-size:20px;margin:6px 0 10px;">Total drinks to prepare</div>${totals.size ? [...totals.entries()].map(([name,qty]) => `<div class="row" style="padding:9px 0;border-bottom:1px solid #eee5da;"><b>${escapeHtml(name)}</b><b>× ${qty}</b></div>`).join("") : `<div class="dashboard-empty">No paid drinks scheduled for today.</div>`}<div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:10px;">Preparation order</div>${orders.map((order) => `<div style="padding:14px 0;border-bottom:1px solid #eee5da;"><div class="queue-top"><b>${escapeHtml(order.collection_time || "Time pending")} · ${escapeHtml(order.customer_name || "Customer")}</b><span class="mono">${escapeHtml(order.order_number || order.id)}</span></div><div class="queue-name" style="margin-top:7px;">${(order.order_items || []).map((item) => `${escapeHtml(item.product_name)} × ${Number(item.quantity || 0)}`).join(" · ")}</div><div class="queue-name">${escapeHtml(order.collection_point || "")}${order.notes ? ` · Note: ${escapeHtml(order.notes)}` : ""}</div></div>`).join("")}</section>`;
+}
 function renderOrders() {
   const search = String(astate.orderSearch || "").trim().toLowerCase();
   const orders = astate.orders.filter((order) => {
@@ -1337,6 +1357,7 @@ function renderOrders() {
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center;">
         <button class="btn-secondary" onclick="editOrder('${o.id}')">Edit order</button>
         ${o.order_status !== "cancelled" && (o.payment_status === "submitted" || o.payment_status === "awaiting_payment") ? `<button class="small-btn" onclick="confirmPayment('${o.id}')">✓ Confirm payment</button>` : ""}
+        ${o.order_status !== "cancelled" && o.payment_status === "submitted" ? `<button class="link-danger" onclick="rejectPayment('${o.id}')">Reject proof</button>` : ""}
         ${o.payment_status === "awaiting_payment" ? `<span class="hint" style="margin:0;">Check the Instagram DM payment screenshot before confirming.</span>` : ""}
         ${o.payment_status === "paid" && o.order_status === "confirmed" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','preparing')">Start preparing</button>` : ""}
         ${o.payment_status === "paid" && o.order_status === "preparing" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','ready')">Mark ready for collection</button>` : ""}
@@ -1609,6 +1630,7 @@ function renderSettingsTab() {
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Admin welcome icon</div>
     <p class="hint" style="text-align:left;margin:0 0 12px;">Upload the Slow Studio platform icon shown after Admin login. SVG or transparent PNG works best.</p>
     <div class="field"><label>Slow Studio icon</label><input value="${escapeHtml(s.admin_welcome_icon_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('admin_welcome_icon_url',this.value)"><input type="file" accept="image/svg+xml,image/png,image/webp" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'admin_welcome_icon_url')">${s.admin_welcome_icon_url ? `<img src="${escapeHtml(s.admin_welcome_icon_url)}" alt="Admin welcome icon preview" style="display:block;width:84px;height:84px;object-fit:contain;margin-top:10px;border:1px solid #E1D9C8;border-radius:18px;padding:8px;background:#fff;">` : ""}</div>
+    <div class="field"><label>Admin welcome duration <span id="admin-welcome-duration-value" style="float:right;font-weight:600;color:#4B5D3A;">${Math.max(2, Math.min(10, Number(s.admin_welcome_duration_seconds || 5)))} seconds</span></label><input type="range" min="2" max="10" step="1" value="${Math.max(2, Math.min(10, Number(s.admin_welcome_duration_seconds || 5)))}" oninput="onSettingsField('admin_welcome_duration_seconds',Number(this.value));document.getElementById('admin-welcome-duration-value').textContent=this.value+' seconds'"><div class="hint" style="text-align:left;margin-top:5px;">Choose how long Welcome back appears after Admin login.</div></div>
     </section>
     <section ${active === "logo" ? "" : "hidden"}>
     <div class="field"><label>Welcome logo position</label><select onchange="onSettingsField('welcome_logo_position',this.value)"><option value="left" ${s.welcome_logo_position === "left" ? "selected" : ""}>Left</option><option value="center" ${(!s.welcome_logo_position || s.welcome_logo_position === "center") ? "selected" : ""}>Centre</option><option value="right" ${s.welcome_logo_position === "right" ? "selected" : ""}>Right</option></select><div class="hint" style="text-align:left;margin-top:5px;">Choose where the logo sits on the Welcome cover.</div></div>
@@ -1689,12 +1711,35 @@ function cmsToggle(label, key, description = "") {
 }
 function cmsSaveButton() { return `<button class="btn-primary" id="settings-save-btn" style="width:100%;margin-top:18px;" onclick="saveSettings()">Save settings</button>`; }
 
+function updateDesignPreview() {
+  const s = astate.settingsDraft || {};
+  const shop = document.getElementById("design-shop-preview");
+  const card = document.getElementById("design-loyalty-preview");
+  const headingFont = ({ fraunces:"Fraunces,serif", noto_serif_jp:"'Noto Serif JP',serif", work_sans:"'Work Sans',sans-serif", noto_sans_jp:"'Noto Sans JP',sans-serif", georgia:"Georgia,serif" })[s.theme_heading_font || "fraunces"];
+  const bodyFont = ({ fraunces:"Fraunces,serif", noto_serif_jp:"'Noto Serif JP',serif", work_sans:"'Work Sans',sans-serif", noto_sans_jp:"'Noto Sans JP',sans-serif", georgia:"Georgia,serif" })[s.theme_body_font || "work_sans"];
+  if (shop) {
+    shop.style.background = s.theme_background_color || "#F3EEE3";
+    shop.style.color = s.theme_text_color || "#2A2A22";
+    shop.style.fontFamily = bodyFont;
+    shop.querySelectorAll("[data-preview-heading]").forEach((element) => element.style.fontFamily = headingFont);
+    shop.querySelectorAll("[data-preview-card]").forEach((element) => element.style.background = s.theme_card_color || "#FFFFFF");
+    shop.querySelectorAll("[data-preview-primary]").forEach((element) => { element.style.background = s.theme_primary_color || "#4B5D3A"; element.style.color = s.theme_background_color || "#F3EEE3"; });
+  }
+  if (card) {
+    card.style.background = s.loyalty_card_background || "#1E473E";
+    card.style.color = s.loyalty_card_text_color || "#F9F4E8";
+    card.style.fontFamily = bodyFont;
+    card.querySelectorAll("[data-preview-heading]").forEach((element) => element.style.fontFamily = headingFont);
+    card.querySelectorAll("[data-preview-accent]").forEach((element) => element.style.background = s.loyalty_card_accent_color || "#CAE4B3");
+  }
+}
+
 function renderDesignTab() {
   const s = astate.settingsDraft || {};
-  const color = (label,key,fallback) => `<div class="field"><label>${label}</label><div style="display:grid;grid-template-columns:64px 1fr;gap:9px;"><input type="color" value="${escapeHtml(s[key] || fallback)}" oninput="onSettingsField('${key}',this.value);this.nextElementSibling.value=this.value"><input value="${escapeHtml(s[key] || fallback)}" oninput="onSettingsField('${key}',this.value);this.previousElementSibling.value=this.value"></div></div>`;
+  const color = (label,key,fallback) => `<div class="field"><label>${label}</label><div style="display:grid;grid-template-columns:64px 1fr;gap:9px;"><input type="color" value="${escapeHtml(s[key] || fallback)}" oninput="onSettingsField('${key}',this.value);this.nextElementSibling.value=this.value;updateDesignPreview()"><input value="${escapeHtml(s[key] || fallback)}" oninput="onSettingsField('${key}',this.value);if(/^#[0-9a-fA-F]{6}$/.test(this.value)){this.previousElementSibling.value=this.value;updateDesignPreview()}"></div></div>`;
   const fonts = [["fraunces","Elegant serif · Fraunces"],["noto_serif_jp","Japanese serif · Noto Serif JP"],["work_sans","Clean sans · Work Sans"],["noto_sans_jp","Japanese sans · Noto Sans JP"],["georgia","Classic serif · Georgia"]];
-  const select = (label,key,fallback) => `<div class="field"><label>${label}</label><select onchange="onSettingsField('${key}',this.value)">${fonts.map(([v,n]) => `<option value="${v}" ${(s[key] || fallback) === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>`;
-  return `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Customer shop design</h2><span>Used across the ordering pages</span></div><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;">${color("Primary colour","theme_primary_color","#4B5D3A")}${color("Background colour","theme_background_color","#F3EEE3")}${color("Card colour","theme_card_color","#FFFFFF")}${color("Text colour","theme_text_color","#2A2A22")}${select("Heading font","theme_heading_font","fraunces")}${select("Body font","theme_body_font","work_sans")}</div><div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:12px;">Loyalty card design</div><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;">${color("Card background","loyalty_card_background","#1E473E")}${color("Card text","loyalty_card_text_color","#F9F4E8")}${color("Card accent","loyalty_card_accent_color","#CAE4B3")}</div><div class="hint" style="text-align:left;margin-top:8px;">Open the customer shop after saving to preview the complete design.</div>${cmsSaveButton()}</section>`;
+  const select = (label,key,fallback) => `<div class="field"><label>${label}</label><select onchange="onSettingsField('${key}',this.value);updateDesignPreview()">${fonts.map(([v,n]) => `<option value="${v}" ${(s[key] || fallback) === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>`;
+  return `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Customer shop design</h2><span>Used across the ordering pages</span></div><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;">${color("Primary colour","theme_primary_color","#4B5D3A")}${color("Background colour","theme_background_color","#F3EEE3")}${color("Card colour","theme_card_color","#FFFFFF")}${color("Text colour","theme_text_color","#2A2A22")}${select("Heading font","theme_heading_font","fraunces")}${select("Body font","theme_body_font","work_sans")}</div><div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:12px;">Loyalty card design</div><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;">${color("Card background","loyalty_card_background","#1E473E")}${color("Card text","loyalty_card_text_color","#F9F4E8")}${color("Card accent","loyalty_card_accent_color","#CAE4B3")}</div><div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:12px;">Live preview</div><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch;"><div id="design-shop-preview" style="background:${escapeHtml(s.theme_background_color || "#F3EEE3")};color:${escapeHtml(s.theme_text_color || "#2A2A22")};padding:20px;border-radius:20px;border:1px solid #e1d9c8;"><div data-preview-heading style="font-size:25px;font-weight:700;">${escapeHtml(s.store_name || "Your Store")}</div><div style="font-size:12px;opacity:.7;margin:3px 0 18px;">${escapeHtml(s.store_tagline || "crafted with care")}</div><div data-preview-card style="background:${escapeHtml(s.theme_card_color || "#FFFFFF")};border-radius:15px;padding:14px;box-shadow:0 8px 22px rgba(30,30,20,.08);"><div data-preview-heading style="font-size:18px;font-weight:700;">Ichigo Matcha Latte</div><div style="font-size:12px;opacity:.72;margin:5px 0 13px;">Freshly whisked matcha with creamy oat milk.</div><div style="display:flex;justify-content:space-between;align-items:center;"><b>$6.90</b><span data-preview-primary style="background:${escapeHtml(s.theme_primary_color || "#4B5D3A")};color:${escapeHtml(s.theme_background_color || "#F3EEE3")};padding:8px 15px;border-radius:99px;">Add</span></div></div></div><div id="design-loyalty-preview" style="background:${escapeHtml(s.loyalty_card_background || "#1E473E")};color:${escapeHtml(s.loyalty_card_text_color || "#F9F4E8")};padding:22px;border-radius:20px;box-shadow:0 12px 28px rgba(20,35,25,.16);"><div style="font-size:10px;letter-spacing:.15em;opacity:.75;">MEMBER</div><div data-preview-heading style="font-size:24px;font-weight:700;margin-top:8px;">${escapeHtml(s.loyalty_heading || "Shizuku Club")}</div><div style="font-size:13px;margin-top:8px;opacity:.9;">Welcome back, Shermin</div><div style="font-size:42px;font-weight:700;margin:22px 0 7px;">8 <span style="font-size:14px;">points</span></div><div style="height:9px;background:rgba(255,255,255,.2);border-radius:99px;overflow:hidden;"><div data-preview-accent style="width:64%;height:100%;background:${escapeHtml(s.loyalty_card_accent_color || "#CAE4B3")};border-radius:99px;"></div></div><div style="font-size:11px;margin-top:9px;opacity:.75;">8 / 50 points</div></div></div><div class="hint" style="text-align:left;margin-top:10px;">Changes appear here instantly. Press Save settings when you are happy with the design.</div>${cmsSaveButton()}</section>`;
 }
 
 function renderWordingTab() {
@@ -1800,6 +1845,7 @@ function render() {
   const nav = [
     ["dashboard", "▦", "Dashboard"],
     ["orders", "▣", "Orders"],
+    ["preparation", "☷", "Today's prep"],
     ["menu", "◇", "Products"],
     ["inventory", "▤", "Inventory & cost"],
     ["promos", "✦", "Promos"],
@@ -1815,12 +1861,12 @@ function render() {
     ["checkout_comms", "☏", "Checkout & chat"],
     ["settings", "⚙", "Store settings"],
   ];
-  const tabTitle = { orders: "Orders", menu: "Products", inventory: "Inventory & food cost", promos: "Promos", rewards: "Rewards", customers: "Customers", messages: "Messages", reviews: "Reviews", availability: "Availability", faq: "FAQ", notifications: "Notifications", design: "Design", wording: "Customer wording", checkout_comms: "Checkout & communication", settings: "Store settings" };
-  const tabSubtitle = { orders: "Review payments and edit every customer order.", menu: "Keep your drinks, prices and availability up to date.", inventory: "Track ingredient stock and calculate each product's food cost.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", messages: "Read and reply to order-linked customer messages.", reviews: "Approve the customer reviews shown on your ordering page.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose where you receive new-order alerts.", design: "Change the customer shop and loyalty card colours and fonts.", wording: "Edit the main words customers see across your shop.", checkout_comms: "Control checkout fields, payment wording, chat and reviews.", settings: "Manage your store details, images, contact information and payment details." };
+  const tabTitle = { preparation: "Today's preparation", orders: "Orders", menu: "Products", inventory: "Inventory & food cost", promos: "Promos", rewards: "Rewards", customers: "Customers", messages: "Messages", reviews: "Reviews", availability: "Availability", faq: "FAQ", notifications: "Notifications", design: "Design", wording: "Customer wording", checkout_comms: "Checkout & communication", settings: "Store settings" };
+  const tabSubtitle = { preparation: "See every paid drink to prepare and print today's list.", orders: "Review payments and edit every customer order.", menu: "Keep your drinks, prices and availability up to date.", inventory: "Track ingredient stock and calculate each product's food cost.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", messages: "Read and reply to order-linked customer messages.", reviews: "Approve the customer reviews shown on your ordering page.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose where you receive new-order alerts.", design: "Change the customer shop and loyalty card colours and fonts.", wording: "Edit the main words customers see across your shop.", checkout_comms: "Control checkout fields, payment wording, chat and reviews.", settings: "Manage your store details, images, contact information and payment details." };
   const page = astate.tab === "dashboard" ? renderDashboardTab() : `
     <div class="admin-top"><div><div class="admin-eyebrow">Shizuku Lab admin</div><h1 class="tab-page-title">${tabTitle[astate.tab] || "Dashboard"}</h1><p class="tab-page-subtitle">${tabSubtitle[astate.tab] || ""}</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
     <div class="admin-content">
-      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "inventory" ? renderInventoryTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "messages" ? renderMessagesTab() : astate.tab === "reviews" ? renderReviewsTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : astate.tab === "design" ? renderDesignTab() : astate.tab === "wording" ? renderWordingTab() : astate.tab === "checkout_comms" ? renderCheckoutCommunicationTab() : renderSettingsTab()}
+      ${astate.tab === "preparation" ? renderPreparationTab() : astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "inventory" ? renderInventoryTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "messages" ? renderMessagesTab() : astate.tab === "reviews" ? renderReviewsTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : astate.tab === "design" ? renderDesignTab() : astate.tab === "wording" ? renderWordingTab() : astate.tab === "checkout_comms" ? renderCheckoutCommunicationTab() : renderSettingsTab()}
     </div>`;
   app.innerHTML = `
     ${dashboardStyles()}
@@ -1830,6 +1876,7 @@ function render() {
     </div>
     ${renderEditOverlay()}
   `;
+  if (astate.tab === "design") requestAnimationFrame(updateDesignPreview);
 }
 
 if (db) {

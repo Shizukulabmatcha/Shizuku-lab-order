@@ -89,7 +89,7 @@ const state = {
     chat_business_hours: "",
     reviews_enabled: true,
   },
-  form: { name: "", phone: "", instagram: "", pickupDate: "", slotId: "", collectionPoint: "", notes: "", promoCode: "" },
+  form: { name: "", phone: "", email: "", instagram: "", pickupDate: "", slotId: "", collectionPoint: "", notes: "", promoCode: "" },
   promo: null,
   promoMsg: "",
   payment: { transactionReference: "", proofFile: null, expiresAt: null },
@@ -105,6 +105,7 @@ const state = {
 let paymentCountdownTimer = null;
 let stockRefreshTimer = null;
 let orderTrackingTimer = null;
+let customerChatChannel = null;
 
 /* ---------- helpers ---------- */
 function money(n) { return `$${Number(n || 0).toFixed(2)}`; }
@@ -653,6 +654,7 @@ async function submitOrder() {
   const f = state.form;
   if (!f.name.trim()) { alert("Please enter your name."); return; }
   if (!isValidPhone(f.phone)) { alert("Please enter a valid Singapore phone number (for example, 91234567)."); return; }
+  if (f.email && !/^\S+@\S+\.\S+$/.test(f.email.trim())) { alert("Please enter a valid email address, or leave it blank."); return; }
   if (!f.slotId) { alert("Please select a pickup slot."); return; }
   if (!f.collectionPoint) { alert("Please select a collection point."); return; }
   if (cartLines().length === 0) { alert("Your cart is empty."); setScreen("menu"); return; }
@@ -678,6 +680,7 @@ async function submitOrder() {
     order_number: orderNumber,
     customer_name: f.name.trim(),
     customer_phone: normalisePhone(f.phone),
+    customer_email: f.email.trim() || null,
     collection_date: slot.date,
     collection_time: slot.time,
     collection_point: f.collectionPoint,
@@ -1202,6 +1205,7 @@ function renderCheckout() {
       <button class="back-link" onclick="setScreen('cart')">${ICONS.back} Back to cart</button>
       <div class="field"><label>Name</label><input id="f-name" value="${escapeHtml(f.name)}" placeholder="Your name" oninput="onFormInput('name', this.value)"></div>
       <div class="field"><label>Phone</label><input id="f-phone" value="${escapeHtml(f.phone)}" placeholder="e.g. 91234567" inputmode="tel" autocomplete="tel" oninput="this.value=cleanPhoneInput(this.value);onFormInput('phone', this.value)"></div>
+      <div class="field"><label>Email (for order confirmation)</label><input id="f-email" type="email" value="${escapeHtml(f.email)}" placeholder="you@example.com" autocomplete="email" oninput="onFormInput('email', this.value)"></div>
       ${state.store.show_checkout_instagram === false ? "" : `<div class="field"><label>Instagram (optional)</label><input id="f-instagram" value="${escapeHtml(f.instagram)}" placeholder="@yourhandle" oninput="onFormInput('instagram', this.value)"></div>`}
       <div class="field"><label>Collection date</label>
         <select class="checkout-select" onchange="onPickupDateChange(this.value)">
@@ -1381,6 +1385,7 @@ function renderConfirmation() {
 /* ---------- order tracking ---------- */
 function trackingStatus(order) {
   if (!order) return { title: "", note: "", step: 0 };
+  if (order.payment_status === "rejected") return { title: "Payment proof needs attention", note: order.payment_rejection_reason || "Please upload a new payment screenshot.", step: 0 };
   if (order.order_status === "cancelled") return { title: "Order cancelled", note: "Please contact us if you have any questions.", step: 0 };
   if (order.order_status === "collected") return { title: "Collected", note: "Thank you for collecting your Shizuku order. ✨", step: 4 };
   if (order.order_status === "ready") return { title: "Ready for collection", note: "Your order is ready — see you at your pickup time!", step: 3 };
@@ -1388,6 +1393,14 @@ function trackingStatus(order) {
   if (order.payment_status === "submitted" || order.order_status === "awaiting_confirmation") return { title: "Payment under review", note: "We’ll confirm your order once your payment proof is verified.", step: 0 };
   if (order.payment_status === "paid" || order.order_status === "confirmed") return { title: "Order confirmed", note: "Payment verified — we’ll prepare your order closer to pickup.", step: 1 };
   return { title: "Awaiting payment", note: "Please complete payment and submit your payment screenshot.", step: 0 };
+}
+function retryRejectedPayment() {
+  const order = state.tracking.order;
+  if (!order) return;
+  state.lastOrder = { ...order };
+  state.payment = { transactionReference: "", proofFile: null, expiresAt: Date.now() + 15 * 60 * 1000 };
+  state.screen = "payment";
+  render();
 }
 async function findOrder() {
   const t = state.tracking;
@@ -1404,9 +1417,21 @@ async function findOrder() {
     t.lastCheckedAt = new Date();
     state.reviewDraft.name = state.reviewDraft.name || data.customer_name || "";
     await loadOrderMessages();
+    startCustomerChatRealtime();
     startLiveOrderTracking();
   }
   render();
+}
+
+function startCustomerChatRealtime() {
+  const order = state.tracking.order;
+  if (!IS_CONFIGURED || !order?.id || customerChatChannel) return;
+  customerChatChannel = db.channel(`customer-order-chat-${order.id}`)
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "order_messages", filter: `order_id=eq.${order.id}` }, async () => {
+      await loadOrderMessages();
+      render();
+    })
+    .subscribe();
 }
 
 function startLiveOrderTracking() {
@@ -1577,6 +1602,14 @@ function applyCmsWording() {
     const programmeTitle = Array.from(loyaltyCard.querySelectorAll(".display")).find((element) => element.textContent.trim() === (state.store.loyalty_heading || "Shizuku Club"));
     if (programmeTitle) programmeTitle.after(greeting);
     else loyaltyCard.prepend(greeting);
+  }
+  if (state.screen === "track" && state.tracking.order?.payment_status === "rejected") {
+    const screen = document.querySelector(".screen");
+    const box = document.createElement("div");
+    box.className = "summary-card";
+    box.style.marginTop = "16px";
+    box.innerHTML = `<b>Payment screenshot was not accepted</b><div class="hint" style="text-align:left;margin:8px 0 14px;">${escapeHtml(state.tracking.order.payment_rejection_reason || "Please upload a clearer screenshot.")}</div><button class="primary-btn" onclick="retryRejectedPayment()">Upload a new screenshot</button>`;
+    screen?.append(box);
   }
 }
 function render() {
