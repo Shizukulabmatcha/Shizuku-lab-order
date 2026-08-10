@@ -672,6 +672,7 @@ async function saveSettings() {
   if (error) { alert("Could not save: " + error.message); return; }
   astate.settings = { ...astate.settingsDraft };
   alert("Saved.");
+  render();
 }
 
 function onNotificationField(key, value) { astate.notificationDraft[key] = value; }
@@ -841,6 +842,14 @@ function dashboardStyles() {
       .shop-admin .dashboard-card-head{display:block;padding:15px}.shop-admin .dashboard-card-head span{display:block;margin-top:6px}
       .shop-admin .queue-row{padding:14px}.shop-admin .queue-top{align-items:flex-start;flex-wrap:wrap}
       .shop-admin .admin-content{min-width:0;overflow:hidden}
+      .shop-admin.mobile-nav-top{display:block}
+      .shop-admin.mobile-nav-top .admin-side{position:sticky;top:0;z-index:40;width:100%;height:auto;min-height:0;padding:10px 12px;border-right:0;border-bottom:1px solid #eadfd2;display:block;overflow:visible}
+      .shop-admin.mobile-nav-top .admin-logo{display:inline-block;font-size:18px;margin:0 8px 3px 2px}
+      .shop-admin.mobile-nav-top .admin-caption{display:inline-block;margin:0;font-size:8px}
+      .shop-admin.mobile-nav-top .admin-nav{display:flex;overflow-x:auto;overflow-y:hidden;gap:5px;padding:7px 0 2px;scrollbar-width:none}
+      .shop-admin.mobile-nav-top .admin-nav::-webkit-scrollbar{display:none}
+      .shop-admin.mobile-nav-top .admin-nav button{flex:0 0 auto;width:auto;padding:9px 11px;white-space:nowrap}
+      .shop-admin.mobile-nav-top .admin-main{width:100%;padding:18px 12px 64px}
     }
   </style>`;
 }
@@ -1599,6 +1608,7 @@ function renderSettingsTab() {
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Store details</div>
     ${field("Store name", "store_name")}
     ${field("Store tagline", "store_tagline", "雫ラボ · crafted drop by drop")}
+    <div class="field"><label>Admin mobile menu position</label><select onchange="onSettingsField('admin_mobile_nav_position',this.value)"><option value="left" ${(s.admin_mobile_nav_position || "left") === "left" ? "selected" : ""}>Left sidebar</option><option value="top" ${s.admin_mobile_nav_position === "top" ? "selected" : ""}>Top menu</option></select><div class="hint" style="text-align:left;margin-top:5px;">Only changes the Admin layout on phones. Desktop stays on the left.</div></div>
     ${field("Instagram (without @)", "instagram")}
     ${field("Shizuku Lab website link (optional)", "website_url", "https://your-brand-website.com")}
     <div class="divider"></div>
@@ -1898,7 +1908,7 @@ function render() {
     </div>`;
   app.innerHTML = `
     ${dashboardStyles()}
-    <div class="shop-admin">
+    <div class="shop-admin ${(astate.settings?.admin_mobile_nav_position || "left") === "top" ? "mobile-nav-top" : "mobile-nav-left"}">
       <aside class="admin-side"><div class="admin-logo">${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</div><div class="admin-caption">SHOP ADMIN</div><div class="admin-nav-label">MAIN</div><nav class="admin-nav">${nav.map(([tab, icon, label]) => `<button class="${astate.tab === tab ? "active" : ""}" onclick="setTab('${tab}')"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="admin-side-bottom"><button class="link-btn" onclick="logoutAdmin()">Sign out</button></div></aside>
       <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}${astate.newMessageAlert ? `<div class="new-order-alert" role="alert"><div><strong>New customer message</strong><span>${escapeHtml(astate.newMessageAlert.orderNumber)} · ${escapeHtml(astate.newMessageAlert.text)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="astate.newMessageAlert=null;setTab('messages')">Open message</button><button class="btn-secondary" onclick="astate.newMessageAlert=null;render()">Dismiss</button></div></div>` : ""}${astate.newOrderAlert ? `<div class="new-order-alert" role="alert"><div><strong>New order received</strong><span>${escapeHtml(astate.newOrderAlert.orderNumber)} · ${escapeHtml(astate.newOrderAlert.customer)} · ${money(astate.newOrderAlert.total)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="setTab('orders')">Open order</button><button class="btn-secondary" onclick="dismissNewOrderAlert()">Dismiss</button></div></div>` : ""}${page}</main>
     </div>
