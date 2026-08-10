@@ -2,6 +2,8 @@
 
 const astate = {
   unlocked: false,
+  welcomePending: false,
+  welcomeTimer: null,
   loginEmail: "tinghuioh29@gmail.com",
   loginPassword: "",
   recoveryMode: false,
@@ -37,6 +39,7 @@ const astate = {
   messages: [],
   messageDrafts: {},
   selectedAvailabilityDate: null,
+  settingsSection: "welcome",
   availabilityDraft: null,
   calendarMonth: null,
   orderFilter: "all",
@@ -703,7 +706,7 @@ async function loginWithPassword() {
   astate.loginMessage = error
     ? "That Gmail or password is not correct. Please try again."
     : "Signed in.";
-  if (!error) await checkAdminSession();
+  if (!error) { astate.welcomePending = true; await checkAdminSession(); }
   render();
 }
 
@@ -745,6 +748,7 @@ async function saveNewPassword() {
   astate.recoveryPassword = "";
   astate.recoveryPasswordConfirm = "";
   astate.loginMessage = "Password saved. You are now signed in.";
+  astate.welcomePending = true;
   await checkAdminSession();
 }
 
@@ -796,7 +800,27 @@ function dashboardStyles() {
     .shop-admin .stat-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:22px}.shop-admin .dashboard-summary-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.shop-admin .stat{border:1px solid #eadfd2;border-radius:18px;padding:19px 20px;background:#fff;min-height:120px}.shop-admin .stat:nth-child(1){background:#f0f7e8;border-color:#d7e8c8}.shop-admin .stat:nth-child(2){background:#fff1e7;border-color:#f2d7c4}.shop-admin .stat:nth-child(3){background:#f3efff;border-color:#dfd6ff}.shop-admin .stat.profit-stat{background:#eef7f0;border-color:#cfe3d3}.shop-admin .stat-label{display:flex;gap:8px;align-items:center;color:#69675f;font-weight:700;font-size:14px}.shop-admin .stat-icon{font-size:19px}.shop-admin .stat-value{font:700 30px/1 Georgia,serif;margin-top:18px}.shop-admin .stat-help{font-size:13px;color:#756e64;margin-top:7px}
     .shop-admin .dashboard-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(280px,.75fr);gap:20px}.shop-admin .dashboard-card{border:1px solid #eadfd2;border-radius:18px;background:#fff;overflow:hidden}.shop-admin .dashboard-card-head{display:flex;justify-content:space-between;align-items:center;padding:19px 20px;border-bottom:1px solid #eee3d8}.shop-admin .dashboard-card-head h2{font:700 19px/1.1 Georgia,serif;margin:0}.shop-admin .dashboard-card-head span{color:#756e64;font-size:13px}.shop-admin .queue-row{padding:16px 20px;border-bottom:1px solid #f0e7de;cursor:pointer}.shop-admin .queue-row:last-child{border-bottom:0}.shop-admin .queue-row:hover{background:#fffaf6}.shop-admin .queue-top{display:flex;justify-content:space-between;gap:14px;align-items:center}.shop-admin .queue-number{font-family:ui-monospace,monospace;font-size:14px;font-weight:800}.shop-admin .queue-name{color:#6d665d;font-size:14px;margin-top:6px}.shop-admin .queue-amount{font-weight:800}.shop-admin .queue-status{font-size:12px;font-weight:800;padding:6px 9px;border-radius:99px;background:#f5efe7;color:#756950;white-space:nowrap}.shop-admin .dashboard-empty{padding:30px 20px;color:#756e64;text-align:center}.shop-admin .action-list{padding:8px 20px 12px}.shop-admin .action{display:flex;gap:12px;padding:17px 0;border-bottom:1px solid #f0e7de}.shop-admin .action:last-child{border:0}.shop-admin .action-icon{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:#fff0e7;color:#ef7138}.shop-admin .action strong{font-size:14px}.shop-admin .action p{font-size:13px;color:#756e64;line-height:1.4;margin:4px 0 0}
     .shop-admin .tab-page-title{font:700 32px/1.1 Georgia,serif;margin:0 0 8px}.shop-admin .tab-page-subtitle{margin:0 0 24px;color:#6e6b63}.shop-admin .admin-content .tabs{margin-bottom:22px}.shop-admin .admin-content .screen{max-width:none}.shop-admin .admin-content .order-card{box-shadow:none}
-    @media(max-width:1100px){.shop-admin .dashboard-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:800px){.shop-admin{display:block}.shop-admin .admin-side{position:static;width:auto;height:auto;min-height:0;padding:20px 16px;border-right:0;border-bottom:1px solid #eadfd2;display:block;overflow:visible}.shop-admin .admin-caption{margin-bottom:16px}.shop-admin .admin-nav{grid-template-columns:repeat(5,minmax(max-content,1fr));overflow-x:auto;overflow-y:visible;gap:7px;padding-bottom:2px}.shop-admin .admin-nav-label,.shop-admin .admin-side-bottom{display:none}.shop-admin .admin-nav button{padding:10px 11px;font-size:13px;text-align:center;white-space:nowrap}.shop-admin .admin-nav .nav-icon{display:none}.shop-admin .admin-main{padding:28px 16px 70px}.shop-admin .admin-top{margin-bottom:22px}.shop-admin .admin-title{font-size:32px}.shop-admin .open-shop{padding:10px;font-size:12px}.shop-admin .stat-grid,.shop-admin .dashboard-grid,.shop-admin .dashboard-summary-grid{grid-template-columns:1fr}.shop-admin .stat-grid{gap:10px}.shop-admin .stat{min-height:95px;padding:16px}.shop-admin .stat-value{font-size:26px;margin-top:12px}}
+    @media(max-width:1100px){.shop-admin .dashboard-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:800px){
+      .shop-admin{display:grid;grid-template-columns:142px minmax(0,1fr);align-items:start}
+      .shop-admin .admin-side{position:sticky;top:0;width:142px;height:100vh;min-height:100vh;padding:18px 10px 14px;border-right:1px solid #eadfd2;border-bottom:0;display:flex;overflow:hidden}
+      .shop-admin .admin-logo{font-size:21px;line-height:1.05;margin:0 5px 4px;overflow-wrap:anywhere}
+      .shop-admin .admin-caption{font-size:9px;letter-spacing:.12em;margin:0 5px 16px}
+      .shop-admin .admin-nav-label,.shop-admin .admin-side-bottom{display:none}
+      .shop-admin .admin-nav{grid-template-columns:1fr;overflow-x:hidden;overflow-y:auto;gap:5px;padding:0 2px 12px 0}
+      .shop-admin .admin-nav button{padding:10px 9px;font-size:12px;text-align:left;white-space:normal;border-radius:11px;line-height:1.25}
+      .shop-admin .admin-nav .nav-icon{display:inline-block;width:18px;margin-right:3px;font-size:14px}
+      .shop-admin .admin-main{min-width:0;padding:22px 12px 64px}
+      .shop-admin .admin-top{display:block;margin-bottom:18px;padding-bottom:18px}
+      .shop-admin .admin-title,.shop-admin .tab-page-title{font-size:25px}
+      .shop-admin .admin-subtitle,.shop-admin .tab-page-subtitle{font-size:13px;line-height:1.45}
+      .shop-admin .open-shop{display:inline-block;margin-top:13px;padding:9px 10px;font-size:11px}
+      .shop-admin .stat-grid,.shop-admin .dashboard-grid,.shop-admin .dashboard-summary-grid{grid-template-columns:1fr}
+      .shop-admin .stat-grid{gap:10px}.shop-admin .stat{min-height:95px;padding:14px}.shop-admin .stat-value{font-size:24px;margin-top:11px}
+      .shop-admin .dashboard-card-head{display:block;padding:15px}.shop-admin .dashboard-card-head span{display:block;margin-top:6px}
+      .shop-admin .queue-row{padding:14px}.shop-admin .queue-top{align-items:flex-start;flex-wrap:wrap}
+      .shop-admin .admin-content{min-width:0;overflow:hidden}
+    }
   </style>`;
 }
 
@@ -1027,6 +1051,33 @@ function renderLogin() {
       <button class="link-btn" style="margin-top:14px;width:100%;" onclick="sendPasswordSetup()">First time here? Set or reset password</button>
     </div>
   </div>`;
+}
+
+function renderAdminWelcome() {
+  const welcomeBrand = escapeHtml(astate.settings?.store_name || "Your Studio");
+  const welcomeIcon = escapeHtml(astate.settings?.admin_welcome_icon_url || "slow-studio-icon.svg");
+  if (!astate.welcomeTimer) {
+    astate.welcomeTimer = setTimeout(() => {
+      astate.welcomePending = false;
+      astate.welcomeTimer = null;
+      render();
+    }, 1700);
+  }
+  return `<style>
+    @keyframes shizukuWelcomeIn{0%{opacity:0;transform:translateY(18px) scale(.985)}100%{opacity:1;transform:none}}
+    @keyframes slowStudioIconIn{0%{opacity:0;transform:translateY(18px) scale(.78) rotate(-5deg)}70%{transform:translateY(-2px) scale(1.04) rotate(1deg)}100%{opacity:1;transform:none}}
+    @keyframes slowStudioHalo{0%{opacity:0;transform:scale(.6)}55%{opacity:.5}100%{opacity:0;transform:scale(1.45)}}
+    .admin-welcome{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:24px;background:linear-gradient(145deg,#f7f0e5 0%,#eef4e7 48%,#e3eddb 100%);color:#263125;text-align:center;overflow:hidden}
+    .admin-welcome-inner{animation:shizukuWelcomeIn .75s cubic-bezier(.2,.8,.2,1) both}
+    .admin-welcome-mark{position:relative;width:88px;height:88px;margin:0 auto 24px;display:grid;place-items:center}
+    .admin-welcome-icon{position:relative;z-index:2;width:74px;height:74px;object-fit:contain;animation:slowStudioIconIn .9s cubic-bezier(.2,.8,.2,1) both}
+    .admin-welcome-fallback{position:relative;z-index:2;width:70px;height:70px;border-radius:20px;display:grid;place-items:center;background:#263125;color:#f7f0e5;font:700 25px/1 Georgia,serif;letter-spacing:-.05em;animation:slowStudioIconIn .9s cubic-bezier(.2,.8,.2,1) both}
+    .admin-welcome-halo{position:absolute;inset:7px;border:1.5px solid #71865c;border-radius:50%;animation:slowStudioHalo 1.4s .12s ease-out both}
+    .admin-welcome-kicker{font:800 11px/1.2 'Work Sans',sans-serif;letter-spacing:.18em;color:#7a8c65;text-transform:uppercase;margin-bottom:10px}
+    .admin-welcome h1{font:700 clamp(38px,7vw,68px)/.98 Georgia,serif;letter-spacing:-.035em;margin:0}
+    .admin-welcome p{font:500 15px/1.5 'Work Sans',sans-serif;color:#68725e;margin:14px 0 0}
+    @media(prefers-reduced-motion:reduce){.admin-welcome-inner,.admin-welcome-icon,.admin-welcome-fallback,.admin-welcome-halo{animation:none}}
+  </style><div class="admin-welcome" role="status" aria-live="polite"><div class="admin-welcome-inner"><div class="admin-welcome-mark"><span class="admin-welcome-halo"></span><img class="admin-welcome-icon" src="${welcomeIcon}" alt="Slow Studio" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="admin-welcome-fallback" hidden>SS</span></div><div class="admin-welcome-kicker">Powered by Slow Studio</div><h1>Welcome back,<br>${welcomeBrand}.</h1><p>Everything is ready for today’s slow moments.</p></div></div>`;
 }
 
 function setOrderFilter(filter) { astate.orderFilter = filter; render(); }
@@ -1510,7 +1561,11 @@ function renderSettingsTab() {
     ["georgia", "Classic serif · Georgia"],
   ];
   const fontSelect = (label, key, fallback) => `<div class="field"><label>${label}</label><select onchange="onSettingsField('${key}',this.value)">${welcomeFonts.map(([value, name]) => `<option value="${value}" ${(s[key] || fallback) === value ? "selected" : ""}>${name}</option>`).join("")}</select></div>`;
+  const active = astate.settingsSection || "welcome";
+  const sectionButton = (id, label) => `<button type="button" class="${active === id ? "btn-primary" : "btn-secondary"}" onclick="astate.settingsSection='${id}';render()">${label}</button>`;
   return `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 22px;">${sectionButton("welcome","Welcome")}${sectionButton("logo","Logo")}${sectionButton("banner","Banner picture")}${sectionButton("details","Store details")}</div>
+    <section ${active === "details" ? "" : "hidden"}>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Store details</div>
     ${field("Store name", "store_name")}
     ${field("Instagram (without @)", "instagram")}
@@ -1520,6 +1575,8 @@ function renderSettingsTab() {
     ${field("Footer text", "powered_by_text", "Powered by Slow Studio")}
     ${field("Slow Studio link (optional)", "powered_by_url", "https://slow-studio.com")}
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_powered_by !== false ? "checked" : ""} onchange="onSettingsField('show_powered_by', this.checked)"><span><b>Show Powered by Slow Studio</b><br><span class="hint">When a link is entered, customers can click the footer and it opens in a new tab.</span></span></label>
+    </section>
+    <section ${active === "welcome" ? "" : "hidden"}>
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Welcome announcement</div>
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_announcement ? "checked" : ""} onchange="onSettingsField('show_announcement', this.checked)"><span><b>Show announcement before Welcome page</b><br><span class="hint">The same announcement appears at most once per customer per day.</span></span></label>
@@ -1538,6 +1595,12 @@ function renderSettingsTab() {
     ${field("Loyalty button text", "welcome_loyalty_button_text", "Check your loyalty")}
     ${field("Website button text", "welcome_website_button_text", "Visit Shizuku Lab website ↗")}
     ${fontSelect("Welcome body & button font", "welcome_body_font", "work_sans")}
+    <div class="divider"></div>
+    <div class="display" style="font-size:20px;margin:4px 0 8px;">Admin welcome icon</div>
+    <p class="hint" style="text-align:left;margin:0 0 12px;">Upload the Slow Studio platform icon shown after Admin login. SVG or transparent PNG works best.</p>
+    <div class="field"><label>Slow Studio icon</label><input value="${escapeHtml(s.admin_welcome_icon_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('admin_welcome_icon_url',this.value)"><input type="file" accept="image/svg+xml,image/png,image/webp" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'admin_welcome_icon_url')">${s.admin_welcome_icon_url ? `<img src="${escapeHtml(s.admin_welcome_icon_url)}" alt="Admin welcome icon preview" style="display:block;width:84px;height:84px;object-fit:contain;margin-top:10px;border:1px solid #E1D9C8;border-radius:18px;padding:8px;background:#fff;">` : ""}</div>
+    </section>
+    <section ${active === "logo" ? "" : "hidden"}>
     <div class="field"><label>Welcome logo position</label><select onchange="onSettingsField('welcome_logo_position',this.value)"><option value="left" ${s.welcome_logo_position === "left" ? "selected" : ""}>Left</option><option value="center" ${(!s.welcome_logo_position || s.welcome_logo_position === "center") ? "selected" : ""}>Centre</option><option value="right" ${s.welcome_logo_position === "right" ? "selected" : ""}>Right</option></select><div class="hint" style="text-align:left;margin-top:5px;">Choose where the logo sits on the Welcome cover.</div></div>
     ${s.logo_url ? `<div class="field"><label>Welcome logo preview</label><div id="welcome-logo-live-preview" style="width:${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)}px;height:${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)}px;border:5px solid #F4EEE3;border-radius:50%;overflow:hidden;background:#fff;display:grid;place-items:center;margin-top:8px;"><img id="welcome-logo-live-preview-image" src="${escapeHtml(s.logo_url)}" alt="Welcome logo preview" style="width:100%;height:100%;object-fit:contain;padding:12px;transform:translate(${Number(s.welcome_logo_image_x || 0)}%, ${Number(s.welcome_logo_image_y || 0)}%) scale(${Number(s.welcome_logo_image_scale || s.logo_image_scale || 1)});"></div></div>` : ""}
     <div class="field"><label>Welcome logo circle size <span id="welcome-logo-circle-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)} px</span></label><input type="range" min="56" max="220" step="1" value="${Number(s.welcome_logo_circle_size || s.logo_circle_size || 100)}" oninput="onSettingsField('welcome_logo_circle_size',Number(this.value));updateWelcomeLogoPreview()"></div>
@@ -1553,6 +1616,8 @@ function renderSettingsTab() {
     <div class="field"><label>Logo image size <span id="logo-image-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.logo_image_scale || 1).toFixed(2)}×</span></label><input type="range" min="0.55" max="2" step="0.05" value="${Number(s.logo_image_scale || 1)}" oninput="onSettingsField('logo_image_scale',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">Zoom the logo inside the circle without changing the circle itself.</div></div>
     <div class="field"><label>Move logo left / right <span id="logo-x-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.logo_image_x || 0) > 0 ? "+" : ""}${Number(s.logo_image_x || 0)}%</span></label><input type="range" min="-45" max="45" step="1" value="${Number(s.logo_image_x || 0)}" oninput="onSettingsField('logo_image_x',Number(this.value));updateStorefrontPreview()"></div>
     <div class="field"><label>Move logo up / down <span id="logo-y-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.logo_image_y || 0) > 0 ? "+" : ""}${Number(s.logo_image_y || 0)}%</span></label><input type="range" min="-45" max="45" step="1" value="${Number(s.logo_image_y || 0)}" oninput="onSettingsField('logo_image_y',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">Move the artwork inside the circle without moving the circle itself.</div></div>
+    </section>
+    <section ${active === "banner" ? "" : "hidden"}>
     <div class="field"><label>Top banner image</label><input value="${escapeHtml(s.hero_image_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('hero_image_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'hero_image_url')">${s.hero_image_url ? `<img id="banner-live-preview" src="${escapeHtml(s.hero_image_url)}" alt="Banner preview" style="display:block;width:100%;aspect-ratio:2/1;object-fit:cover;object-position:${Number(s.hero_image_x ?? 50)}% ${Number(s.hero_image_y ?? s.hero_image_position ?? 68)}%;border:1px solid #E1D9C8;border-radius:12px;margin-top:10px;">` : ""}</div>
     <div class="field"><label>Banner left / right crop <span id="banner-x-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.hero_image_x ?? 50)}%</span></label><input type="range" min="0" max="100" step="1" value="${Number(s.hero_image_x ?? 50)}" oninput="onSettingsField('hero_image_x',Number(this.value));updateStorefrontPreview()"></div>
     <div class="field"><label>Banner up / down crop <span id="banner-y-value" style="float:right;font-weight:500;color:#4B5D3A;">${Number(s.hero_image_y ?? s.hero_image_position ?? 68)}%</span></label><input type="range" min="0" max="100" step="1" value="${Number(s.hero_image_y ?? s.hero_image_position ?? 68)}" oninput="onSettingsField('hero_image_y',Number(this.value));updateStorefrontPreview()"><div class="hint" style="text-align:left;margin-top:5px;">Adjust until the drink layers sit where you want them in the banner.</div></div>
@@ -1560,6 +1625,8 @@ function renderSettingsTab() {
     <div class="field"><label>Store introduction</label><textarea rows="4" placeholder="A short introduction customers see below your collection address." oninput="onSettingsField('store_description', this.value)">${escapeHtml(s.store_description || "")}</textarea><div class="hint" style="text-align:left;margin-top:5px;">Shown on the customer ordering page.</div></div>
     ${field("Top rolling message", "ticker_text", "e.g. PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB")}
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_ticker !== false ? "checked" : ""} onchange="onSettingsField('show_ticker', this.checked)"><span><b>Show rolling message</b><br><span class="hint">Untick to hide it from the ordering page.</span></span></label>
+    </section>
+    <section ${active === "details" ? "" : "hidden"}>
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Contact</div>
     ${field("WhatsApp number", "whatsapp_number", "+65 9XXX XXXX")}
@@ -1575,7 +1642,8 @@ function renderSettingsTab() {
     ${field("Collection address", "collection_address")}
     ${field("Saturday collection time", "saturday_collection_time", "10:00 AM - 12:00 PM")}
     ${field("Sunday collection time", "sunday_collection_time", "10:00 AM - 1:00 PM")}
-    <button class="btn-primary" id="settings-save-btn" style="width:100%;margin-top:8px;" onclick="saveSettings()">Save settings</button>
+    </section>
+    <button class="btn-primary" id="settings-save-btn" style="width:100%;margin-top:18px;" onclick="saveSettings()">Save settings</button>
   `;
 }
 
@@ -1682,6 +1750,7 @@ function renderOrderEditor() {
 function render() {
   const app = document.getElementById("app");
   if (!astate.unlocked) { app.innerHTML = renderLogin(); return; }
+  if (astate.welcomePending) { app.innerHTML = renderAdminWelcome(); return; }
   if (astate.loading) { app.innerHTML = header("") + `<div class="loading">Loading…</div>`; return; }
   const nav = [
     ["dashboard", "▦", "Dashboard"],
