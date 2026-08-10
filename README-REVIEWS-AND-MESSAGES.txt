@@ -8,13 +8,17 @@ ONE-TIME SUPABASE SETUP
 1. Open Supabase > SQL Editor.
 2. Run the full contents of supabase-customer-reviews.sql.
 3. Run the full contents of supabase-order-messages.sql.
-4. Run the full contents of supabase-customer-product-stock.sql. This enables
+   Re-run this file when upgrading an existing installation; it adds the
+   separate Live Chat email toggle and includes ordered products in emails.
+4. Run the full contents of supabase-email-notifications.sql again so New
+   Order and Payment Proof emails include product names and quantities.
+5. Run the full contents of supabase-customer-product-stock.sql. This enables
    automatic remaining-stock calculation and overselling protection.
-5. Replace the code in the existing Google Apps Script email project with
+6. Replace the code in the existing Google Apps Script email project with
    google-apps-script-email-notifications.gs.
-6. Keep SHARED_SECRET equal to the key at the end of your saved webhook URL,
+7. Keep SHARED_SECRET equal to the key at the end of your saved webhook URL,
    then deploy a NEW VERSION of the Google Apps Script web app.
-7. Deploy this whole folder to Vercel.
+8. Deploy this whole folder to Vercel.
 
 CUSTOMER EXPERIENCE
 - Customers open Track order and enter their order number + checkout phone.

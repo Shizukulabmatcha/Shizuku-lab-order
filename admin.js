@@ -236,7 +236,7 @@ async function loadAll() {
       astate.loyaltySettings = loyaltySettings || { id: 1, enabled: false, reward_type: "stamps", stamps_required: 10, minimum_spend: 5, points_per_dollar: 1, points_required: 50, reward_description: "A free drink is on us." };
       astate.loyaltyDraft = { ...astate.loyaltySettings };
       astate.customerLoyalty = Object.fromEntries((loyaltyRows || []).map((row) => [row.customer_key, row]));
-      astate.notificationSettings = notificationSettings || { id: 1, recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true };
+      astate.notificationSettings = notificationSettings || { id: 1, recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true, alert_live_chat: true };
       astate.notificationDraft = { ...astate.notificationSettings };
       const [inventoryResult, recipeResult] = await Promise.all([
         db.from("inventory_items").select("*").order("name"),
@@ -672,6 +672,7 @@ async function saveNotificationSettings() {
     enabled: !!draft.enabled,
     alert_new_order: !!draft.alert_new_order,
     alert_payment_proof: !!draft.alert_payment_proof,
+    alert_live_chat: draft.alert_live_chat !== false,
   };
   // Update the existing row so the private webhook secret (configured only in
   // Supabase) is never overwritten by values coming from the browser.
@@ -1648,15 +1649,16 @@ function renderSettingsTab() {
 }
 
 function renderNotificationsTab() {
-  const n = astate.notificationDraft || { recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true };
+  const n = astate.notificationDraft || { recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true, alert_live_chat: true };
   return `<section class="dashboard-card" style="padding:22px;max-width:860px;">
-    <div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Order email alerts</h2><span>${n.enabled ? "On" : "Off"}</span></div>
-    <p class="hint" style="text-align:left;margin:0 0 16px;">Choose where you want new-order alerts sent. This is kept separate from your store details so it is easier to find.</p>
+    <div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Email notifications</h2><span>${n.enabled ? "On" : "Off"}</span></div>
+    <p class="hint" style="text-align:left;margin:0 0 16px;">Choose which Shizuku Lab activity should send an email.</p>
     <div class="field"><label>Receive alerts at</label><input type="email" value="${escapeHtml(n.recipient_email || "")}" placeholder="tinghuioh29@gmail.com" oninput="onNotificationField('recipient_email', this.value)"></div>
     <div class="field"><label>Google Apps Script web app URL</label><input value="${escapeHtml(n.webhook_url || "")}" placeholder="Paste the web app URL after you deploy it" oninput="onNotificationField('webhook_url', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">This private link sends the alert to your Gmail. Leave alerts off until your Google setup is complete.</div></div>
-    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.enabled ? "checked" : ""} onchange="onNotificationField('enabled', this.checked)"><span><b>Turn on order email alerts</b></span></label>
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.enabled ? "checked" : ""} onchange="onNotificationField('enabled', this.checked)"><span><b>Turn on email notifications</b></span></label>
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.alert_new_order !== false ? "checked" : ""} onchange="onNotificationField('alert_new_order', this.checked)"><span>Notify me when a new order is placed</span></label>
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.alert_payment_proof !== false ? "checked" : ""} onchange="onNotificationField('alert_payment_proof', this.checked)"><span>Notify me when payment proof is uploaded</span></label>
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.alert_live_chat !== false ? "checked" : ""} onchange="onNotificationField('alert_live_chat', this.checked)"><span>Notify me when a customer sends a live chat message</span></label>
     <button class="btn-primary" id="notification-save-btn" style="width:100%;margin-top:0;" onclick="saveNotificationSettings()">Save notification settings</button>
   </section>`;
 }
