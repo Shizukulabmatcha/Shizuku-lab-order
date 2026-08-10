@@ -43,6 +43,7 @@ const state = {
   menu: [],
   stockLevels: {},
   cart: loadSavedCart(),
+  cartNotice: "",
   screen: "menu",
   activeCategory: "All",
   productGroups: [],
@@ -106,6 +107,7 @@ const state = {
   orderChat: { messages: [], text: "", loading: false, sending: false, message: "" },
   loyalty: { phone: "", account: null, message: "", loading: false },
   lastOrder: null,
+  pendingPaymentAvailable: false,
   loading: true,
   loadError: null,
 };
@@ -409,12 +411,13 @@ async function init() {
   if (requestedScreen === "track" || requestedScreen === "loyalty") state.screen = requestedScreen;
   else {
     const pendingPayment = loadPendingPayment();
-    if (pendingPayment) {
+    if (pendingPayment && Number(pendingPayment.expiresAt || 0) > Date.now()) {
       state.lastOrder = pendingPayment.order;
       state.payment.expiresAt = Number(pendingPayment.expiresAt || 0);
       state.payment.transactionReference = String(pendingPayment.transactionReference || "");
-      state.screen = "payment";
-    }
+      state.pendingPaymentAvailable = true;
+      state.screen = "menu";
+    } else if (pendingPayment) clearPendingPayment();
   }
 
   if (!IS_CONFIGURED) { state.loading = false; render(); return; }
@@ -426,6 +429,7 @@ async function init() {
     await Promise.all([loadFaq(), loadReviews()]);
     state.slots = computeSlots();
     await Promise.all([loadProducts(), loadOptions(), loadProductGroups(), loadCustomerStockLevels()]);
+    removeUnavailableCartItems();
     startStockRefresh();
   } catch (error) {
     console.error(error);
@@ -440,6 +444,30 @@ async function init() {
 /* ---------- cart ---------- */
 function cartLines() {
   return Object.entries(state.cart).filter(([, item]) => item && item.qty > 0).map(([key, item]) => ({ key, ...item }));
+}
+function removeUnavailableCartItems(availableProductIds = null) {
+  const available = availableProductIds || new Set(state.menu.map((product) => String(product.id)));
+  const removedNames = [];
+  Object.entries(state.cart).forEach(([key,item]) => {
+    if (!item || available.has(String(item.productId))) return;
+    removedNames.push(item.productName || "Unavailable item");
+    delete state.cart[key];
+  });
+  if (removedNames.length) {
+    saveCart();
+    state.promo = null;
+    state.cartNotice = `${removedNames.join(", ")} ${removedNames.length === 1 ? "was" : "were"} removed because ${removedNames.length === 1 ? "it is" : "they are"} no longer available.`;
+  }
+  return removedNames;
+}
+function cartNoticeMarkup() {
+  return state.cartNotice ? `<div style="margin:0 20px 14px;padding:12px 14px;border:1px solid #d8c58e;border-radius:13px;background:#fff8df;color:#5b4b22;font-size:12px;line-height:1.45;">${escapeHtml(state.cartNotice)} <button type="button" style="float:right;border:0;background:none;font-weight:800;color:inherit;" onclick="state.cartNotice='';render()">×</button></div>` : "";
+}
+function resumePendingPayment() { state.pendingPaymentAvailable = false; state.screen = "payment"; render(); }
+function dismissPendingPayment() { state.pendingPaymentAvailable = false; state.lastOrder = null; clearPendingPayment(); render(); }
+function pendingPaymentMarkup() {
+  if (!state.pendingPaymentAvailable || !state.lastOrder) return "";
+  return `<div style="margin:0 20px 14px;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--card);"><b>Unfinished order · ${escapeHtml(state.lastOrder.order_number || "")}</b><div class="hint" style="text-align:left;margin:6px 0 11px;">Payment is still available for this order.</div><div style="display:flex;gap:8px;"><button class="btn-primary" style="flex:1;" onclick="resumePendingPayment()">Resume payment</button><button class="btn-secondary" onclick="dismissPendingPayment()">Dismiss</button></div></div>`;
 }
 function cartCount() { return cartLines().reduce((sum, line) => sum + Number(line.qty || 0), 0); }
 function cartTotal() { return cartLines().reduce((sum, line) => sum + Number(line.unitPrice || 0) * Number(line.qty || 0), 0); }
@@ -686,6 +714,20 @@ async function submitOrder() {
   if (!f.slotId) { alert("Please select a pickup slot."); return; }
   if (!f.collectionPoint) { alert("Please select a collection point."); return; }
   if (cartLines().length === 0) { alert("Your cart is empty."); setScreen("menu"); return; }
+  if (IS_CONFIGURED) {
+    const productIds = [...new Set(cartLines().map((line) => line.productId))];
+    const { data: latestProducts, error: availabilityError } = await db.from("products").select("id,is_available").in("id", productIds);
+    if (!availabilityError) {
+      const availableIds = new Set((latestProducts || []).filter((product) => product.is_available !== false).map((product) => String(product.id)));
+      const removed = removeUnavailableCartItems(availableIds);
+      if (removed.length) {
+        state.screen = "cart";
+        render();
+        alert("An unavailable item was removed from your cart. Please check your cart before continuing.");
+        return;
+      }
+    }
+  }
   if (state.promo) {
     const eligibleSubtotal = promoEligibleSubtotal(state.promo);
     if (eligibleSubtotal <= 0 || eligibleSubtotal < Number(state.promo.minimum_spend || 0)) {
@@ -1017,6 +1059,8 @@ function renderMenu() {
   return `
     ${header({ showCart: true })}
     ${storeInfoPanel()}
+    ${pendingPaymentMarkup()}
+    ${cartNoticeMarkup()}
     ${state.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load products: <code>${escapeHtml(state.loadError)}</code></div>` : ""}
     <div class="cats">
       ${categories.map((category) => `<button class="pill ${category === state.activeCategory ? "active" : ""}" onclick="setCategory('${escapeHtml(category)}')">${escapeHtml(category)}</button>`).join("")}
@@ -1197,6 +1241,7 @@ function renderCart() {
     ${header({ showCart: true })}
     <div class="screen">
       <button class="back-link" onclick="setScreen('menu')">${ICONS.back} Continue browsing</button>
+      ${cartNoticeMarkup()}
       ${lines.length === 0 ? `<div class="empty">Your cart is empty — the whisk is waiting.</div>` : lines.map((line) => `
         <div class="item-card">
           <img class="item-thumb" src="${escapeHtml(line.imageUrl || "matcha-lab.jpg")}" alt="${escapeHtml(line.productName)}">
