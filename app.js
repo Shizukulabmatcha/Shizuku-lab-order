@@ -12,6 +12,7 @@ const ICONS = {
 };
 
 const CART_STORAGE_KEY = "shizuku-lab-cart-v1";
+const PENDING_PAYMENT_STORAGE_KEY = "shizuku-lab-pending-payment-v1";
 function loadSavedCart() {
   try {
     const saved = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || "{}");
@@ -24,6 +25,19 @@ function saveCart() {
 function clearSavedCart() {
   try { localStorage.removeItem(CART_STORAGE_KEY); } catch (error) { /* storage may be unavailable */ }
 }
+function loadPendingPayment() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PENDING_PAYMENT_STORAGE_KEY) || "null");
+    if (!saved?.order || Date.now() - Number(saved.savedAt || 0) > 48 * 60 * 60 * 1000) return null;
+    return saved;
+  } catch (error) { return null; }
+}
+function savePendingPayment() {
+  if (!state.lastOrder) return;
+  try { localStorage.setItem(PENDING_PAYMENT_STORAGE_KEY, JSON.stringify({ order: state.lastOrder, expiresAt: state.payment.expiresAt, transactionReference: state.payment.transactionReference, savedAt: Date.now() })); }
+  catch (error) { /* storage may be unavailable */ }
+}
+function clearPendingPayment() { try { localStorage.removeItem(PENDING_PAYMENT_STORAGE_KEY); } catch (error) { /* storage may be unavailable */ } }
 
 const state = {
   menu: [],
@@ -41,6 +55,7 @@ const state = {
   slots: [],
   openingOverrides: [],
   faq: [],
+  reviews: [],
   store: {
     store_name: "Shizuku Lab",
     instagram: "shizukulab.matcha",
@@ -56,13 +71,17 @@ const state = {
   promoMsg: "",
   payment: { transactionReference: "", proofFile: null, expiresAt: null },
   customerId: null,
-  tracking: { orderNumber: "", phone: "", order: null, message: "", loading: false },
+  tracking: { orderNumber: "", phone: "", order: null, message: "", loading: false, live: false, lastCheckedAt: null },
+  reviewDraft: { name: "", rating: 5, text: "", submitting: false, message: "", submitted: false },
+  orderChat: { messages: [], text: "", loading: false, sending: false, message: "" },
   loyalty: { phone: "", account: null, message: "", loading: false },
   lastOrder: null,
   loading: true,
   loadError: null,
 };
 let paymentCountdownTimer = null;
+let stockRefreshTimer = null;
+let orderTrackingTimer = null;
 
 /* ---------- helpers ---------- */
 function money(n) { return `$${Number(n || 0).toFixed(2)}`; }
@@ -83,6 +102,7 @@ function safeExternalUrl(value) {
   const text = String(value || "").trim();
   return /^https?:\/\//i.test(text) ? text : "";
 }
+function isInstagramOrFacebookBrowser() { return /Instagram|FBAN|FBAV|FB_IAB|FBIOS|FB4A/i.test(navigator.userAgent || ""); }
 function uidCode() { return "SL-" + Math.random().toString(36).slice(2, 8).toUpperCase(); }
 function cleanPhoneInput(value) { return String(value || "").replace(/[^0-9+\-\s]/g, ""); }
 function normalisePhone(value) {
@@ -187,6 +207,12 @@ async function loadFaq() {
   const { data, error } = await db.from("store_faq").select("*").eq("is_active", true).order("sort_order");
   if (error) { console.warn("Could not load FAQ:", error.message); return; }
   state.faq = data || [];
+}
+async function loadReviews() {
+  if (!IS_CONFIGURED) return;
+  const { data, error } = await db.from("customer_reviews").select("id,customer_name,rating,review_text,created_at").eq("status", "published").order("published_at", { ascending: false }).limit(12);
+  if (error) { console.warn("Could not load reviews:", error.message); return; }
+  state.reviews = data || [];
 }
 
 function pickupStartsAt(dateText, timeText) {
@@ -302,6 +328,19 @@ async function loadCustomerStockLevels() {
   }
   state.stockLevels = Object.fromEntries((data || []).map((row) => [String(row.product_id), Number(row.available_quantity)]));
 }
+function startStockRefresh() {
+  if (stockRefreshTimer || !IS_CONFIGURED) return;
+  stockRefreshTimer = setInterval(async () => {
+    if (document.visibilityState !== "visible") return;
+    await loadCustomerStockLevels();
+    if (state.screen === "menu" || state.screen === "options" || state.screen === "bundle" || state.screen === "cart") render();
+  }, 30000);
+  document.addEventListener("visibilitychange", async () => {
+    if (document.visibilityState !== "visible") return;
+    await loadCustomerStockLevels();
+    if (state.screen === "menu" || state.screen === "options" || state.screen === "bundle" || state.screen === "cart") render();
+  });
+}
 async function loadProductGroups() {
   const { data, error } = await db.from("product_groups").select("*").eq("is_visible", true).order("sort_order").order("name");
   // The old shop continues to work before the one-time SQL upgrade is run.
@@ -328,6 +367,15 @@ async function init() {
 
   const requestedScreen = new URLSearchParams(window.location.search).get("screen");
   if (requestedScreen === "track" || requestedScreen === "loyalty") state.screen = requestedScreen;
+  else {
+    const pendingPayment = loadPendingPayment();
+    if (pendingPayment) {
+      state.lastOrder = pendingPayment.order;
+      state.payment.expiresAt = Number(pendingPayment.expiresAt || 0);
+      state.payment.transactionReference = String(pendingPayment.transactionReference || "");
+      state.screen = "payment";
+    }
+  }
 
   if (!IS_CONFIGURED) { state.loading = false; render(); return; }
 
@@ -335,9 +383,10 @@ async function init() {
     await ensureCustomerSession();
     await loadStoreSettings();
     await loadOpeningOverrides();
-    await loadFaq();
+    await Promise.all([loadFaq(), loadReviews()]);
     state.slots = computeSlots();
     await Promise.all([loadProducts(), loadOptions(), loadProductGroups(), loadCustomerStockLevels()]);
+    startStockRefresh();
   } catch (error) {
     console.error(error);
     state.loadError = error?.message || String(error);
@@ -615,6 +664,7 @@ async function submitOrder() {
   if (!IS_CONFIGURED) {
     state.lastOrder = { ...orderPayload, id: null, items: cartLines().map((line) => ({ ...line })), slot };
     state.screen = "payment";
+    savePendingPayment();
     render();
     return;
   }
@@ -674,6 +724,7 @@ async function submitOrder() {
 
     state.lastOrder = { ...order, items: cartLines().map((line) => ({ ...line })), slot };
     state.screen = "payment";
+    savePendingPayment();
     render();
   } catch (error) {
     console.error("Order submission error:", error);
@@ -691,6 +742,7 @@ async function submitOrder() {
 /* ---------- mark paid ---------- */
 function onPaymentReference(value) {
   state.payment.transactionReference = value;
+  savePendingPayment();
 }
 
 function onPaymentProof(input) {
@@ -712,6 +764,14 @@ function onPaymentProof(input) {
   }
   state.payment.proofFile = file;
   render();
+}
+
+function openInstagramPaymentHelp() {
+  const order = state.lastOrder;
+  const instagramHandle = String(state.store.instagram || "shizukulab.matcha").replace(/^@/, "");
+  const url = `https://ig.me/m/${encodeURIComponent(instagramHandle)}`;
+  try { navigator.clipboard?.writeText(order?.order_number || order?.id || ""); } catch (error) { /* best effort */ }
+  window.open(url, "_blank");
 }
 
 async function markPaid() {
@@ -747,6 +807,7 @@ async function markPaid() {
   state.lastOrder = { ...order, payment_status: "submitted", order_status: "awaiting_confirmation" };
   state.cart = {};
   clearSavedCart();
+  clearPendingPayment();
   state.form.collectionPoint = "";
   state.payment = { transactionReference: "", proofFile: null, expiresAt: null };
   state.screen = "confirmation";
@@ -908,8 +969,16 @@ function renderMenu() {
     <div class="sticky-bar"><div class="sticky-bar-inner">
       <button class="primary-btn" onclick="setScreen('cart')">${ICONS.bag} View cart · ${money(cartTotal())}</button>
     </div></div>` : ""}
+    ${renderReviews()}
     ${renderFAQ()}
   `;
+}
+
+function reviewStars(rating) { return "★".repeat(Math.max(0, Math.min(5, Number(rating) || 0))) + "☆".repeat(Math.max(0, 5 - (Number(rating) || 0))); }
+function renderReviews() {
+  if (!state.reviews.length) return "";
+  const average = state.reviews.reduce((sum, item) => sum + Number(item.rating || 0), 0) / state.reviews.length;
+  return `<section class="faq-section review-section"><div class="faq-title"><span>お客様の声</span> · REVIEWS</div><div style="display:flex;align-items:center;gap:9px;margin:0 0 14px;"><b style="font:700 25px/1 Georgia,serif;">${average.toFixed(1)}</b><span style="color:#a36d1e;letter-spacing:2px;">${reviewStars(Math.round(average))}</span><span class="hint" style="margin:0;">${state.reviews.length} review${state.reviews.length === 1 ? "" : "s"}</span></div>${state.reviews.map((item) => `<article class="summary-card" style="margin:10px 0;padding:16px;"><div style="display:flex;justify-content:space-between;gap:12px;"><b>${escapeHtml(item.customer_name)}</b><span style="color:#a36d1e;letter-spacing:1px;">${reviewStars(item.rating)}</span></div><p style="margin:10px 0 0;line-height:1.55;">${escapeHtml(item.review_text)}</p></article>`).join("")}</section>`;
 }
 
 /* ---------- FAQ ---------- */
@@ -1177,6 +1246,7 @@ function paymentCountdownText() {
 }
 function refreshPayNowQr() {
   state.payment.expiresAt = Date.now() + 15 * 60 * 1000;
+  savePendingPayment();
   render();
 }
 function startPaymentCountdown() {
@@ -1206,6 +1276,7 @@ function renderPayment() {
   const paymentExpired = paymentSecondsLeft() === 0;
   const paynowName = state.store.paynow_name || state.store.store_name || "Shizuku Lab";
   const paynowNumber = state.store.paynow_number || "";
+  const inAppBrowser = isInstagramOrFacebookBrowser();
   let qrHtml;
   try {
     qrHtml = paynowNumber ? `<div class="qr-box ${paymentExpired ? "qr-expired" : ""}">${payNowQrSvg(order.total, order.order_number, state.payment.expiresAt)}</div>` : null;
@@ -1231,15 +1302,18 @@ function renderPayment() {
         <div class="ref-note">Enter <b>${escapeHtml(order.order_number || order.id || "")}</b> as the payment reference.</div>
       </div>
       <div class="summary-card" style="margin-top:16px;">
+        ${inAppBrowser ? `<div style="padding:14px 16px;margin-bottom:16px;border:1px solid #d8c58e;border-radius:14px;background:#fff8df;color:#5b4b22;font-size:13px;line-height:1.5;"><b>Using Instagram or Facebook?</b><br>Photo access may be blocked by the in-app browser. Please choose <b>Allow all photos/media</b>. If it still fails, do not refresh—send the screenshot through Instagram below. Your order <b>${escapeHtml(order.order_number || order.id || "")}</b> will be restored if this page reloads.</div>` : ""}
         <div class="field">
           <label>PayNow transaction reference <span class="hint">(optional)</span></label>
           <input value="${escapeHtml(state.payment.transactionReference)}" placeholder="e.g. 123456789" oninput="onPaymentReference(this.value)">
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Payment screenshot <span style="color:#B33;">*</span></label>
-          <input type="file" accept="image/*,.heic,.heif" required aria-required="true" onchange="onPaymentProof(this)">
+          <input type="file" accept="image/jpeg,image/png,image/heic,image/heif" required aria-required="true" onchange="onPaymentProof(this)">
           <div class="hint" style="margin-top:8px;">${state.payment.proofFile ? `Selected: <b>${escapeHtml(state.payment.proofFile.name)}</b>` : "Required — upload a clear screenshot of your successful PayNow payment. If you opened this page inside Facebook or Instagram, please allow photo access when prompted."}</div>
         </div>
+        <button type="button" class="btn-secondary" style="width:100%;margin-top:14px;" onclick="openInstagramPaymentHelp()">Upload problem? Send screenshot by Instagram DM</button>
+        <div class="hint" style="margin-top:8px;margin-bottom:0;">We copied your order number where supported. Include it in your message so we can match your payment.</div>
       </div>
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
@@ -1293,8 +1367,84 @@ async function findOrder() {
   t.loading = false;
   if (error) t.message = "We couldn’t check this order right now. Please try again shortly.";
   else if (!data) t.message = "We couldn’t find an order with those details. Please check and try again.";
-  else t.order = data;
+  else {
+    t.order = data;
+    t.lastCheckedAt = new Date();
+    state.reviewDraft.name = state.reviewDraft.name || data.customer_name || "";
+    await loadOrderMessages();
+    startLiveOrderTracking();
+  }
   render();
+}
+
+function startLiveOrderTracking() {
+  if (orderTrackingTimer || !state.tracking.order || !IS_CONFIGURED) return;
+  state.tracking.live = true;
+  orderTrackingTimer = setInterval(refreshTrackedOrder, 15000);
+}
+async function refreshTrackedOrder() {
+  const t = state.tracking;
+  if (!t.order || document.visibilityState !== "visible") return;
+  const { data, error } = await db.rpc("track_shizuku_order", { p_order_number: t.order.order_number, p_phone: normalisePhone(t.phone) }).maybeSingle();
+  if (!error && data) {
+    const changed = data.order_status !== t.order.order_status || data.payment_status !== t.order.payment_status || data.collection_time !== t.order.collection_time || data.collection_date !== t.order.collection_date;
+    t.order = data; t.lastCheckedAt = new Date(); t.live = true;
+    const messagesBefore = JSON.stringify(state.orderChat.messages.map((item) => [item.id, item.message_text, item.created_at]));
+    await loadOrderMessages();
+    const messagesChanged = messagesBefore !== JSON.stringify(state.orderChat.messages.map((item) => [item.id, item.message_text, item.created_at]));
+    if (changed || messagesChanged) render();
+  }
+}
+
+async function loadOrderMessages() {
+  const order = state.tracking.order, chat = state.orderChat;
+  if (!order || !IS_CONFIGURED) return;
+  chat.loading = true; chat.message = "";
+  const { data, error } = await db.rpc("get_shizuku_messages", { p_order_number: order.order_number, p_phone: state.tracking.phone });
+  chat.loading = false;
+  if (error) chat.message = "Messaging is not ready yet. Please try again later.";
+  else chat.messages = data || [];
+}
+
+async function sendOrderMessage() {
+  const order = state.tracking.order, chat = state.orderChat;
+  const text = String(chat.text || "").trim();
+  if (!order || !text || chat.sending) return;
+  chat.sending = true; chat.message = ""; render();
+  const { error } = await db.rpc("send_shizuku_message", { p_order_number: order.order_number, p_phone: state.tracking.phone, p_message_text: text });
+  chat.sending = false;
+  if (error) chat.message = error.message || "We couldn’t send your message.";
+  else { chat.text = ""; await loadOrderMessages(); }
+  render();
+}
+
+function renderOrderChat() {
+  const chat = state.orderChat;
+  return `<div class="summary-card" style="margin-top:16px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;"><div><div class="display" style="font-size:19px;">Message Shizuku Lab</div><div class="hint" style="text-align:left;margin-top:4px;">Replies will appear here when you track this order.</div></div><button class="pill" style="padding:7px 10px;" onclick="loadOrderMessages().then(render)">Refresh</button></div><div style="display:flex;flex-direction:column;gap:9px;margin:16px 0;max-height:310px;overflow:auto;">${chat.loading ? `<div class="hint">Loading messages…</div>` : chat.messages.length ? chat.messages.map((item) => `<div style="max-width:86%;align-self:${item.sender === "customer" ? "flex-end" : "flex-start"};padding:10px 12px;border-radius:${item.sender === "customer" ? "14px 14px 3px 14px" : "14px 14px 14px 3px"};background:${item.sender === "customer" ? "#4B5D3A" : "#f2ebe1"};color:${item.sender === "customer" ? "#fff" : "var(--ink)"};"><div style="font-size:10px;font-weight:800;opacity:.72;margin-bottom:4px;">${item.sender === "customer" ? "YOU" : "SHIZUKU LAB"}</div><div style="white-space:pre-wrap;line-height:1.45;">${escapeHtml(item.message_text)}</div></div>`).join("") : `<div class="hint" style="text-align:left;">No messages yet. Ask us anything about this order.</div>`}</div><div class="field"><label>Your message</label><textarea maxlength="1000" rows="3" placeholder="Write to Shizuku Lab…" oninput="state.orderChat.text=this.value">${escapeHtml(chat.text)}</textarea></div><button class="primary-btn" ${chat.sending ? "disabled" : ""} onclick="sendOrderMessage()">${chat.sending ? "Sending…" : "Send message"}</button>${chat.message ? `<div class="ref-note" style="color:#B33333;">${escapeHtml(chat.message)}</div>` : ""}</div>`;
+}
+
+async function submitReview() {
+  const draft = state.reviewDraft, order = state.tracking.order;
+  if (!order || draft.submitting || draft.submitted) return;
+  if (String(draft.text || "").trim().length < 3) { draft.message = "Please write a little more about your visit."; render(); return; }
+  draft.submitting = true; draft.message = ""; render();
+  const { error } = await db.rpc("submit_shizuku_review", {
+    p_order_number: order.order_number,
+    p_phone: state.tracking.phone,
+    p_customer_name: String(draft.name || order.customer_name || "Customer").trim(),
+    p_rating: Number(draft.rating),
+    p_review_text: String(draft.text || "").trim(),
+  });
+  draft.submitting = false;
+  if (error) draft.message = error.message || "We couldn’t submit your review.";
+  else { draft.submitted = true; draft.message = "Thank you — your review was sent to Shizuku Lab for approval."; }
+  render();
+}
+
+function renderReviewForm() {
+  const d = state.reviewDraft;
+  if (d.submitted) return `<div class="summary-card" style="margin-top:16px;text-align:center;"><div style="font-size:30px;">♡</div><b>Thank you for your review</b><div class="hint" style="margin-top:7px;line-height:1.5;">${escapeHtml(d.message)}</div></div>`;
+  return `<div class="summary-card" style="margin-top:16px;"><div class="display" style="font-size:19px;margin-bottom:6px;">How was your Shizuku?</div><div class="hint" style="text-align:left;line-height:1.5;">Your review will appear after approval.</div><div style="display:flex;gap:5px;margin:15px 0;">${[1,2,3,4,5].map((n) => `<button type="button" aria-label="${n} star${n === 1 ? "" : "s"}" onclick="state.reviewDraft.rating=${n};render();" style="border:0;background:none;padding:2px;font-size:29px;color:${n <= d.rating ? "#a36d1e" : "#d8d0c4"};cursor:pointer;">★</button>`).join("")}</div><div class="field"><label>Name shown publicly</label><input maxlength="80" value="${escapeHtml(d.name || state.tracking.order?.customer_name || "")}" oninput="state.reviewDraft.name=this.value"></div><div class="field"><label>Your review</label><textarea maxlength="600" rows="4" placeholder="Tell us what you enjoyed…" oninput="state.reviewDraft.text=this.value">${escapeHtml(d.text)}</textarea></div><button class="primary-btn" ${d.submitting ? "disabled" : ""} onclick="submitReview()">${d.submitting ? "Sending…" : "Submit review"}</button>${d.message ? `<div class="ref-note" style="color:#B33333;">${escapeHtml(d.message)}</div>` : ""}</div>`;
 }
 function renderTrackOrder() {
   const t = state.tracking;
@@ -1312,7 +1462,7 @@ function renderTrackOrder() {
         <button class="primary-btn" style="margin-top:16px;" ${t.loading ? "disabled" : ""} onclick="findOrder()">${t.loading ? "Checking…" : "Track order"}</button>
         ${t.message ? `<div class="ref-note" style="color:#B33333;">${escapeHtml(t.message)}</div>` : ""}
       </div>
-      ${t.order ? `<div class="summary-card" style="margin-top:16px;"><div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(t.order.order_number)}</span></div><div class="row"><span class="label">Pickup</span><span>${escapeHtml(t.order.collection_date || "")} · ${escapeHtml(t.order.collection_time || "")}</span></div><div class="divider"></div><div class="center" style="padding:12px 0 8px;"><div style="display:inline-flex;width:54px;height:54px;align-items:center;justify-content:center;background:var(--matcha);color:var(--cream);border-radius:999px;font-size:24px;">✓</div><div class="display" style="font-size:20px;margin-top:12px;">${escapeHtml(status.title)}</div><div class="hint" style="margin:8px 0 14px;line-height:1.5;">${escapeHtml(status.note)}</div></div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:4px 0 2px;">${stages.map((stage, index) => `<div style="text-align:center;"><div style="height:6px;border-radius:99px;background:${index <= status.step ? "var(--matcha)" : "var(--line)"};"></div><div style="font-size:9px;color:var(--muted);line-height:1.25;margin-top:6px;">${stage}</div></div>`).join("")}</div></div>` : ""}
+      ${t.order ? `<div class="summary-card" style="margin-top:16px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;"><span style="font-size:11px;font-weight:800;letter-spacing:.08em;color:#4B5D3A;">● LIVE UPDATES</span><button class="pill" style="padding:6px 9px;font-size:11px;" onclick="refreshTrackedOrder()">Refresh now</button></div><div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(t.order.order_number)}</span></div><div class="row"><span class="label">Pickup</span><span>${escapeHtml(t.order.collection_date || "")} · ${escapeHtml(t.order.collection_time || "")}</span></div><div class="divider"></div><div class="center" style="padding:12px 0 8px;"><div style="display:inline-flex;width:54px;height:54px;align-items:center;justify-content:center;background:var(--matcha);color:var(--cream);border-radius:999px;font-size:24px;">✓</div><div class="display" style="font-size:20px;margin-top:12px;">${escapeHtml(status.title)}</div><div class="hint" style="margin:8px 0 14px;line-height:1.5;">${escapeHtml(status.note)}</div></div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:4px 0 2px;">${stages.map((stage, index) => `<div style="text-align:center;"><div style="height:6px;border-radius:99px;background:${index <= status.step ? "var(--matcha)" : "var(--line)"};"></div><div style="font-size:9px;color:var(--muted);line-height:1.25;margin-top:6px;">${stage}</div></div>`).join("")}</div></div>${renderOrderChat()}${t.order.order_status === "collected" && t.order.payment_status === "paid" ? renderReviewForm() : ""}` : ""}
     </div>`;
 }
 

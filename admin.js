@@ -33,6 +33,9 @@ const astate = {
   settingsDraft: null,
   openingOverrides: [],
   faq: [],
+  reviews: [],
+  messages: [],
+  messageDrafts: {},
   selectedAvailabilityDate: null,
   availabilityDraft: null,
   calendarMonth: null,
@@ -199,6 +202,14 @@ async function loadAll() {
       const { data: faq, error: faqError } = await db.from("store_faq").select("*").order("sort_order");
       if (faqError) console.warn("Could not load FAQ:", faqError.message);
       astate.faq = faq || [];
+      const [{ data: reviews, error: reviewsError }, { data: messages, error: messagesError }] = await Promise.all([
+        db.from("customer_reviews").select("*").order("created_at", { ascending: false }),
+        db.from("order_messages").select("*").order("created_at"),
+      ]);
+      if (reviewsError) console.warn("Could not load reviews:", reviewsError.message);
+      if (messagesError) console.warn("Could not load messages:", messagesError.message);
+      astate.reviews = reviews || [];
+      astate.messages = messages || [];
       const { data: overrides, error: availabilityError } = await db.from("store_opening_overrides").select("*").order("collection_date");
       if (availabilityError) console.warn("Could not load store availability:", availabilityError.message);
       astate.openingOverrides = overrides || [];
@@ -909,10 +920,53 @@ function subscribeToOrderChanges() {
     .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders" }, async () => {
       await refreshOrdersOnly();
     })
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "order_messages" }, async (payload) => {
+      const message = payload.new || {};
+      if (!astate.messages.some((item) => String(item.id) === String(message.id))) astate.messages = [...astate.messages, message];
+      if (message.sender === "customer") {
+        astate.newMessageAlert = { orderNumber: message.order_number || "Order", text: message.message_text || "New message" };
+        if ("Notification" in window && Notification.permission === "granted") new Notification("New customer message", { body: `${message.order_number || "Order"} · ${message.message_text || ""}` });
+      }
+      render();
+    })
     .subscribe();
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
 }
 function setTab(tab) { astate.tab = tab; render(); }
+
+function messageThreads() {
+  const map = new Map();
+  astate.messages.forEach((message) => { const key = String(message.order_id); const thread = map.get(key) || { orderId: key, orderNumber: message.order_number, messages: [], latest: message.created_at }; thread.messages.push(message); thread.latest = message.created_at; map.set(key, thread); });
+  return [...map.values()].sort((a,b) => new Date(b.latest) - new Date(a.latest));
+}
+function unreadMessageCount() { return astate.messages.filter((item) => item.sender === "customer" && !item.read_by_seller).length; }
+async function markThreadRead(orderId) {
+  const ids = astate.messages.filter((item) => String(item.order_id) === String(orderId) && item.sender === "customer" && !item.read_by_seller).map((item) => item.id);
+  if (!ids.length) return;
+  const { error } = await db.from("order_messages").update({ read_by_seller: true }).in("id", ids);
+  if (!error) { astate.messages = astate.messages.map((item) => ids.includes(item.id) ? { ...item, read_by_seller: true } : item); render(); }
+}
+async function replyToOrder(orderId) {
+  const text = String(astate.messageDrafts[orderId] || "").trim(); if (!text) return;
+  const thread = messageThreads().find((item) => String(item.orderId) === String(orderId)); if (!thread) return;
+  const { data, error } = await db.from("order_messages").insert({ order_id: String(orderId), order_number: thread.orderNumber, sender: "seller", message_text: text, read_by_seller: true }).select().single();
+  if (error) { alert("Could not send reply: " + error.message); return; }
+  astate.messages = [...astate.messages, data]; astate.messageDrafts[orderId] = ""; await markThreadRead(orderId); render();
+}
+function renderMessagesTab() {
+  const threads = messageThreads();
+  if (!threads.length) return `<div class="dashboard-card"><div class="dashboard-empty">No customer messages yet.</div></div>`;
+  return threads.map((thread) => { const unread = thread.messages.filter((item) => item.sender === "customer" && !item.read_by_seller).length; const order = astate.orders.find((item) => String(item.id) === thread.orderId); return `<section class="dashboard-card" style="margin-bottom:16px;" onclick="markThreadRead('${escapeHtml(thread.orderId)}')"><div class="dashboard-card-head"><h2>${escapeHtml(thread.orderNumber || "Order")}${unread ? ` <span style="display:inline-grid;place-items:center;min-width:23px;height:23px;padding:0 6px;border-radius:99px;background:#ef7138;color:#fff;font:800 12px/1 inherit;">${unread}</span>` : ""}</h2><span>${escapeHtml(order?.customer_name || "Customer")} · ${escapeHtml(order?.customer_phone || "")}</span></div><div style="padding:18px 20px;"><div style="display:flex;flex-direction:column;gap:9px;max-height:360px;overflow:auto;">${thread.messages.map((item) => `<div style="max-width:82%;align-self:${item.sender === "seller" ? "flex-end" : "flex-start"};padding:10px 12px;border-radius:13px;background:${item.sender === "seller" ? "#263125" : "#f3ece3"};color:${item.sender === "seller" ? "#fff" : "#332f2a"};"><div style="font-size:10px;font-weight:800;opacity:.7;margin-bottom:4px;">${item.sender === "seller" ? "YOU" : "CUSTOMER"}</div><div style="white-space:pre-wrap;line-height:1.45;">${escapeHtml(item.message_text)}</div></div>`).join("")}</div><div class="field" style="margin-top:16px;"><label>Reply</label><textarea rows="3" maxlength="1000" oninput="astate.messageDrafts['${escapeHtml(thread.orderId)}']=this.value">${escapeHtml(astate.messageDrafts[thread.orderId] || "")}</textarea></div><button class="btn-primary" onclick="event.stopPropagation();replyToOrder('${escapeHtml(thread.orderId)}')">Send reply</button></div></section>`; }).join("");
+}
+
+async function setReviewStatus(id, status) {
+  const fields = { status, published_at: status === "published" ? new Date().toISOString() : null };
+  const { data, error } = await db.from("customer_reviews").update(fields).eq("id", id).select().single();
+  if (error) { alert("Could not update review: " + error.message); return; }
+  astate.reviews = astate.reviews.map((item) => String(item.id) === String(id) ? data : item); render();
+}
+async function deleteReview(id) { if (!confirm("Delete this review permanently?")) return; const { error } = await db.from("customer_reviews").delete().eq("id", id); if (error) { alert(error.message); return; } astate.reviews = astate.reviews.filter((item) => String(item.id) !== String(id)); render(); }
+function renderReviewsTab() { return astate.reviews.length ? astate.reviews.map((item) => `<section class="dashboard-card" style="padding:20px;margin-bottom:14px;"><div class="queue-top"><div><b>${escapeHtml(item.customer_name)}</b><div class="queue-name">${escapeHtml(item.order_number)} · ${"★".repeat(Number(item.rating) || 0)}${"☆".repeat(5-(Number(item.rating)||0))}</div></div><div class="queue-status">${escapeHtml(String(item.status).toUpperCase())}</div></div><p style="line-height:1.6;white-space:pre-wrap;">${escapeHtml(item.review_text)}</p><div style="display:flex;gap:9px;flex-wrap:wrap;"><button class="btn-primary" onclick="setReviewStatus('${item.id}','published')">Publish</button><button class="btn-secondary" onclick="setReviewStatus('${item.id}','hidden')">Hide</button><button class="link-danger" onclick="deleteReview('${item.id}')">Delete</button></div></section>`).join("") : `<div class="dashboard-card"><div class="dashboard-empty">No reviews submitted yet.</div></div>`; }
 function renderDashboardTab() {
   const stats = dashboardStats();
   const liveOrders = astate.orders.filter((order) => order.order_status !== "cancelled" && order.order_status !== "collected").slice(0, 6);
@@ -1637,23 +1691,25 @@ function render() {
     ["promos", "✦", "Promos"],
     ["rewards", "♧", "Rewards"],
     ["customers", "◉", "Customers"],
+    ["messages", "✉", `Messages${unreadMessageCount() ? ` (${unreadMessageCount()})` : ""}`],
+    ["reviews", "★", "Reviews"],
     ["availability", "◷", "Availability"],
     ["faq", "?", "FAQ"],
     ["notifications", "🔔", "Notifications"],
     ["settings", "⚙", "Store settings"],
   ];
-  const tabTitle = { orders: "Orders", menu: "Products", inventory: "Inventory & food cost", promos: "Promos", rewards: "Rewards", customers: "Customers", availability: "Availability", faq: "FAQ", notifications: "Notifications", settings: "Store settings" };
-  const tabSubtitle = { orders: "Review payments and edit every customer order.", menu: "Keep your drinks, prices and availability up to date.", inventory: "Track ingredient stock and calculate each product's food cost.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose where you receive new-order alerts.", settings: "Manage your store details, images, contact information and payment details." };
+  const tabTitle = { orders: "Orders", menu: "Products", inventory: "Inventory & food cost", promos: "Promos", rewards: "Rewards", customers: "Customers", messages: "Messages", reviews: "Reviews", availability: "Availability", faq: "FAQ", notifications: "Notifications", settings: "Store settings" };
+  const tabSubtitle = { orders: "Review payments and edit every customer order.", menu: "Keep your drinks, prices and availability up to date.", inventory: "Track ingredient stock and calculate each product's food cost.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", messages: "Read and reply to order-linked customer messages.", reviews: "Approve the customer reviews shown on your ordering page.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose where you receive new-order alerts.", settings: "Manage your store details, images, contact information and payment details." };
   const page = astate.tab === "dashboard" ? renderDashboardTab() : `
     <div class="admin-top"><div><div class="admin-eyebrow">Shizuku Lab admin</div><h1 class="tab-page-title">${tabTitle[astate.tab] || "Dashboard"}</h1><p class="tab-page-subtitle">${tabSubtitle[astate.tab] || ""}</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
     <div class="admin-content">
-      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "inventory" ? renderInventoryTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : renderSettingsTab()}
+      ${astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "inventory" ? renderInventoryTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "messages" ? renderMessagesTab() : astate.tab === "reviews" ? renderReviewsTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : renderSettingsTab()}
     </div>`;
   app.innerHTML = `
     ${dashboardStyles()}
     <div class="shop-admin">
       <aside class="admin-side"><div class="admin-logo">${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</div><div class="admin-caption">SHOP ADMIN</div><div class="admin-nav-label">MAIN</div><nav class="admin-nav">${nav.map(([tab, icon, label]) => `<button class="${astate.tab === tab ? "active" : ""}" onclick="setTab('${tab}')"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="admin-side-bottom"><button class="link-btn" onclick="logoutAdmin()">Sign out</button></div></aside>
-      <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}${astate.newOrderAlert ? `<div class="new-order-alert" role="alert"><div><strong>New order received</strong><span>${escapeHtml(astate.newOrderAlert.orderNumber)} · ${escapeHtml(astate.newOrderAlert.customer)} · ${money(astate.newOrderAlert.total)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="setTab('orders')">Open order</button><button class="btn-secondary" onclick="dismissNewOrderAlert()">Dismiss</button></div></div>` : ""}${page}</main>
+      <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}${astate.newMessageAlert ? `<div class="new-order-alert" role="alert"><div><strong>New customer message</strong><span>${escapeHtml(astate.newMessageAlert.orderNumber)} · ${escapeHtml(astate.newMessageAlert.text)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="astate.newMessageAlert=null;setTab('messages')">Open message</button><button class="btn-secondary" onclick="astate.newMessageAlert=null;render()">Dismiss</button></div></div>` : ""}${astate.newOrderAlert ? `<div class="new-order-alert" role="alert"><div><strong>New order received</strong><span>${escapeHtml(astate.newOrderAlert.orderNumber)} · ${escapeHtml(astate.newOrderAlert.customer)} · ${money(astate.newOrderAlert.total)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="setTab('orders')">Open order</button><button class="btn-secondary" onclick="dismissNewOrderAlert()">Dismiss</button></div></div>` : ""}${page}</main>
     </div>
     ${renderEditOverlay()}
   `;
