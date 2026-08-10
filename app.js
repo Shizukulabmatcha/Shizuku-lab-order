@@ -58,6 +58,7 @@ const state = {
   reviews: [],
   store: {
     store_name: "Shizuku Lab",
+    store_tagline: "雫ラボ · crafted drop by drop",
     instagram: "shizukulab.matcha",
     paynow_name: "",
     paynow_number: "",
@@ -65,6 +66,28 @@ const state = {
     collection_address: "Blk 130A drop off point, Near Creamier TPY, Toa Payoh Lorong 1, Singapore",
     saturday_collection_time: "10:00 AM - 12:00 PM",
     sunday_collection_time: "10:00 AM - 1:00 PM",
+    collection_points: ["Blk 130A", "Near Creamier"],
+    theme_primary_color: "#4B5D3A",
+    theme_background_color: "#F3EEE3",
+    theme_card_color: "#FFFFFF",
+    theme_text_color: "#2A2A22",
+    theme_heading_font: "fraunces",
+    theme_body_font: "work_sans",
+    menu_heading: "Menu",
+    reviews_heading: "お客様の声 · REVIEWS",
+    track_order_heading: "Track my order",
+    loyalty_heading: "Shizuku Club",
+    loyalty_card_background: "#1E473E",
+    loyalty_card_text_color: "#F9F4E8",
+    loyalty_card_accent_color: "#CAE4B3",
+    show_checkout_instagram: true,
+    show_checkout_notes: true,
+    payment_instructions: "Scan with your banking app, or PayNow to the account below.",
+    chat_enabled: true,
+    chat_heading: "Message us",
+    chat_auto_reply: "Thanks for your message. We will reply as soon as possible.",
+    chat_business_hours: "",
+    reviews_enabled: true,
   },
   form: { name: "", phone: "", instagram: "", pickupDate: "", slotId: "", collectionPoint: "", notes: "", promoCode: "" },
   promo: null,
@@ -85,6 +108,13 @@ let orderTrackingTimer = null;
 
 /* ---------- helpers ---------- */
 function money(n) { return `$${Number(n || 0).toFixed(2)}`; }
+function themeFont(value, fallback) {
+  return ({ fraunces: "'Fraunces',serif", noto_serif_jp: "'Noto Serif JP',serif", work_sans: "'Work Sans',sans-serif", noto_sans_jp: "'Noto Sans JP',sans-serif", georgia: "Georgia,serif" })[value] || fallback;
+}
+function storefrontThemeStyle() {
+  const s = state.store;
+  return `<style>:root{--matcha:${escapeHtml(s.theme_primary_color || "#4B5D3A")};--cream:${escapeHtml(s.theme_background_color || "#F3EEE3")};--card:${escapeHtml(s.theme_card_color || "#FFFFFF")};--ink:${escapeHtml(s.theme_text_color || "#2A2A22")};--loyalty-card-bg:${escapeHtml(s.loyalty_card_background || "#1E473E")};--loyalty-card-text:${escapeHtml(s.loyalty_card_text_color || "#F9F4E8")};--loyalty-card-accent:${escapeHtml(s.loyalty_card_accent_color || "#CAE4B3")};}body{font-family:${themeFont(s.theme_body_font,"'Work Sans',sans-serif")}}.display{font-family:${themeFont(s.theme_heading_font,"'Fraunces',serif")}}.screen>div[style*="linear-gradient(135deg,#1e473e"]{background:var(--loyalty-card-bg)!important;color:var(--loyalty-card-text)!important}.screen>div[style*="linear-gradient(135deg,#1e473e"] [style*="background:#cae4b3"]{background:var(--loyalty-card-accent)!important}</style>`;
+}
 function originalPrice(item) { return Number(item?.price || 0); }
 function salePrice(item) {
   const original = originalPrice(item);
@@ -891,12 +921,14 @@ function storeInfoPanel() {
 
 /* ---------- header ---------- */
 function header({ showCart = false } = {}) {
+  const storeName = escapeHtml(state.store.store_name || "Shizuku Lab");
+  const storeTagline = escapeHtml(state.store.store_tagline || "雫ラボ · crafted drop by drop");
   return `
     <div class="header">
       <div class="header-row">
         <div>
-          <div class="display brand-title">Shizuku Lab</div>
-          <div class="brand-sub">雫ラボ · crafted drop by drop</div>
+          <div class="display brand-title">${storeName}</div>
+          <div class="brand-sub">${storeTagline}</div>
         </div>
         <div style="display:flex;align-items:center;gap:9px;">
           ${showCart ? `
@@ -962,7 +994,7 @@ function renderMenu() {
       <button class="pill ${state.menuView === "list" ? "active" : ""}" style="padding:6px 11px;font-size:11px;" onclick="state.menuView='list';render();">☷ List</button>
       <button class="pill ${state.menuView === "gallery" ? "active" : ""}" style="padding:6px 11px;font-size:11px;" onclick="state.menuView='gallery';render();">▦ Gallery</button>
     </div>
-    <div class="menu-list" style="padding-top:10px;"><div class="menu-kana">メニュー · DRINK MENU</div>
+    <div class="menu-list" style="padding-top:10px;"><div class="menu-kana">${escapeHtml(state.store.menu_heading || "メニュー · DRINK MENU")}</div>
       ${items.length === 0 ? `<div class="empty">No items available yet.</div>` : groups.map((group) => { const groupItems = items.filter((item) => productGroupName(item) === group); if (!groupItems.length) return ""; return `<section class="product-group"><h2 class="product-group-title">${escapeHtml(group)}</h2><div class="product-group-items" style="${state.menuView === "gallery" ? "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;" : ""}">${groupItems.map(renderMenuCard).join("")}</div></section>`; }).join("")}
     </div>
     ${cartCount() > 0 ? `
@@ -976,7 +1008,7 @@ function renderMenu() {
 
 function reviewStars(rating) { return "★".repeat(Math.max(0, Math.min(5, Number(rating) || 0))) + "☆".repeat(Math.max(0, 5 - (Number(rating) || 0))); }
 function renderReviews() {
-  if (!state.reviews.length) return "";
+  if (state.store.reviews_enabled === false || !state.reviews.length) return "";
   const average = state.reviews.reduce((sum, item) => sum + Number(item.rating || 0), 0) / state.reviews.length;
   return `<section class="faq-section review-section"><div class="faq-title"><span>お客様の声</span> · REVIEWS</div><div style="display:flex;align-items:center;gap:9px;margin:0 0 14px;"><b style="font:700 25px/1 Georgia,serif;">${average.toFixed(1)}</b><span style="color:#a36d1e;letter-spacing:2px;">${reviewStars(Math.round(average))}</span><span class="hint" style="margin:0;">${state.reviews.length} review${state.reviews.length === 1 ? "" : "s"}</span></div>${state.reviews.map((item) => `<article class="summary-card" style="margin:10px 0;padding:16px;"><div style="display:flex;justify-content:space-between;gap:12px;"><b>${escapeHtml(item.customer_name)}</b><span style="color:#a36d1e;letter-spacing:1px;">${reviewStars(item.rating)}</span></div><p style="margin:10px 0 0;line-height:1.55;">${escapeHtml(item.review_text)}</p></article>`).join("")}</section>`;
 }
@@ -1161,6 +1193,7 @@ function renderCart() {
 function renderCheckout() {
   const f = state.form;
   const canSubmit = f.name.trim() && isValidPhone(f.phone) && f.slotId && f.collectionPoint;
+  const collectionPoints = Array.isArray(state.store.collection_points) && state.store.collection_points.length ? state.store.collection_points : ["Blk 130A", "Near Creamier"];
   const pickupDates = Array.from(new Map(state.slots.map((slot) => [slot.date, slot.label])).entries());
   const availableTimes = state.slots.filter((slot) => slot.date === f.pickupDate);
   return `
@@ -1169,7 +1202,7 @@ function renderCheckout() {
       <button class="back-link" onclick="setScreen('cart')">${ICONS.back} Back to cart</button>
       <div class="field"><label>Name</label><input id="f-name" value="${escapeHtml(f.name)}" placeholder="Your name" oninput="onFormInput('name', this.value)"></div>
       <div class="field"><label>Phone</label><input id="f-phone" value="${escapeHtml(f.phone)}" placeholder="e.g. 91234567" inputmode="tel" autocomplete="tel" oninput="this.value=cleanPhoneInput(this.value);onFormInput('phone', this.value)"></div>
-      <div class="field"><label>Instagram (optional)</label><input id="f-instagram" value="${escapeHtml(f.instagram)}" placeholder="@yourhandle" oninput="onFormInput('instagram', this.value)"></div>
+      ${state.store.show_checkout_instagram === false ? "" : `<div class="field"><label>Instagram (optional)</label><input id="f-instagram" value="${escapeHtml(f.instagram)}" placeholder="@yourhandle" oninput="onFormInput('instagram', this.value)"></div>`}
       <div class="field"><label>Collection date</label>
         <select class="checkout-select" onchange="onPickupDateChange(this.value)">
           <option value="">Select a date</option>
@@ -1185,11 +1218,10 @@ function renderCheckout() {
       <div class="field"><label>Collection point <span style="color:#B33;">*</span></label>
         <select class="checkout-select" required aria-required="true" onchange="onFormInput('collectionPoint', this.value)">
           <option value="">Select a collection point</option>
-          <option value="Blk 130A" ${f.collectionPoint === "Blk 130A" ? "selected" : ""}>Blk 130A</option>
-          <option value="Near Creamier" ${f.collectionPoint === "Near Creamier" ? "selected" : ""}>Near Creamier</option>
+          ${collectionPoints.map((point) => `<option value="${escapeHtml(point)}" ${f.collectionPoint === point ? "selected" : ""}>${escapeHtml(point)}</option>`).join("")}
         </select>
       </div>
-      <div class="field"><label>Notes (optional)</label><textarea id="f-notes" rows="2" placeholder="Less ice, allergies, etc." oninput="onFormInput('notes', this.value)">${escapeHtml(f.notes)}</textarea></div>
+      ${state.store.show_checkout_notes === false ? "" : `<div class="field"><label>Notes (optional)</label><textarea id="f-notes" rows="2" placeholder="Less ice, allergies, etc." oninput="onFormInput('notes', this.value)">${escapeHtml(f.notes)}</textarea></div>`}
       <div class="field">
         <label>Promo code (optional)</label>
         ${state.promo
@@ -1291,7 +1323,7 @@ function renderPayment() {
     <div class="screen">
       <div class="summary-card">
         ${qrHtml}
-        <div class="hint">Scan with your banking app, or PayNow to <b>${escapeHtml(paynowName)}</b>${paynowNumber ? `<br>${escapeHtml(paynowNumber)}` : ""}</div>
+        <div class="hint">${escapeHtml(state.store.payment_instructions || "Scan with your banking app, or PayNow to the account below.")}<br><b>${escapeHtml(paynowName)}</b>${paynowNumber ? `<br>${escapeHtml(paynowNumber)}` : ""}</div>
         <div class="payment-timer" id="paynow-countdown" aria-live="polite">Please complete payment within ${paymentCountdownText()}.</div>
         <button class="btn-secondary refresh-qr-btn" id="refresh-paynow-qr" ${paymentExpired ? "" : "hidden"} onclick="refreshPayNowQr()">Refresh QR · 15 minutes</button>
         <div class="divider"></div>
@@ -1419,6 +1451,7 @@ async function sendOrderMessage() {
 }
 
 function renderOrderChat() {
+  if (state.store.chat_enabled === false) return "";
   const chat = state.orderChat;
   return `<div class="summary-card" style="margin-top:16px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;"><div><div class="display" style="font-size:19px;">Message Shizuku Lab</div><div class="hint" style="text-align:left;margin-top:4px;">Replies will appear here when you track this order.</div></div><button class="pill" style="padding:7px 10px;" onclick="loadOrderMessages().then(render)">Refresh</button></div><div style="display:flex;flex-direction:column;gap:9px;margin:16px 0;max-height:310px;overflow:auto;">${chat.loading ? `<div class="hint">Loading messages…</div>` : chat.messages.length ? chat.messages.map((item) => `<div style="max-width:86%;align-self:${item.sender === "customer" ? "flex-end" : "flex-start"};padding:10px 12px;border-radius:${item.sender === "customer" ? "14px 14px 3px 14px" : "14px 14px 14px 3px"};background:${item.sender === "customer" ? "#4B5D3A" : "#f2ebe1"};color:${item.sender === "customer" ? "#fff" : "var(--ink)"};"><div style="font-size:10px;font-weight:800;opacity:.72;margin-bottom:4px;">${item.sender === "customer" ? "YOU" : "SHIZUKU LAB"}</div><div style="white-space:pre-wrap;line-height:1.45;">${escapeHtml(item.message_text)}</div></div>`).join("") : `<div class="hint" style="text-align:left;">No messages yet. Ask us anything about this order.</div>`}</div><div class="field"><label>Your message</label><textarea maxlength="1000" rows="3" placeholder="Write to Shizuku Lab…" oninput="state.orderChat.text=this.value">${escapeHtml(chat.text)}</textarea></div><button class="primary-btn" ${chat.sending ? "disabled" : ""} onclick="sendOrderMessage()">${chat.sending ? "Sending…" : "Send message"}</button>${chat.message ? `<div class="ref-note" style="color:#B33333;">${escapeHtml(chat.message)}</div>` : ""}</div>`;
 }
@@ -1442,6 +1475,7 @@ async function submitReview() {
 }
 
 function renderReviewForm() {
+  if (state.store.reviews_enabled === false) return "";
   const d = state.reviewDraft;
   if (d.submitted) return `<div class="summary-card" style="margin-top:16px;text-align:center;"><div style="font-size:30px;">♡</div><b>Thank you for your review</b><div class="hint" style="margin-top:7px;line-height:1.5;">${escapeHtml(d.message)}</div></div>`;
   return `<div class="summary-card" style="margin-top:16px;"><div class="display" style="font-size:19px;margin-bottom:6px;">How was your Shizuku?</div><div class="hint" style="text-align:left;line-height:1.5;">Your review will appear after approval.</div><div style="display:flex;gap:5px;margin:15px 0;">${[1,2,3,4,5].map((n) => `<button type="button" aria-label="${n} star${n === 1 ? "" : "s"}" onclick="state.reviewDraft.rating=${n};render();" style="border:0;background:none;padding:2px;font-size:29px;color:${n <= d.rating ? "#a36d1e" : "#d8d0c4"};cursor:pointer;">★</button>`).join("")}</div><div class="field"><label>Name shown publicly</label><input maxlength="80" value="${escapeHtml(d.name || state.tracking.order?.customer_name || "")}" oninput="state.reviewDraft.name=this.value"></div><div class="field"><label>Your review</label><textarea maxlength="600" rows="4" placeholder="Tell us what you enjoyed…" oninput="state.reviewDraft.text=this.value">${escapeHtml(d.text)}</textarea></div><button class="primary-btn" ${d.submitting ? "disabled" : ""} onclick="submitReview()">${d.submitting ? "Sending…" : "Submit review"}</button>${d.message ? `<div class="ref-note" style="color:#B33333;">${escapeHtml(d.message)}</div>` : ""}</div>`;
@@ -1454,7 +1488,7 @@ function renderTrackOrder() {
     ${header()}
     <div class="screen">
       <button class="back-link" onclick="window.location.href='index.html'">${ICONS.back} Back to welcome</button>
-      <div class="display" style="font-size:23px;margin:4px 0 6px;">Track my order</div>
+      <div class="display" style="font-size:23px;margin:4px 0 6px;">${escapeHtml(state.store.track_order_heading || "Track my order")}</div>
       <div class="hint" style="text-align:left;line-height:1.5;">Enter the order number and phone number you used at checkout.</div>
       <div class="summary-card" style="margin-top:16px;">
         <div class="field"><label>Order number</label><input value="${escapeHtml(t.orderNumber)}" placeholder="e.g. SL-ABC123" style="text-transform:uppercase;" oninput="state.tracking.orderNumber=this.value.toUpperCase()"></div>
@@ -1515,6 +1549,36 @@ function renderLoyalty() {
 }
 
 /* ---------- main render ---------- */
+function applyCmsWording() {
+  document.querySelectorAll(".display").forEach((element) => {
+    const text = element.textContent.trim();
+    if (text === "Message Shizuku Lab") element.textContent = state.store.chat_heading || `Message ${state.store.store_name || "us"}`;
+    if (text === "Shizuku Club") element.textContent = state.store.loyalty_heading || "Shizuku Club";
+  });
+  document.querySelectorAll(".faq-title").forEach((element) => {
+    if (element.textContent.includes("REVIEWS")) element.textContent = state.store.reviews_heading || "お客様の声 · REVIEWS";
+  });
+  const chatInput = document.querySelector('textarea[placeholder="Write to Shizuku Lab…"]');
+  const chatCard = chatInput?.closest(".summary-card");
+  if (chatCard && (state.store.chat_auto_reply || state.store.chat_business_hours)) {
+    const info = document.createElement("div");
+    info.className = "ref-note";
+    info.style.marginBottom = "12px";
+    info.textContent = [state.store.chat_auto_reply, state.store.chat_business_hours].filter(Boolean).join(" · ");
+    chatInput.closest(".field")?.before(info);
+  }
+  const loyaltyCard = document.querySelector('.screen > div[style*="linear-gradient(135deg,#1e473e"]');
+  const customerName = String(state.loyalty.account?.customer_name || "").trim();
+  if (loyaltyCard && customerName) {
+    const firstName = customerName.split(/\s+/)[0];
+    const greeting = document.createElement("div");
+    greeting.style.cssText = "font-size:13px;font-weight:600;margin:10px 0 2px;color:inherit;opacity:.9;";
+    greeting.textContent = `Welcome back, ${firstName}`;
+    const programmeTitle = Array.from(loyaltyCard.querySelectorAll(".display")).find((element) => element.textContent.trim() === (state.store.loyalty_heading || "Shizuku Club"));
+    if (programmeTitle) programmeTitle.after(greeting);
+    else loyaltyCard.prepend(greeting);
+  }
+}
 function render() {
   const app = document.getElementById("app");
   if (!app) return;
@@ -1530,7 +1594,8 @@ function render() {
   else if (state.screen === "track") html = renderTrackOrder();
   else if (state.screen === "loyalty") html = renderLoyalty();
   else html = renderMenu();
-  app.innerHTML = `${html}${poweredByFooter()}`;
+  app.innerHTML = `${storefrontThemeStyle()}${html}${poweredByFooter()}`;
+  applyCmsWording();
   if (state.screen === "payment") startPaymentCountdown();
 }
 
