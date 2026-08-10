@@ -49,6 +49,7 @@ const state = {
   menuView: "list",
   optionGroups: [],
   options: [],
+  productOptionGroups: [],
   selectedProduct: null,
   selectedOptions: {},
   bundle: { drink1: null, drink2: null, drink1Options: {}, drink2Options: {} },
@@ -379,15 +380,17 @@ async function loadProductGroups() {
   state.productGroups = data || [];
 }
 async function loadOptions() {
-  const [groupsResult, optionsResult] = await Promise.all([
+  const [groupsResult, optionsResult, mappingsResult] = await Promise.all([
     db.from("option_groups").select("*").order("id"),
     db.from("options").select("*").eq("is_available", true).order("option_group_id").order("id"),
+    db.from("product_option_groups").select("product_id, option_group_id"),
   ]);
   if (groupsResult.error) throw groupsResult.error;
   if (optionsResult.error) throw optionsResult.error;
   // Owners can hide a whole group (for example, Sweetness) from the dashboard.
   state.optionGroups = (groupsResult.data || []).filter((group) => group.is_visible !== false);
   state.options = optionsResult.data || [];
+  state.productOptionGroups = mappingsResult.error ? [] : (mappingsResult.data || []);
 }
 
 /* ---------- init ---------- */
@@ -463,6 +466,11 @@ function getOptionsForGroup(groupId) {
   // Supabase column is option_group_id, not option_group
   return state.options.filter((option) => String(option.option_group_id) === String(groupId));
 }
+function optionGroupsForProduct(product) {
+  if (!product) return [];
+  const enabledIds = new Set(state.productOptionGroups.filter((row) => String(row.product_id) === String(product.id)).map((row) => String(row.option_group_id)));
+  return state.optionGroups.filter((group) => enabledIds.has(String(group.id)));
+}
 function selectOption(groupId, optionId) {
   const option = state.options.find((item) => String(item.id) === String(optionId));
   if (!option) return;
@@ -470,7 +478,7 @@ function selectOption(groupId, optionId) {
   render();
 }
 function validateRequiredOptions() {
-  for (const group of state.optionGroups) {
+  for (const group of optionGroupsForProduct(state.selectedProduct)) {
     if (!group.required) continue;
     if (!state.selectedOptions[group.id]) { alert(`Please choose an option for "${group.name}".`); return false; }
   }
@@ -546,7 +554,7 @@ function selectBundleOption(drinkNumber, groupId, optionId) {
 }
 function validateBundleDrink(drink, selectedOptions) {
   if (!drink) return false;
-  for (const group of state.optionGroups) {
+  for (const group of optionGroupsForProduct(drink)) {
     if (!group.required) continue;
     if (!selectedOptions[group.id]) return false;
   }
@@ -1063,7 +1071,7 @@ function renderOptions() {
           <div class="stock-line">${stockMarkup(product)}</div>
         </div>
       </div>
-      ${state.optionGroups.length === 0 ? `<div class="hint">No customisation options available.</div>` : state.optionGroups.map((group) => {
+      ${optionGroupsForProduct(product).length === 0 ? `<div class="hint">No customisation options for this item.</div>` : optionGroupsForProduct(product).map((group) => {
         const options = getOptionsForGroup(group.id);
         const selected = state.selectedOptions[group.id];
         return `
@@ -1142,7 +1150,7 @@ function renderBundleDrinkOptions(drinkNumber, drink, selectedOptions) {
   return `
     <div class="bundle-customisation" style="margin-top:18px;">
       <div class="bundle-selected">${escapeHtml(drink.name)}</div>
-      ${state.optionGroups.map((group) => {
+      ${optionGroupsForProduct(drink).map((group) => {
         const options = getOptionsForGroup(group.id);
         const selected = selectedOptions[group.id];
         return `
@@ -1400,7 +1408,7 @@ function renderConfirmation() {
 function trackingStatus(order) {
   if (!order) return { title: "", note: "", step: 0 };
   if (order.payment_status === "rejected") return { title: "Payment proof needs attention", note: order.payment_rejection_reason || "Please upload a new payment screenshot.", step: 0 };
-  if (order.order_status === "cancelled") return { title: "Order cancelled", note: "Please contact us if you have any questions.", step: 0 };
+  if (order.order_status === "cancelled") return { title: "Order cancelled", note: order.payment_rejection_reason || "This order can no longer accept payment. Please place a new order.", step: 0 };
   if (order.order_status === "collected") return { title: "Collected", note: "Thank you for collecting your Shizuku order. ✨", step: 4 };
   if (order.order_status === "ready") return { title: "Ready for collection", note: "Your order is ready — see you at your pickup time!", step: 3 };
   if (order.order_status === "preparing") return { title: "Preparing your order", note: "We’re freshly preparing your drinks now.", step: 2 };
@@ -1416,6 +1424,7 @@ function retryRejectedPayment() {
   state.screen = "payment";
   render();
 }
+function continueTrackedPayment() { retryRejectedPayment(); }
 async function findOrder() {
   const t = state.tracking;
   const number = String(t.orderNumber || "").trim().toUpperCase();
@@ -1623,6 +1632,22 @@ function applyCmsWording() {
     box.className = "summary-card";
     box.style.marginTop = "16px";
     box.innerHTML = `<b>Payment screenshot was not accepted</b><div class="hint" style="text-align:left;margin:8px 0 14px;">${escapeHtml(state.tracking.order.payment_rejection_reason || "Please upload a clearer screenshot.")}</div><button class="primary-btn" onclick="retryRejectedPayment()">Upload a new screenshot</button>`;
+    screen?.append(box);
+  }
+  if (state.screen === "track" && state.tracking.order?.payment_status === "awaiting_payment" && state.tracking.order?.order_status !== "cancelled") {
+    const screen = document.querySelector(".screen");
+    const box = document.createElement("div");
+    box.className = "summary-card";
+    box.style.marginTop = "16px";
+    box.innerHTML = `<b>Payment is not completed yet</b><div class="hint" style="text-align:left;margin:8px 0 14px;">Continue to PayNow and upload your payment screenshot.</div><button class="primary-btn" onclick="continueTrackedPayment()">Continue payment</button>`;
+    screen?.append(box);
+  }
+  if (state.screen === "track" && state.tracking.order?.order_status === "cancelled") {
+    const screen = document.querySelector(".screen");
+    const box = document.createElement("div");
+    box.className = "summary-card";
+    box.style.marginTop = "16px";
+    box.innerHTML = `<b>This order cannot be paid</b><div class="hint" style="text-align:left;margin:8px 0 14px;">Its stock reservation has already been released.</div><button class="primary-btn" onclick="setScreen('menu')">Place a new order</button>`;
     screen?.append(box);
   }
 }
