@@ -1717,6 +1717,16 @@ function updateDesignPreview() {
   const card = document.getElementById("design-loyalty-preview");
   const headingFont = ({ fraunces:"Fraunces,serif", noto_serif_jp:"'Noto Serif JP',serif", work_sans:"'Work Sans',sans-serif", noto_sans_jp:"'Noto Sans JP',sans-serif", georgia:"Georgia,serif" })[s.theme_heading_font || "fraunces"];
   const bodyFont = ({ fraunces:"Fraunces,serif", noto_serif_jp:"'Noto Serif JP',serif", work_sans:"'Work Sans',sans-serif", noto_sans_jp:"'Noto Sans JP',sans-serif", georgia:"Georgia,serif" })[s.theme_body_font || "work_sans"];
+  if (shop && !document.getElementById("reset-original-colours")) {
+    const button = document.createElement("button");
+    button.id = "reset-original-colours";
+    button.type = "button";
+    button.className = "btn-secondary";
+    button.style.margin = "0 0 14px";
+    button.textContent = "↺ Reset to original colours";
+    button.onclick = resetOriginalDesignColours;
+    shop.parentElement?.before(button);
+  }
   if (shop) {
     shop.style.background = s.theme_background_color || "#F3EEE3";
     shop.style.color = s.theme_text_color || "#2A2A22";
@@ -1733,10 +1743,21 @@ function updateDesignPreview() {
     card.querySelectorAll("[data-preview-accent]").forEach((element) => element.style.background = s.loyalty_card_accent_color || "#CAE4B3");
   }
 }
+function resetOriginalDesignColours() {
+  const originals = {
+    theme_primary_color: "#4B5D3A", theme_background_color: "#F3EEE3",
+    theme_card_color: "#FFFFFF", theme_text_color: "#2A2A22",
+    loyalty_card_background: "#1E473E", loyalty_card_text_color: "#F9F4E8",
+    loyalty_card_accent_color: "#CAE4B3"
+  };
+  Object.assign(astate.settingsDraft, originals);
+  Object.entries(originals).forEach(([key,value]) => document.querySelectorAll(`[data-design-key="${key}"]`).forEach((input) => { input.value = value; }));
+  updateDesignPreview();
+}
 
 function renderDesignTab() {
   const s = astate.settingsDraft || {};
-  const color = (label,key,fallback) => `<div class="field"><label>${label}</label><div style="display:grid;grid-template-columns:64px 1fr;gap:9px;"><input type="color" value="${escapeHtml(s[key] || fallback)}" oninput="onSettingsField('${key}',this.value);this.nextElementSibling.value=this.value;updateDesignPreview()"><input value="${escapeHtml(s[key] || fallback)}" oninput="onSettingsField('${key}',this.value);if(/^#[0-9a-fA-F]{6}$/.test(this.value)){this.previousElementSibling.value=this.value;updateDesignPreview()}"></div></div>`;
+  const color = (label,key,fallback) => `<div class="field"><label>${label}</label><div style="display:grid;grid-template-columns:64px 1fr;gap:9px;"><input data-design-key="${key}" type="color" value="${escapeHtml(s[key] || fallback)}" oninput="onSettingsField('${key}',this.value);this.nextElementSibling.value=this.value;updateDesignPreview()"><input data-design-key="${key}" value="${escapeHtml(s[key] || fallback)}" oninput="onSettingsField('${key}',this.value);if(/^#[0-9a-fA-F]{6}$/.test(this.value)){this.previousElementSibling.value=this.value;updateDesignPreview()}"></div></div>`;
   const fonts = [["fraunces","Elegant serif · Fraunces"],["noto_serif_jp","Japanese serif · Noto Serif JP"],["work_sans","Clean sans · Work Sans"],["noto_sans_jp","Japanese sans · Noto Sans JP"],["georgia","Classic serif · Georgia"]];
   const select = (label,key,fallback) => `<div class="field"><label>${label}</label><select onchange="onSettingsField('${key}',this.value);updateDesignPreview()">${fonts.map(([v,n]) => `<option value="${v}" ${(s[key] || fallback) === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>`;
   return `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Customer shop design</h2><span>Used across the ordering pages</span></div><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;">${color("Primary colour","theme_primary_color","#4B5D3A")}${color("Background colour","theme_background_color","#F3EEE3")}${color("Card colour","theme_card_color","#FFFFFF")}${color("Text colour","theme_text_color","#2A2A22")}${select("Heading font","theme_heading_font","fraunces")}${select("Body font","theme_body_font","work_sans")}</div><div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:12px;">Loyalty card design</div><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;">${color("Card background","loyalty_card_background","#1E473E")}${color("Card text","loyalty_card_text_color","#F9F4E8")}${color("Card accent","loyalty_card_accent_color","#CAE4B3")}</div><div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:12px;">Live preview</div><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch;"><div id="design-shop-preview" style="background:${escapeHtml(s.theme_background_color || "#F3EEE3")};color:${escapeHtml(s.theme_text_color || "#2A2A22")};padding:20px;border-radius:20px;border:1px solid #e1d9c8;"><div data-preview-heading style="font-size:25px;font-weight:700;">${escapeHtml(s.store_name || "Your Store")}</div><div style="font-size:12px;opacity:.7;margin:3px 0 18px;">${escapeHtml(s.store_tagline || "crafted with care")}</div><div data-preview-card style="background:${escapeHtml(s.theme_card_color || "#FFFFFF")};border-radius:15px;padding:14px;box-shadow:0 8px 22px rgba(30,30,20,.08);"><div data-preview-heading style="font-size:18px;font-weight:700;">Ichigo Matcha Latte</div><div style="font-size:12px;opacity:.72;margin:5px 0 13px;">Freshly whisked matcha with creamy oat milk.</div><div style="display:flex;justify-content:space-between;align-items:center;"><b>$6.90</b><span data-preview-primary style="background:${escapeHtml(s.theme_primary_color || "#4B5D3A")};color:${escapeHtml(s.theme_background_color || "#F3EEE3")};padding:8px 15px;border-radius:99px;">Add</span></div></div></div><div id="design-loyalty-preview" style="background:${escapeHtml(s.loyalty_card_background || "#1E473E")};color:${escapeHtml(s.loyalty_card_text_color || "#F9F4E8")};padding:22px;border-radius:20px;box-shadow:0 12px 28px rgba(20,35,25,.16);"><div style="font-size:10px;letter-spacing:.15em;opacity:.75;">MEMBER</div><div data-preview-heading style="font-size:24px;font-weight:700;margin-top:8px;">${escapeHtml(s.loyalty_heading || "Shizuku Club")}</div><div style="font-size:13px;margin-top:8px;opacity:.9;">Welcome back, Shermin</div><div style="font-size:42px;font-weight:700;margin:22px 0 7px;">8 <span style="font-size:14px;">points</span></div><div style="height:9px;background:rgba(255,255,255,.2);border-radius:99px;overflow:hidden;"><div data-preview-accent style="width:64%;height:100%;background:${escapeHtml(s.loyalty_card_accent_color || "#CAE4B3")};border-radius:99px;"></div></div><div style="font-size:11px;margin-top:9px;opacity:.75;">8 / 50 points</div></div></div><div class="hint" style="text-align:left;margin-top:10px;">Changes appear here instantly. Press Save settings when you are happy with the design.</div>${cmsSaveButton()}</section>`;
@@ -1770,7 +1791,7 @@ function renderAvailabilityTab() {
     const isSelected = dateText === astate.selectedAvailabilityDate;
     const label = status.is_open ? (status.override ? "Special open" : "Open") : (status.override ? "Closed" : "—");
     const color = status.is_open ? "#4B5D3A" : status.override ? "#B33333" : "#8A8478";
-    cells.push(`<button class="slot" style="min-height:70px;padding:8px;text-align:left;display:block;border-color:${isSelected ? "#4B5D3A" : "#E1D9C8"};background:${isSelected ? "#F1F5EA" : "#fff"};" onclick="selectAvailabilityDate('${dateText}')"><b>${day}</b><br><span style="font-size:11px;color:${color};">${label}</span></button>`);
+    cells.push(`<button class="slot availability-day" style="min-height:70px;padding:8px;text-align:left;display:block;border-color:${isSelected ? "#4B5D3A" : "#E1D9C8"};background:${isSelected ? "#F1F5EA" : "#fff"};" onclick="selectAvailabilityDate('${dateText}')"><b>${day}</b><br><span style="font-size:11px;color:${color};">${label}</span></button>`);
   }
   const existing = astate.openingOverrides.find((item) => item.collection_date === selected.collection_date);
   return `
@@ -1783,8 +1804,9 @@ function renderAvailabilityTab() {
     <div class="display" style="font-size:20px;margin:16px 0 8px;">Opening calendar</div>
     <div class="hint" style="text-align:left;margin:0 0 10px;">Weekend hours stay as your normal schedule. Click a date to close it, open an extra day, or change that day's collection time.</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 10px;"><button class="link-btn" onclick="changeCalendarMonth(-1)">←</button><b>${month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</b><button class="link-btn" onclick="changeCalendarMonth(1)">→</button></div>
-    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;text-align:center;margin-bottom:6px;color:#777064;font-size:12px;"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
-    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;">${cells.join("")}</div>
+    <style>.availability-week,.availability-calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;width:100%;min-width:0}.availability-week{text-align:center;margin-bottom:6px;color:#777064;font-size:12px}.availability-day{width:100%;min-width:0;overflow:hidden}@media(max-width:640px){.availability-week,.availability-calendar{gap:3px}.availability-week{font-size:9px}.availability-day{min-height:54px!important;padding:5px 3px!important;font-size:11px}.availability-day span{display:block;font-size:8px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}</style>
+    <div class="availability-week"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+    <div class="availability-calendar">${cells.join("")}</div>
     <div class="order-card" style="margin-top:16px;">
       <div class="order-top"><b>${escapeHtml(selected.collection_date)}</b><span class="hint">${existing ? "Special calendar setting" : "Normal weekly schedule"}</span></div>
       <label class="slot" style="cursor:pointer;gap:10px;margin:12px 0;">

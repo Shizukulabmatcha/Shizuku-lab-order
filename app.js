@@ -599,7 +599,21 @@ function changeCartQty(key, delta) {
 
 /* ---------- screen ---------- */
 function setScreen(screen) { state.screen = screen; render(); }
-function setCategory(category) { state.activeCategory = category; render(); }
+function setCategory(category) {
+  const pageY = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+  const categoryScroll = document.querySelector(".cats")?.scrollLeft || 0;
+  state.activeCategory = category;
+  render();
+  const restoreMenuPosition = () => {
+    const cats = document.querySelector(".cats");
+    if (cats) cats.scrollLeft = categoryScroll;
+    document.documentElement.scrollTop = pageY;
+    document.body.scrollTop = pageY;
+    window.scrollTo({ top: pageY, behavior: "auto" });
+  };
+  requestAnimationFrame(() => requestAnimationFrame(restoreMenuPosition));
+  setTimeout(restoreMenuPosition, 80);
+}
 
 /* ---------- promo ---------- */
 async function applyPromoCode() {
