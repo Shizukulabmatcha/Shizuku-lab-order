@@ -1490,7 +1490,7 @@ function trackingStatus(order) {
   if (!order) return { title: "", note: "", step: 0 };
   if (order.payment_status === "rejected") return { title: "Payment proof needs attention", note: order.payment_rejection_reason || "Please upload a new payment screenshot.", step: 0 };
   if (order.order_status === "cancelled") return { title: "Order cancelled", note: order.payment_rejection_reason || "This order can no longer accept payment. Please place a new order.", step: 0 };
-  if (order.order_status === "collected") return { title: "Collected", note: "Thank you for collecting your Shizuku order. ✨", step: 4 };
+  if (order.order_status === "collected") return { title: "Collected with care ✨", note: "We hope you enjoyed every sip. Looking forward to making your next Shizuku drink.", step: 4 };
   if (order.order_status === "ready") return { title: "Ready for collection", note: "Your order is ready — see you at your pickup time!", step: 3 };
   if (order.order_status === "preparing") return { title: "Preparing your order", note: "We’re freshly preparing your drinks now.", step: 2 };
   if (order.payment_status === "submitted" || order.order_status === "awaiting_confirmation") return { title: "Payment under review", note: "We’ll confirm your order once your payment proof is verified.", step: 0 };
@@ -1510,7 +1510,7 @@ async function findOrder() {
   const t = state.tracking;
   const number = String(t.orderNumber || "").trim().toUpperCase();
   const phone = normalisePhone(t.phone);
-  if (!number || !phone) { t.message = "Enter both your order number and phone number."; t.order = null; render(); return; }
+  if (!number && !phone) { t.message = "Enter your order number or phone number."; t.order = null; render(); return; }
   t.loading = true; t.message = ""; t.order = null; render();
   const { data, error } = await db.rpc("track_shizuku_order", { p_order_number: number, p_phone: phone }).maybeSingle();
   t.loading = false;
@@ -1518,6 +1518,8 @@ async function findOrder() {
   else if (!data) t.message = "We couldn’t find an order with those details. Please check and try again.";
   else {
     t.order = data;
+    if (!t.phone && data.customer_phone) t.phone = data.customer_phone;
+    if (!t.orderNumber && data.order_number) t.orderNumber = data.order_number;
     t.lastCheckedAt = new Date();
     state.reviewDraft.name = state.reviewDraft.name || data.customer_name || "";
     await loadOrderMessages();
@@ -1618,9 +1620,10 @@ function renderTrackOrder() {
     <div class="screen">
       <button class="back-link" onclick="window.location.href='index.html'">${ICONS.back} Back to welcome</button>
       <div class="display" style="font-size:23px;margin:4px 0 6px;">${escapeHtml(state.store.track_order_heading || "Track my order")}</div>
-      <div class="hint" style="text-align:left;line-height:1.5;">Enter the order number and phone number you used at checkout.</div>
+      <div class="hint" style="text-align:left;line-height:1.5;">Enter either your order number or the phone number used at checkout.</div>
       <div class="summary-card" style="margin-top:16px;">
         <div class="field"><label>Order number</label><input value="${escapeHtml(t.orderNumber)}" placeholder="e.g. SL-ABC123" style="text-transform:uppercase;" oninput="state.tracking.orderNumber=this.value.toUpperCase()"></div>
+        <div style="display:flex;align-items:center;gap:12px;margin:2px 0 14px;color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.12em;"><span style="height:1px;background:var(--line);flex:1;"></span>OR<span style="height:1px;background:var(--line);flex:1;"></span></div>
         <div class="field" style="margin-bottom:0;"><label>Phone number</label><input value="${escapeHtml(t.phone)}" placeholder="The number used at checkout" inputmode="tel" oninput="this.value=cleanPhoneInput(this.value);state.tracking.phone=this.value"></div>
         <button class="primary-btn" style="margin-top:16px;" ${t.loading ? "disabled" : ""} onclick="findOrder()">${t.loading ? "Checking…" : "Track order"}</button>
         ${t.message ? `<div class="ref-note" style="color:#B33333;">${escapeHtml(t.message)}</div>` : ""}
