@@ -92,6 +92,35 @@ const state = {
     menu_heading: "Menu",
     reviews_heading: "お客様の声 · REVIEWS",
     track_order_heading: "Track my order",
+    track_intro_text: "Enter either your order number or the phone number used at checkout.",
+    track_order_number_label: "Order number",
+    track_phone_label: "Phone number",
+    track_or_text: "OR",
+    track_button_text: "Track order",
+    track_live_updates_text: "LIVE UPDATES",
+    track_refresh_text: "Refresh now",
+    track_order_label: "Order",
+    track_pickup_label: "Pickup",
+    track_stage_payment: "Payment review",
+    track_stage_confirmed: "Confirmed",
+    track_stage_preparing: "Preparing",
+    track_stage_ready: "Ready",
+    track_awaiting_title: "Awaiting payment",
+    track_awaiting_note: "Please complete payment and submit your payment screenshot.",
+    track_review_title: "Payment under review",
+    track_review_note: "We’ll confirm your order once your payment proof is verified.",
+    track_confirmed_title: "Order confirmed",
+    track_confirmed_note: "Payment verified — we’ll prepare your order closer to pickup.",
+    track_preparing_title: "Preparing your order",
+    track_preparing_note: "We’re freshly preparing your drinks now.",
+    track_ready_title: "Ready for collection",
+    track_ready_note: "Your order is ready — see you at your pickup time!",
+    track_collected_title: "Collected with care ✨",
+    track_collected_note: "We hope you enjoyed every sip. Looking forward to making your next Shizuku drink.",
+    track_cancelled_title: "Order cancelled",
+    track_cancelled_note: "This order can no longer accept payment. Please place a new order.",
+    track_rejected_title: "Payment proof needs attention",
+    track_rejected_note: "Please upload a new payment screenshot.",
     loyalty_heading: "Shizuku Club",
     loyalty_card_background: "#1E473E",
     loyalty_card_text_color: "#F9F4E8",
@@ -1488,15 +1517,16 @@ function renderConfirmation() {
 
 /* ---------- order tracking ---------- */
 function trackingStatus(order) {
+  const s = state.store;
   if (!order) return { title: "", note: "", step: 0 };
-  if (order.payment_status === "rejected") return { title: "Payment proof needs attention", note: order.payment_rejection_reason || "Please upload a new payment screenshot.", step: 0 };
-  if (order.order_status === "cancelled") return { title: "Order cancelled", note: order.payment_rejection_reason || "This order can no longer accept payment. Please place a new order.", step: 0 };
-  if (order.order_status === "collected") return { title: "Collected with care ✨", note: "We hope you enjoyed every sip. Looking forward to making your next Shizuku drink.", step: 4 };
-  if (order.order_status === "ready") return { title: "Ready for collection", note: "Your order is ready — see you at your pickup time!", step: 3 };
-  if (order.order_status === "preparing") return { title: "Preparing your order", note: "We’re freshly preparing your drinks now.", step: 2 };
-  if (order.payment_status === "submitted" || order.order_status === "awaiting_confirmation") return { title: "Payment under review", note: "We’ll confirm your order once your payment proof is verified.", step: 0 };
-  if (order.payment_status === "paid" || order.order_status === "confirmed") return { title: "Order confirmed", note: "Payment verified — we’ll prepare your order closer to pickup.", step: 1 };
-  return { title: "Awaiting payment", note: "Please complete payment and submit your payment screenshot.", step: 0 };
+  if (order.payment_status === "rejected") return { title: s.track_rejected_title || "Payment proof needs attention", note: order.payment_rejection_reason || s.track_rejected_note || "Please upload a new payment screenshot.", step: 0 };
+  if (order.order_status === "cancelled") return { title: s.track_cancelled_title || "Order cancelled", note: order.payment_rejection_reason || s.track_cancelled_note || "This order can no longer accept payment. Please place a new order.", step: 0 };
+  if (order.order_status === "collected") return { title: s.track_collected_title || "Collected with care ✨", note: s.track_collected_note || "We hope you enjoyed every sip. Looking forward to making your next Shizuku drink.", step: 4 };
+  if (order.order_status === "ready") return { title: s.track_ready_title || "Ready for collection", note: s.track_ready_note || "Your order is ready — see you at your pickup time!", step: 3 };
+  if (order.order_status === "preparing") return { title: s.track_preparing_title || "Preparing your order", note: s.track_preparing_note || "We’re freshly preparing your drinks now.", step: 2 };
+  if (order.payment_status === "submitted" || order.order_status === "awaiting_confirmation") return { title: s.track_review_title || "Payment under review", note: s.track_review_note || "We’ll confirm your order once your payment proof is verified.", step: 0 };
+  if (order.payment_status === "paid" || order.order_status === "confirmed") return { title: s.track_confirmed_title || "Order confirmed", note: s.track_confirmed_note || "Payment verified — we’ll prepare your order closer to pickup.", step: 1 };
+  return { title: s.track_awaiting_title || "Awaiting payment", note: s.track_awaiting_note || "Please complete payment and submit your payment screenshot.", step: 0 };
 }
 function retryRejectedPayment() {
   const order = state.tracking.order;
@@ -1615,21 +1645,21 @@ function renderReviewForm() {
 function renderTrackOrder() {
   const t = state.tracking;
   const status = trackingStatus(t.order);
-  const stages = ["Payment review", "Confirmed", "Preparing", "Ready"];
+  const stages = [state.store.track_stage_payment || "Payment review", state.store.track_stage_confirmed || "Confirmed", state.store.track_stage_preparing || "Preparing", state.store.track_stage_ready || "Ready"];
   return `
     ${header()}
     <div class="screen">
       <button class="back-link" onclick="window.location.href='index.html'">${ICONS.back} Back to welcome</button>
       <div class="display" style="font-size:23px;margin:4px 0 6px;">${escapeHtml(state.store.track_order_heading || "Track my order")}</div>
-      <div class="hint" style="text-align:left;line-height:1.5;">Enter either your order number or the phone number used at checkout.</div>
+      <div class="hint" style="text-align:left;line-height:1.5;">${escapeHtml(state.store.track_intro_text || "Enter either your order number or the phone number used at checkout.")}</div>
       <div class="summary-card" style="margin-top:16px;">
-        <div class="field"><label>Order number</label><input value="${escapeHtml(t.orderNumber)}" placeholder="e.g. SL-ABC123" style="text-transform:uppercase;" oninput="state.tracking.orderNumber=this.value.toUpperCase()"></div>
-        <div style="display:flex;align-items:center;gap:12px;margin:2px 0 14px;color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.12em;"><span style="height:1px;background:var(--line);flex:1;"></span>OR<span style="height:1px;background:var(--line);flex:1;"></span></div>
-        <div class="field" style="margin-bottom:0;"><label>Phone number</label><input value="${escapeHtml(t.phone)}" placeholder="The number used at checkout" inputmode="tel" oninput="this.value=cleanPhoneInput(this.value);state.tracking.phone=this.value"></div>
-        <button class="primary-btn" style="margin-top:16px;" ${t.loading ? "disabled" : ""} onclick="findOrder()">${t.loading ? "Checking…" : "Track order"}</button>
+        <div class="field"><label>${escapeHtml(state.store.track_order_number_label || "Order number")}</label><input value="${escapeHtml(t.orderNumber)}" placeholder="e.g. SL-ABC123" style="text-transform:uppercase;" oninput="state.tracking.orderNumber=this.value.toUpperCase()"></div>
+        <div style="display:flex;align-items:center;gap:12px;margin:2px 0 14px;color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.12em;"><span style="height:1px;background:var(--line);flex:1;"></span>${escapeHtml(state.store.track_or_text || "OR")}<span style="height:1px;background:var(--line);flex:1;"></span></div>
+        <div class="field" style="margin-bottom:0;"><label>${escapeHtml(state.store.track_phone_label || "Phone number")}</label><input value="${escapeHtml(t.phone)}" placeholder="The number used at checkout" inputmode="tel" oninput="this.value=cleanPhoneInput(this.value);state.tracking.phone=this.value"></div>
+        <button class="primary-btn" style="margin-top:16px;" ${t.loading ? "disabled" : ""} onclick="findOrder()">${t.loading ? "Checking…" : escapeHtml(state.store.track_button_text || "Track order")}</button>
         ${t.message ? `<div class="ref-note" style="color:#B33333;">${escapeHtml(t.message)}</div>` : ""}
       </div>
-      ${t.order ? `<div class="summary-card" style="margin-top:16px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;"><span style="font-size:11px;font-weight:800;letter-spacing:.08em;color:#4B5D3A;">● LIVE UPDATES</span><button class="pill" style="padding:6px 9px;font-size:11px;" onclick="refreshTrackedOrder()">Refresh now</button></div><div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(t.order.order_number)}</span></div><div class="row"><span class="label">Pickup</span><span>${escapeHtml(t.order.collection_date || "")} · ${escapeHtml(t.order.collection_time || "")}</span></div><div class="divider"></div><div class="center" style="padding:12px 0 8px;"><div style="display:inline-flex;width:54px;height:54px;align-items:center;justify-content:center;background:var(--matcha);color:var(--cream);border-radius:999px;font-size:24px;">✓</div><div class="display" style="font-size:20px;margin-top:12px;">${escapeHtml(status.title)}</div><div class="hint" style="margin:8px 0 14px;line-height:1.5;">${escapeHtml(status.note)}</div></div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:4px 0 2px;">${stages.map((stage, index) => `<div style="text-align:center;"><div style="height:6px;border-radius:99px;background:${index <= status.step ? "var(--matcha)" : "var(--line)"};"></div><div style="font-size:9px;color:var(--muted);line-height:1.25;margin-top:6px;">${stage}</div></div>`).join("")}</div></div>${renderOrderChat()}${t.order.order_status === "collected" && t.order.payment_status === "paid" ? renderReviewForm() : ""}` : ""}
+      ${t.order ? `<div class="summary-card" style="margin-top:16px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;"><span style="font-size:11px;font-weight:800;letter-spacing:.08em;color:#4B5D3A;">● ${escapeHtml(state.store.track_live_updates_text || "LIVE UPDATES")}</span><button class="pill" style="padding:6px 9px;font-size:11px;" onclick="refreshTrackedOrder()">${escapeHtml(state.store.track_refresh_text || "Refresh now")}</button></div><div class="row"><span class="label">${escapeHtml(state.store.track_order_label || "Order")}</span><span class="mono">${escapeHtml(t.order.order_number)}</span></div><div class="row"><span class="label">${escapeHtml(state.store.track_pickup_label || "Pickup")}</span><span>${escapeHtml(t.order.collection_date || "")} · ${escapeHtml(t.order.collection_time || "")}</span></div><div class="divider"></div><div class="center" style="padding:12px 0 8px;"><div style="display:inline-flex;width:54px;height:54px;align-items:center;justify-content:center;background:var(--matcha);color:var(--cream);border-radius:999px;font-size:24px;">✓</div><div class="display" style="font-size:20px;margin-top:12px;">${escapeHtml(status.title)}</div><div class="hint" style="margin:8px 0 14px;line-height:1.5;">${escapeHtml(status.note)}</div></div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:4px 0 2px;">${stages.map((stage, index) => `<div style="text-align:center;"><div style="height:6px;border-radius:99px;background:${index <= status.step ? "var(--matcha)" : "var(--line)"};"></div><div style="font-size:9px;color:var(--muted);line-height:1.25;margin-top:6px;">${escapeHtml(stage)}</div></div>`).join("")}</div></div>${renderOrderChat()}${t.order.order_status === "collected" && t.order.payment_status === "paid" ? renderReviewForm() : ""}` : ""}
     </div>`;
 }
 
