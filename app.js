@@ -75,6 +75,13 @@ const state = {
     theme_text_color: "#2A2A22",
     theme_heading_font: "fraunces",
     theme_body_font: "work_sans",
+    theme_heading_size: 25,
+    theme_body_size: 14,
+    theme_product_name_size: 15,
+    theme_price_size: 14,
+    theme_button_size: 14,
+    default_menu_view: "list",
+    show_menu_view_switch: true,
     menu_heading: "Menu",
     reviews_heading: "お客様の声 · REVIEWS",
     track_order_heading: "Track my order",
@@ -124,7 +131,7 @@ function themeFont(value, fallback) {
 }
 function storefrontThemeStyle() {
   const s = state.store;
-  return `<style>:root{--matcha:${escapeHtml(s.theme_primary_color || "#4B5D3A")};--cream:${escapeHtml(s.theme_background_color || "#F3EEE3")};--card:${escapeHtml(s.theme_card_color || "#FFFFFF")};--ink:${escapeHtml(s.theme_text_color || "#2A2A22")};--loyalty-card-bg:${escapeHtml(s.loyalty_card_background || "#1E473E")};--loyalty-card-text:${escapeHtml(s.loyalty_card_text_color || "#F9F4E8")};--loyalty-card-accent:${escapeHtml(s.loyalty_card_accent_color || "#CAE4B3")};}body{font-family:${themeFont(s.theme_body_font,"'Work Sans',sans-serif")}}.display{font-family:${themeFont(s.theme_heading_font,"'Fraunces',serif")}}.screen>div[style*="linear-gradient(135deg,#1e473e"]{background:var(--loyalty-card-bg)!important;color:var(--loyalty-card-text)!important}.screen>div[style*="linear-gradient(135deg,#1e473e"] [style*="background:#cae4b3"]{background:var(--loyalty-card-accent)!important}</style>`;
+  return `<style>:root{--matcha:${escapeHtml(s.theme_primary_color || "#4B5D3A")};--cream:${escapeHtml(s.theme_background_color || "#F3EEE3")};--card:${escapeHtml(s.theme_card_color || "#FFFFFF")};--ink:${escapeHtml(s.theme_text_color || "#2A2A22")};--loyalty-card-bg:${escapeHtml(s.loyalty_card_background || "#1E473E")};--loyalty-card-text:${escapeHtml(s.loyalty_card_text_color || "#F9F4E8")};--loyalty-card-accent:${escapeHtml(s.loyalty_card_accent_color || "#CAE4B3")};--cms-body-size:${Math.max(12,Math.min(22,Number(s.theme_body_size||14)))}px;--cms-product-size:${Math.max(12,Math.min(26,Number(s.theme_product_name_size||15)))}px;--cms-price-size:${Math.max(12,Math.min(24,Number(s.theme_price_size||14)))}px;--cms-button-size:${Math.max(12,Math.min(22,Number(s.theme_button_size||14)))}px;}body{font-family:${themeFont(s.theme_body_font,"'Work Sans',sans-serif")};font-size:var(--cms-body-size)}.display{font-family:${themeFont(s.theme_heading_font,"'Fraunces',serif")}}.item-name{font-size:var(--cms-product-size)!important}.item-price,.discount-price{font-size:var(--cms-price-size)!important}.primary-btn,.pill{font-size:var(--cms-button-size)!important}.screen>div[style*="linear-gradient(135deg,#1e473e"]{background:var(--loyalty-card-bg)!important;color:var(--loyalty-card-text)!important}.screen>div[style*="linear-gradient(135deg,#1e473e"] [style*="background:#cae4b3"]{background:var(--loyalty-card-accent)!important}</style>`;
 }
 function originalPrice(item) { return Number(item?.price || 0); }
 function salePrice(item) {
@@ -202,7 +209,10 @@ async function loadStoreSettings() {
   if (!IS_CONFIGURED) return;
   const { data, error } = await db.from("store_settings").select("*").limit(1).maybeSingle();
   if (error) { console.warn("Could not load store settings:", error.message); return; }
-  if (data) state.store = { ...state.store, ...data };
+  if (data) {
+    state.store = { ...state.store, ...data };
+    state.menuView = data.default_menu_view === "gallery" ? "gallery" : "list";
+  }
 }
 
 // Invisible to customers: Supabase gives each browser a private visitor identity.
@@ -1066,10 +1076,10 @@ function renderMenu() {
     <div class="cats">
       ${categories.map((category) => `<button class="pill ${category === state.activeCategory ? "active" : ""}" onclick="setCategory('${escapeHtml(category)}')">${escapeHtml(category)}</button>`).join("")}
     </div>
-    <div style="display:flex;justify-content:flex-end;gap:7px;padding:2px 20px 3px;">
+    ${state.store.show_menu_view_switch === false ? "" : `<div style="display:flex;justify-content:flex-end;gap:7px;padding:2px 20px 3px;">
       <button class="pill ${state.menuView === "list" ? "active" : ""}" style="padding:6px 11px;font-size:11px;" onclick="state.menuView='list';render();">☷ List</button>
       <button class="pill ${state.menuView === "gallery" ? "active" : ""}" style="padding:6px 11px;font-size:11px;" onclick="state.menuView='gallery';render();">▦ Gallery</button>
-    </div>
+    </div>`}
     <div class="menu-list" style="padding-top:10px;"><div class="menu-kana">${escapeHtml(state.store.menu_heading || "メニュー · DRINK MENU")}</div>
       ${items.length === 0 ? `<div class="empty">No items available yet.</div>` : groups.map((group) => { const groupItems = items.filter((item) => productGroupName(item) === group); if (!groupItems.length) return ""; return `<section class="product-group"><h2 class="product-group-title">${escapeHtml(group)}</h2><div class="product-group-items" style="${state.menuView === "gallery" ? "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;" : ""}">${groupItems.map(renderMenuCard).join("")}</div></section>`; }).join("")}
     </div>
@@ -1717,6 +1727,7 @@ function applyCmsWording() {
 function render() {
   const app = document.getElementById("app");
   if (!app) return;
+  app.style.setProperty("--cms-heading-size", `${Math.max(18, Math.min(48, Number(state.store.theme_heading_size || 25)))}px`);
   if (state.loading) { app.innerHTML = `<div class="loading">Loading Shizuku Lab…</div>`; return; }
   let html = "";
   if (state.screen === "menu") html = renderMenu();

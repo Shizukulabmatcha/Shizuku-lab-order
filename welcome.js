@@ -6,10 +6,30 @@
     noto_sans_jp: "'Noto Sans JP','Work Sans',Arial,sans-serif",
     georgia: "Georgia,'Noto Serif JP','Times New Roman',serif",
   };
-  if (typeof IS_CONFIGURED === "undefined" || !IS_CONFIGURED || typeof db === "undefined") return;
+  const isInAppBrowser = /Instagram|FBAN|FBAV|FB_IAB|FBIOS|FB4A/i.test(navigator.userAgent || "");
+  const browserNotice = document.getElementById("inapp-browser-notice");
+  const showBrowserNotice = (settings = {}) => {
+    if (!browserNotice || !isInAppBrowser || settings.show_instagram_browser_notice === false) return;
+    let dismissed = false;
+    try { dismissed = sessionStorage.getItem("shizuku-inapp-notice-dismissed") === "1"; } catch (_) {}
+    if (dismissed) return;
+    const noticeLogo = document.getElementById("inapp-browser-logo");
+    if (settings.logo_url && noticeLogo) noticeLogo.src = settings.logo_url;
+    document.getElementById("inapp-browser-copy")?.addEventListener("click", async (event) => {
+      try { await navigator.clipboard.writeText(window.location.href); event.currentTarget.textContent = "Link copied ✓"; }
+      catch (_) { window.prompt("Copy this store link", window.location.href); }
+    });
+    document.getElementById("inapp-browser-continue")?.addEventListener("click", () => {
+      browserNotice.hidden = true;
+      try { sessionStorage.setItem("shizuku-inapp-notice-dismissed", "1"); } catch (_) {}
+    });
+    browserNotice.hidden = false;
+  };
+  if (typeof IS_CONFIGURED === "undefined" || !IS_CONFIGURED || typeof db === "undefined") { showBrowserNotice(); return; }
   try {
     const { data, error } = await db.from("store_settings").select("*").limit(1).maybeSingle();
     if (error || !data) return;
+    showBrowserNotice(data);
     const app = document.getElementById("welcome-app");
     const logoFrame = app.querySelector(".welcome-logo-frame");
     const logo = app.querySelector(".welcome-logo");
@@ -22,6 +42,8 @@
     const poweredBy = app.querySelector("#welcome-powered-by");
     app.style.fontFamily = fontStacks[data.welcome_body_font] || fontStacks.work_sans;
     title.style.fontFamily = fontStacks[data.welcome_title_font] || fontStacks.fraunces;
+    title.style.fontSize = `${Math.max(28, Math.min(64, Number(data.welcome_title_size || 39)))}px`;
+    copy.style.fontSize = `${Math.max(12, Math.min(22, Number(data.theme_body_size || 14)))}px`;
     if (data.logo_url) logo.src = data.logo_url;
     const circleSize = Math.max(56, Math.min(220, Number(data.welcome_logo_circle_size || data.logo_circle_size || 100)));
     const imageScale = Math.max(0.55, Math.min(2.4, Number(data.welcome_logo_image_scale || data.logo_image_scale || 1)));

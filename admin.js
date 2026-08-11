@@ -5,6 +5,7 @@ const astate = {
   welcomePending: false,
   welcomeTimer: null,
   navCollapsed: (() => { try { return localStorage.getItem("shizuku-admin-nav-collapsed") === "1"; } catch (_) { return false; } })(),
+  navScrollTop: 0,
   loginEmail: "tinghuioh29@gmail.com",
   loginPassword: "",
   recoveryMode: false,
@@ -992,7 +993,13 @@ function subscribeToOrderChanges() {
     .subscribe();
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
 }
-function setTab(tab) { astate.tab = tab; render(); }
+function setTab(tab) {
+  const nav = document.querySelector(".admin-nav");
+  if (nav) astate.navScrollTop = nav.scrollTop;
+  astate.tab = tab;
+  render();
+  requestAnimationFrame(() => { const nextNav = document.querySelector(".admin-nav"); if (nextNav) nextNav.scrollTop = astate.navScrollTop; });
+}
 
 function messageThreads() {
   const map = new Map();
@@ -1639,6 +1646,9 @@ function renderSettingsTab() {
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_powered_by !== false ? "checked" : ""} onchange="onSettingsField('show_powered_by', this.checked)"><span><b>Show Powered by Slow Studio</b><br><span class="hint">When a link is entered, customers can click the footer and it opens in a new tab.</span></span></label>
     </section>
     <section ${active === "welcome" ? "" : "hidden"}>
+    <div class="display" style="font-size:20px;margin:4px 0 8px;">Instagram browser guidance</div>
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_instagram_browser_notice !== false ? "checked" : ""} onchange="onSettingsField('show_instagram_browser_notice',this.checked)"><span><b>Show “Open in browser” guidance</b><br><span class="hint">Only appears when a customer opens your Welcome page inside Instagram or Facebook. They can still continue if they prefer.</span></span></label>
+    <div class="divider"></div>
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Welcome announcement</div>
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_announcement ? "checked" : ""} onchange="onSettingsField('show_announcement', this.checked)"><span><b>Show announcement before Welcome page</b><br><span class="hint">The same announcement appears at most once per customer per day.</span></span></label>
@@ -1761,7 +1771,9 @@ function updateDesignPreview() {
     shop.style.background = s.theme_background_color || "#F3EEE3";
     shop.style.color = s.theme_text_color || "#2A2A22";
     shop.style.fontFamily = bodyFont;
-    shop.querySelectorAll("[data-preview-heading]").forEach((element) => element.style.fontFamily = headingFont);
+    shop.querySelectorAll("[data-preview-heading]").forEach((element) => { element.style.fontFamily = headingFont; element.style.fontSize = `${Number(s.theme_heading_size || 25)}px`; });
+    shop.querySelectorAll("[data-preview-card] [data-preview-heading]").forEach((element) => element.style.fontSize = `${Number(s.theme_product_name_size || 15)}px`);
+    shop.querySelectorAll("[data-preview-primary]").forEach((element) => element.style.fontSize = `${Number(s.theme_button_size || 14)}px`);
     shop.querySelectorAll("[data-preview-card]").forEach((element) => element.style.background = s.theme_card_color || "#FFFFFF");
     shop.querySelectorAll("[data-preview-primary]").forEach((element) => { element.style.background = s.theme_primary_color || "#4B5D3A"; element.style.color = s.theme_background_color || "#F3EEE3"; });
   }
@@ -1785,11 +1797,22 @@ function resetOriginalDesignColours() {
   updateDesignPreview();
 }
 
+function applyDesignPreset(name) {
+  const presets = {
+    elegant: { theme_heading_font:"fraunces", theme_body_font:"work_sans", theme_heading_size:25, theme_body_size:14, theme_product_name_size:15, theme_price_size:14, theme_button_size:14, welcome_title_font:"fraunces", welcome_body_font:"work_sans", welcome_title_size:39 },
+    japanese: { theme_heading_font:"noto_serif_jp", theme_body_font:"noto_sans_jp", theme_heading_size:24, theme_body_size:14, theme_product_name_size:15, theme_price_size:14, theme_button_size:14, welcome_title_font:"noto_serif_jp", welcome_body_font:"noto_sans_jp", welcome_title_size:37 },
+    clean: { theme_heading_font:"work_sans", theme_body_font:"work_sans", theme_heading_size:26, theme_body_size:15, theme_product_name_size:16, theme_price_size:15, theme_button_size:15, welcome_title_font:"work_sans", welcome_body_font:"work_sans", welcome_title_size:40 }
+  };
+  Object.assign(astate.settingsDraft, presets[name] || presets.elegant);
+  render();
+}
+
 function renderDesignTab() {
   const s = astate.settingsDraft || {};
-  const color = (label,key,fallback) => `<div class="field"><label>${label}</label><div style="display:grid;grid-template-columns:64px 1fr;gap:9px;"><input data-design-key="${key}" type="color" value="${escapeHtml(s[key] || fallback)}" oninput="onSettingsField('${key}',this.value);this.nextElementSibling.value=this.value;updateDesignPreview()"><input data-design-key="${key}" value="${escapeHtml(s[key] || fallback)}" oninput="onSettingsField('${key}',this.value);if(/^#[0-9a-fA-F]{6}$/.test(this.value)){this.previousElementSibling.value=this.value;updateDesignPreview()}"></div></div>`;
+  const color = (label,key,fallback) => `${key === "theme_primary_color" ? `<div style="grid-column:1/-1;"><div class="display" style="font-size:20px;margin-bottom:10px;">Menu display</div><div class="field"><label>Default customer menu view</label><select onchange="onSettingsField('default_menu_view',this.value)"><option value="list" ${(s.default_menu_view || "list") === "list" ? "selected" : ""}>List</option><option value="gallery" ${s.default_menu_view === "gallery" ? "selected" : ""}>Gallery</option></select></div><label class="slot" style="cursor:pointer;gap:10px;margin-bottom:14px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_menu_view_switch !== false ? "checked" : ""} onchange="onSettingsField('show_menu_view_switch',this.checked)"><span><b>Let customers switch between List and Gallery</b><br><span class="hint">Untick this to keep everyone on your selected default view.</span></span></label><div class="divider"></div></div>` : ""}<div class="field"><label>${label}</label><div style="display:grid;grid-template-columns:64px 1fr;gap:9px;"><input data-design-key="${key}" type="color" value="${escapeHtml(s[key] || fallback)}" oninput="onSettingsField('${key}',this.value);this.nextElementSibling.value=this.value;updateDesignPreview()"><input data-design-key="${key}" value="${escapeHtml(s[key] || fallback)}" oninput="onSettingsField('${key}',this.value);if(/^#[0-9a-fA-F]{6}$/.test(this.value)){this.previousElementSibling.value=this.value;updateDesignPreview()}"></div></div>`;
   const fonts = [["fraunces","Elegant serif · Fraunces"],["noto_serif_jp","Japanese serif · Noto Serif JP"],["work_sans","Clean sans · Work Sans"],["noto_sans_jp","Japanese sans · Noto Sans JP"],["georgia","Classic serif · Georgia"]];
-  const select = (label,key,fallback) => `<div class="field"><label>${label}</label><select onchange="onSettingsField('${key}',this.value);updateDesignPreview()">${fonts.map(([v,n]) => `<option value="${v}" ${(s[key] || fallback) === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>`;
+  const select = (label,key,fallback) => `${key === "theme_heading_font" ? `<div style="grid-column:1/-1;"><div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:10px;">Recommended font styles</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;"><button class="btn-secondary" onclick="applyDesignPreset('elegant')">Shizuku Elegant</button><button class="btn-secondary" onclick="applyDesignPreset('japanese')">Japanese Calm</button><button class="btn-secondary" onclick="applyDesignPreset('clean')">Clean Studio</button></div></div>` : ""}<div class="field"><label>${label}</label><select onchange="onSettingsField('${key}',this.value);updateDesignPreview()">${fonts.map(([v,n]) => `<option value="${v}" ${(s[key] || fallback) === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>${key === "theme_body_font" ? `<div style="grid-column:1/-1;"><div class="display" style="font-size:20px;margin:8px 0 10px;">Font sizes</div><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;">${size("Main heading","theme_heading_size",25,18,48)}${size("Body text","theme_body_size",14,12,22)}${size("Product name","theme_product_name_size",15,12,26)}${size("Price","theme_price_size",14,12,24)}${size("Buttons","theme_button_size",14,12,22)}${size("Welcome title","welcome_title_size",39,28,64)}</div></div>` : ""}`;
+  const size = (label,key,fallback,min,max) => `<div class="field"><label>${label} <span style="float:right;color:#4B5D3A;">${Number(s[key] || fallback)} px</span></label><input type="range" min="${min}" max="${max}" step="1" value="${Number(s[key] || fallback)}" oninput="onSettingsField('${key}',Number(this.value));render()"></div>`;
   return `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Customer shop design</h2><span>Used across the ordering pages</span></div><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;">${color("Primary colour","theme_primary_color","#4B5D3A")}${color("Background colour","theme_background_color","#F3EEE3")}${color("Card colour","theme_card_color","#FFFFFF")}${color("Text colour","theme_text_color","#2A2A22")}${select("Heading font","theme_heading_font","fraunces")}${select("Body font","theme_body_font","work_sans")}</div><div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:12px;">Loyalty card design</div><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;">${color("Card background","loyalty_card_background","#1E473E")}${color("Card text","loyalty_card_text_color","#F9F4E8")}${color("Card accent","loyalty_card_accent_color","#CAE4B3")}</div><div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:12px;">Live preview</div><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch;"><div id="design-shop-preview" style="background:${escapeHtml(s.theme_background_color || "#F3EEE3")};color:${escapeHtml(s.theme_text_color || "#2A2A22")};padding:20px;border-radius:20px;border:1px solid #e1d9c8;"><div data-preview-heading style="font-size:25px;font-weight:700;">${escapeHtml(s.store_name || "Your Store")}</div><div style="font-size:12px;opacity:.7;margin:3px 0 18px;">${escapeHtml(s.store_tagline || "crafted with care")}</div><div data-preview-card style="background:${escapeHtml(s.theme_card_color || "#FFFFFF")};border-radius:15px;padding:14px;box-shadow:0 8px 22px rgba(30,30,20,.08);"><div data-preview-heading style="font-size:18px;font-weight:700;">Ichigo Matcha Latte</div><div style="font-size:12px;opacity:.72;margin:5px 0 13px;">Freshly whisked matcha with creamy oat milk.</div><div style="display:flex;justify-content:space-between;align-items:center;"><b>$6.90</b><span data-preview-primary style="background:${escapeHtml(s.theme_primary_color || "#4B5D3A")};color:${escapeHtml(s.theme_background_color || "#F3EEE3")};padding:8px 15px;border-radius:99px;">Add</span></div></div></div><div id="design-loyalty-preview" style="background:${escapeHtml(s.loyalty_card_background || "#1E473E")};color:${escapeHtml(s.loyalty_card_text_color || "#F9F4E8")};padding:22px;border-radius:20px;box-shadow:0 12px 28px rgba(20,35,25,.16);"><div style="font-size:10px;letter-spacing:.15em;opacity:.75;">MEMBER</div><div data-preview-heading style="font-size:24px;font-weight:700;margin-top:8px;">${escapeHtml(s.loyalty_heading || "Shizuku Club")}</div><div style="font-size:13px;margin-top:8px;opacity:.9;">Welcome back, Shermin</div><div style="font-size:42px;font-weight:700;margin:22px 0 7px;">8 <span style="font-size:14px;">points</span></div><div style="height:9px;background:rgba(255,255,255,.2);border-radius:99px;overflow:hidden;"><div data-preview-accent style="width:64%;height:100%;background:${escapeHtml(s.loyalty_card_accent_color || "#CAE4B3")};border-radius:99px;"></div></div><div style="font-size:11px;margin-top:9px;opacity:.75;">8 / 50 points</div></div></div><div class="hint" style="text-align:left;margin-top:10px;">Changes appear here instantly. Press Save settings when you are happy with the design.</div>${cmsSaveButton()}</section>`;
 }
 

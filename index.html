@@ -10,6 +10,17 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="welcome-page">
+  <div class="inapp-browser-notice" id="inapp-browser-notice" hidden role="dialog" aria-modal="true" aria-labelledby="inapp-browser-title">
+    <section class="inapp-browser-card">
+      <div class="inapp-browser-logo"><img src="logo.png" alt="Store logo" id="inapp-browser-logo"></div>
+      <div class="inapp-browser-kicker">Instagram browser</div>
+      <h2 id="inapp-browser-title">Open this store in your browser</h2>
+      <p>For smoother payment and screenshot upload, open this ordering page in Safari or Chrome.</p>
+      <div class="inapp-browser-steps"><b>How to open it</b><span>1. Tap the three dots ··· at the top-right.</span><span>2. Choose “Open in external browser”.</span></div>
+      <button class="inapp-browser-copy" id="inapp-browser-copy" type="button">Copy store link</button>
+      <button class="inapp-browser-continue" id="inapp-browser-continue" type="button">Continue in Instagram anyway</button>
+    </section>
+  </div>
   <div class="welcome-announcement" id="welcome-announcement" hidden role="dialog" aria-modal="true" aria-labelledby="welcome-announcement-title">
     <section class="welcome-announcement-card">
       <button class="welcome-announcement-close" id="welcome-announcement-close" type="button" aria-label="Close">×</button>
