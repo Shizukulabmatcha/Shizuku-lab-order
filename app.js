@@ -282,7 +282,9 @@ async function loadOpeningOverrides() {
   if (!IS_CONFIGURED) return;
   const today = formatDateForDatabase(new Date());
   const until = new Date();
-  until.setDate(until.getDate() + Math.max(7, Number(state.store.order_advance_days || 14)) + 7);
+  // Load far enough ahead for the shop card to always show the true next open date,
+  // even when several upcoming collection dates have been closed in Admin.
+  until.setDate(until.getDate() + 180);
   const { data, error } = await db.from("store_opening_overrides")
     .select("*")
     .gte("collection_date", today)
@@ -386,6 +388,28 @@ function computeSlots() {
     });
   }
   return slots;
+}
+
+function nextCollectionSchedule(limit = 2) {
+  const weekly = new Map(getWeekendConfig().map((item) => [item.day, item]));
+  const dates = [];
+  for (let offset = 0; offset <= 180 && dates.length < limit; offset++) {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + offset);
+    const dateText = formatDateForDatabase(date);
+    const override = state.openingOverrides.find((item) => item.collection_date === dateText);
+    const weeklyConfig = weekly.get(date.getDay());
+    if (override && !override.is_open) continue;
+    const collectionTime = normaliseTime((override && override.collection_time) || (weeklyConfig && weeklyConfig.time));
+    if (!collectionTime) continue;
+    dates.push([dateText, collectionTime]);
+  }
+  return dates.map(([dateText, collectionTime]) => {
+    const date = new Date(`${dateText}T12:00:00`);
+    const label = date.toLocaleDateString("en-SG", { weekday: "long", day: "numeric", month: "short" });
+    return { date: dateText, label, time: collectionTime.replace(/\s*\|\s*/g, " · ") };
+  });
 }
 
 /* ---------- load products / options ---------- */
@@ -1022,6 +1046,7 @@ function storeInfoPanel() {
   const bannerHeight = Math.max(130, Math.min(320, Number(state.store.hero_banner_height || 190)));
   const tickerText = escapeHtml(state.store.ticker_text || "PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB");
   const storeDescription = escapeHtml(state.store.store_description || "Little cups, big comfort. Freshly whisked matcha made with care — one cup at a time.");
+  const nextCollections = nextCollectionSchedule(2);
   return `
     ${state.store.show_ticker === false ? "" : `<div class="promo-ticker"><div class="promo-ticker-track"><span>${tickerText}</span><span>${tickerText}</span><span>${tickerText}</span></div></div>`}
     <div class="store-panel">
@@ -1032,8 +1057,7 @@ function storeInfoPanel() {
         <p class="store-desc">${storeDescription}</p>
         <div class="hours-card-dark">
           <div class="hours-row"><span class="hours-label">NEXT COLLECTION</span><span class="hours-status-dark open">PRE-ORDER</span></div>
-          <div class="hours-day">Saturday</div><div class="hours-time">${escapeHtml(state.store.saturday_collection_time || "10:00 AM - 12:00 PM")}</div>
-          <div class="hours-day" style="margin-top:8px;">Sunday</div><div class="hours-time">${escapeHtml(state.store.sunday_collection_time || "10:00 AM - 1:00 PM")}</div>
+          ${nextCollections.map((item, index) => `<div class="hours-day"${index ? ` style="margin-top:8px;"` : ""}>${escapeHtml(item.label)}</div><div class="hours-time">${escapeHtml(item.time)}</div>`).join("")}
         </div>
       </div>
     </div>
