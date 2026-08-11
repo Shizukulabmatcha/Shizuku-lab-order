@@ -82,6 +82,10 @@ const state = {
     theme_button_size: 14,
     default_menu_view: "list",
     show_menu_view_switch: true,
+    product_detail_image_height: 180,
+    product_detail_image_fit: "cover",
+    product_option_text_size: 15,
+    product_option_compact: true,
     menu_heading: "Menu",
     reviews_heading: "お客様の声 · REVIEWS",
     track_order_heading: "Track my order",
@@ -765,7 +769,7 @@ async function submitOrder() {
     collection_date: slot.date,
     collection_time: slot.time,
     collection_point: f.collectionPoint,
-    instagram: f.instagram ? f.instagram.trim().replace(/^@/, "") : null,
+    instagram: f.instagram ? f.instagram.trim().replace(/^@/, "") : "",
     total,
     payment_status: "awaiting_payment",
     order_status: "pending",
@@ -1136,7 +1140,7 @@ function renderOptions() {
         const options = getOptionsForGroup(group.id);
         const selected = state.selectedOptions[group.id];
         return `
-          <div class="field" style="margin-top:20px;">
+          <div class="field product-option-group" style="margin-top:20px;">
             <label><span class="option-kana">カスタマイズ</span>${escapeHtml(group.name)}${group.required ? " *" : " (optional)"}</label>
             <div>
               ${options.map((option) => `
@@ -1728,6 +1732,11 @@ function render() {
   const app = document.getElementById("app");
   if (!app) return;
   app.style.setProperty("--cms-heading-size", `${Math.max(18, Math.min(48, Number(state.store.theme_heading_size || 25)))}px`);
+  app.style.setProperty("--product-detail-image-height", `${Math.max(100, Math.min(420, Number(state.store.product_detail_image_height || 180)))}px`);
+  app.style.setProperty("--product-option-text-size", `${Math.max(12, Math.min(24, Number(state.store.product_option_text_size || 15)))}px`);
+  app.classList.toggle("compact-product-options", state.store.product_option_compact !== false);
+  app.classList.toggle("contain-product-image", state.store.product_detail_image_fit === "contain");
+  app.classList.toggle("product-options-screen", state.screen === "options" || state.screen === "bundle");
   if (state.loading) { app.innerHTML = `<div class="loading">Loading Shizuku Lab…</div>`; return; }
   let html = "";
   if (state.screen === "menu") html = renderMenu();
