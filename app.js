@@ -1414,6 +1414,7 @@ function renderPayment() {
   const paynowName = state.store.paynow_name || state.store.store_name || "Shizuku Lab";
   const paynowNumber = state.store.paynow_number || "";
   const uploadedQrMode = state.store.payment_qr_mode === "uploaded";
+  const instagramHandle = String(state.store.instagram || "shizukulab.matcha").replace(/^@/, "");
   const inAppBrowser = isInstagramOrFacebookBrowser();
   let qrHtml;
   try {
@@ -1452,7 +1453,7 @@ function renderPayment() {
           <input type="file" accept="image/jpeg,image/png,image/heic,image/heif" required aria-required="true" onchange="onPaymentProof(this)">
           <div class="hint" style="margin-top:8px;">${state.payment.proofFile ? `Selected: <b>${escapeHtml(state.payment.proofFile.name)}</b>` : "Required — upload a clear screenshot of your successful PayNow payment. If you opened this page inside Facebook or Instagram, please allow photo access when prompted."}</div>
         </div>
-        ${state.store.show_instagram_payment_help === false ? "" : `<button type="button" class="btn-secondary" style="width:100%;margin-top:14px;" onclick="openInstagramPaymentHelp()">Upload problem? Send screenshot by Instagram DM</button><div class="hint" style="margin-top:8px;margin-bottom:0;">We copied your order number where supported. Include it in your message so we can match your payment.</div>`}
+        ${state.store.show_instagram_payment_help === false ? "" : `<button type="button" class="btn-secondary" style="width:100%;margin-top:14px;" onclick="openInstagramPaymentHelp()">Need a hand? Chat with us on Instagram @${escapeHtml(instagramHandle)} ↗</button>`}
       </div>
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
