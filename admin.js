@@ -1717,9 +1717,12 @@ function renderSettingsTab() {
     </label>
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Payment & collection</div>
+    <div class="field"><label>PayNow QR mode</label><select onchange="onSettingsField('payment_qr_mode',this.value);render()"><option value="dynamic" ${(s.payment_qr_mode || "dynamic") === "dynamic" ? "selected" : ""}>Dynamic QR · order amount locked</option><option value="uploaded" ${s.payment_qr_mode === "uploaded" ? "selected" : ""}>Use my uploaded QR image</option></select><div class="hint" style="text-align:left;margin-top:5px;">Dynamic QR is recommended because it inserts the exact order total. An uploaded static QR cannot prevent customers changing the amount in their banking app.</div></div>
     ${field("PayNow name", "paynow_name")}
     ${field("PayNow number", "paynow_number", "+65 9XXX XXXX")}
-    ${field("PayNow URL (optional)", "paynow_url")}
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_paynow_name !== false ? "checked" : ""} onchange="onSettingsField('show_paynow_name',this.checked)"><span><b>Show PayNow name to customers</b></span></label>
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_paynow_number !== false ? "checked" : ""} onchange="onSettingsField('show_paynow_number',this.checked)"><span><b>Show PayNow phone number to customers</b></span></label>
+    <div class="field"><label>Uploaded PayNow QR image</label><input value="${escapeHtml(s.paynow_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('paynow_url',this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'paynow_url')">${s.paynow_url ? `<img src="${escapeHtml(s.paynow_url)}" alt="PayNow QR preview" style="display:block;width:190px;height:190px;object-fit:contain;margin-top:10px;border:1px solid #E1D9C8;border-radius:14px;padding:8px;background:#fff;">` : ""}<div class="hint" style="text-align:left;margin-top:5px;">Used only when QR mode is set to “Use my uploaded QR image”.</div></div>
     ${field("Collection address", "collection_address")}
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Collection points</div>

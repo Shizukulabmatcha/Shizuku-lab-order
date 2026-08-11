@@ -65,6 +65,9 @@ const state = {
     paynow_name: "",
     paynow_number: "",
     paynow_url: "",
+    payment_qr_mode: "dynamic",
+    show_paynow_name: true,
+    show_paynow_number: true,
     collection_address: "Blk 130A drop off point, Near Creamier TPY, Toa Payoh Lorong 1, Singapore",
     saturday_collection_time: "10:00 AM - 12:00 PM",
     sunday_collection_time: "10:00 AM - 1:00 PM",
@@ -127,6 +130,7 @@ let paymentCountdownTimer = null;
 let stockRefreshTimer = null;
 let orderTrackingTimer = null;
 let customerChatChannel = null;
+let lastRenderedScreen = null;
 
 /* ---------- helpers ---------- */
 function money(n) { return `$${Number(n || 0).toFixed(2)}`; }
@@ -1219,7 +1223,7 @@ function renderBundleDrinkOptions(drinkNumber, drink, selectedOptions) {
         const options = getOptionsForGroup(group.id);
         const selected = selectedOptions[group.id];
         return `
-          <div class="field" style="margin-top:16px;">
+          <div class="field product-option-group" style="margin-top:16px;">
             <label><span class="option-kana">カスタマイズ</span>${escapeHtml(group.name)}${group.required ? " *" : ""}</label>
             <div>
               ${options.map((option) => `
@@ -1409,10 +1413,11 @@ function renderPayment() {
   const paymentExpired = paymentSecondsLeft() === 0;
   const paynowName = state.store.paynow_name || state.store.store_name || "Shizuku Lab";
   const paynowNumber = state.store.paynow_number || "";
+  const uploadedQrMode = state.store.payment_qr_mode === "uploaded";
   const inAppBrowser = isInstagramOrFacebookBrowser();
   let qrHtml;
   try {
-    qrHtml = paynowNumber ? `<div class="qr-box ${paymentExpired ? "qr-expired" : ""}">${payNowQrSvg(order.total, order.order_number, state.payment.expiresAt)}</div>` : null;
+    qrHtml = !uploadedQrMode && paynowNumber ? `<div class="qr-box ${paymentExpired ? "qr-expired" : ""}">${payNowQrSvg(order.total, order.order_number, state.payment.expiresAt)}</div>` : null;
   } catch (e) { qrHtml = null; }
   if (!qrHtml) {
     qrHtml = state.store.paynow_url
@@ -1428,12 +1433,11 @@ function renderPayment() {
       <button class="back-link" onclick="leavePaymentPage()">${ICONS.back} ${state.tracking.order?.order_number === order.order_number ? "Back to Track Order" : "Back to menu"}</button>
       <div class="summary-card">
         ${qrHtml}
-        <div class="hint">${escapeHtml(state.store.payment_instructions || "Scan with your banking app, or PayNow to the account below.")}<br><b>${escapeHtml(paynowName)}</b>${paynowNumber ? `<br>${escapeHtml(paynowNumber)}` : ""}</div>
-        <div class="payment-timer" id="paynow-countdown" aria-live="polite">Please complete payment within ${paymentCountdownText()}.</div>
-        <button class="btn-secondary refresh-qr-btn" id="refresh-paynow-qr" ${paymentExpired ? "" : "hidden"} onclick="refreshPayNowQr()">Refresh QR · 15 minutes</button>
+        <div class="hint">${escapeHtml(state.store.payment_instructions || "Scan with your banking app, or PayNow to the account below.")}${state.store.show_paynow_name === false ? "" : `<br><b>${escapeHtml(paynowName)}</b>`}${state.store.show_paynow_number === false || !paynowNumber ? "" : `<br>${escapeHtml(paynowNumber)}`}</div>
+        ${uploadedQrMode ? `<div class="ref-note" style="color:#A36D1E;"><b>Pay exactly ${money(order.total)}.</b><br>This is an uploaded static QR, so please check the amount before confirming in your banking app.</div>` : `<div class="payment-timer" id="paynow-countdown" aria-live="polite">Please complete payment within ${paymentCountdownText()}.</div><button class="btn-secondary refresh-qr-btn" id="refresh-paynow-qr" ${paymentExpired ? "" : "hidden"} onclick="refreshPayNowQr()">Refresh QR · 15 minutes</button>`}
         <div class="divider"></div>
         ${state.store.show_payment_order_details === false ? "" : `<div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(order.order_number || order.id || "")}</span></div><div class="row bold"><span class="label">Amount</span><span>${money(order.total)}</span></div>`}
-        ${paynowNumber ? `<div class="ref-note" style="color:var(--matcha);"><b>Payment amount is pre-filled in the QR and cannot be edited.</b></div>` : ""}
+        ${!uploadedQrMode && paynowNumber ? `<div class="ref-note" style="color:var(--matcha);"><b>Payment amount is pre-filled in the QR and cannot be edited.</b></div>` : ""}
         ${state.store.show_payment_order_details === false ? "" : `<div class="row"><span class="label">Collection point</span><span>${escapeHtml(order.collection_point || "—")}</span></div>`}
         ${state.store.show_payment_transaction_reference === false ? "" : `<div class="ref-note">Enter <b>${escapeHtml(order.order_number || order.id || "")}</b> as the payment reference.</div>`}
       </div>
@@ -1731,6 +1735,8 @@ function applyCmsWording() {
 function render() {
   const app = document.getElementById("app");
   if (!app) return;
+  const screenChanged = lastRenderedScreen !== null && lastRenderedScreen !== state.screen;
+  lastRenderedScreen = state.screen;
   app.style.setProperty("--cms-heading-size", `${Math.max(18, Math.min(48, Number(state.store.theme_heading_size || 25)))}px`);
   app.style.setProperty("--product-detail-image-height", `${Math.max(100, Math.min(420, Number(state.store.product_detail_image_height || 180)))}px`);
   app.style.setProperty("--product-option-text-size", `${Math.max(12, Math.min(24, Number(state.store.product_option_text_size || 15)))}px`);
@@ -1751,6 +1757,7 @@ function render() {
   else html = renderMenu();
   app.innerHTML = `${storefrontThemeStyle()}${html}${poweredByFooter()}`;
   applyCmsWording();
+  if (screenChanged) requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
   if (state.screen === "payment") startPaymentCountdown();
 }
 
