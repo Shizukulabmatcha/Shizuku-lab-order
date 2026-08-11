@@ -4,6 +4,7 @@ const astate = {
   unlocked: false,
   welcomePending: false,
   welcomeTimer: null,
+  navCollapsed: (() => { try { return localStorage.getItem("shizuku-admin-nav-collapsed") === "1"; } catch (_) { return false; } })(),
   loginEmail: "tinghuioh29@gmail.com",
   loginPassword: "",
   recoveryMode: false,
@@ -817,6 +818,8 @@ function dashboardStyles() {
     .shop-admin .admin-nav-label{margin:0 8px 10px;color:#877d70;font-size:11px;font-weight:800;letter-spacing:.12em}.shop-admin .admin-nav{display:grid;gap:6px;flex:1;min-height:0;overflow-y:auto;align-content:start;padding:0 4px 8px 0}
     .shop-admin .admin-nav button{appearance:none;width:100%;border:0;border-radius:14px;background:transparent;padding:13px 14px;color:#504a42;font:600 15px/1.2 inherit;text-align:left;cursor:pointer}.shop-admin .admin-nav button:hover{background:#f5ede2}.shop-admin .admin-nav button.active{background:#263125;color:#fff;box-shadow:0 10px 24px rgba(47,63,36,.16)}
     .shop-admin .admin-nav .nav-icon{display:inline-block;width:27px;color:#fa7439;font-size:18px;text-align:center;margin-right:5px}.shop-admin .admin-nav button.active .nav-icon{color:#ffe4d8}
+    .shop-admin .admin-collapse-toggle{position:absolute;top:18px;right:10px;z-index:3;width:32px;height:32px;border:1px solid #e5d8ca;border-radius:10px;background:#fff;color:#4b5d3a;font:700 24px/1 Georgia,serif;cursor:pointer;display:grid;place-items:center;padding:0}.shop-admin .admin-collapse-toggle:hover{background:#f5ede2}
+    .shop-admin.nav-collapsed .admin-side{width:76px;flex-basis:76px;padding-left:9px;padding-right:9px}.shop-admin.nav-collapsed .admin-logo,.shop-admin.nav-collapsed .admin-caption,.shop-admin.nav-collapsed .admin-nav-label,.shop-admin.nav-collapsed .admin-side-bottom,.shop-admin.nav-collapsed .nav-text{display:none}.shop-admin.nav-collapsed .admin-collapse-toggle{position:relative;top:auto;right:auto;margin:0 auto 18px}.shop-admin.nav-collapsed .admin-nav{padding-right:0}.shop-admin.nav-collapsed .admin-nav button{padding:12px 5px;text-align:center}.shop-admin.nav-collapsed .admin-nav .nav-icon{width:auto;margin:0;font-size:19px}
     .shop-admin .admin-side-bottom{margin:16px 8px 0;border-top:1px solid #eadfd2;padding:18px 0 0;color:#6b645b;font-size:13px;flex:0 0 auto}.shop-admin .admin-side-bottom a{color:#4d633d;text-decoration:none;font-weight:700}
     .shop-admin .admin-main{width:100%;max-width:1500px;margin:0 auto;padding:42px 54px 80px}.shop-admin .admin-top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;border-bottom:1px solid #eadfd2;padding-bottom:26px;margin-bottom:28px}.shop-admin .admin-eyebrow{font-size:12px;font-weight:800;letter-spacing:.12em;color:#ef7138;text-transform:uppercase;margin-bottom:9px}.shop-admin .admin-title{font:700 40px/1.05 Georgia,serif;margin:0;letter-spacing:-.02em}.shop-admin .admin-subtitle{color:#6e6b63;margin:9px 0 0;font-size:16px}.shop-admin .open-shop{border:1px solid #e8d9ca;background:#fff;border-radius:13px;padding:12px 16px;color:#33492c;font:700 14px inherit;white-space:nowrap;cursor:pointer}
     .shop-admin .stat-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:22px}.shop-admin .dashboard-summary-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.shop-admin .stat{border:1px solid #eadfd2;border-radius:18px;padding:19px 20px;background:#fff;min-height:120px}.shop-admin .stat:nth-child(1){background:#f0f7e8;border-color:#d7e8c8}.shop-admin .stat:nth-child(2){background:#fff1e7;border-color:#f2d7c4}.shop-admin .stat:nth-child(3){background:#f3efff;border-color:#dfd6ff}.shop-admin .stat.profit-stat{background:#eef7f0;border-color:#cfe3d3}.shop-admin .stat-label{display:flex;gap:8px;align-items:center;color:#69675f;font-weight:700;font-size:14px}.shop-admin .stat-icon{font-size:19px}.shop-admin .stat-value{font:700 30px/1 Georgia,serif;margin-top:18px}.shop-admin .stat-help{font-size:13px;color:#756e64;margin-top:7px}
@@ -846,10 +849,13 @@ function dashboardStyles() {
       .shop-admin.mobile-nav-top .admin-side{position:sticky;top:0;z-index:40;width:100%;height:auto;min-height:0;padding:10px 12px;border-right:0;border-bottom:1px solid #eadfd2;display:block;overflow:visible}
       .shop-admin.mobile-nav-top .admin-logo{display:inline-block;font-size:18px;margin:0 8px 3px 2px}
       .shop-admin.mobile-nav-top .admin-caption{display:inline-block;margin:0;font-size:8px}
+      .shop-admin.mobile-nav-top .admin-collapse-toggle{display:none}
       .shop-admin.mobile-nav-top .admin-nav{display:flex;overflow-x:auto;overflow-y:hidden;gap:5px;padding:7px 0 2px;scrollbar-width:none}
       .shop-admin.mobile-nav-top .admin-nav::-webkit-scrollbar{display:none}
       .shop-admin.mobile-nav-top .admin-nav button{flex:0 0 auto;width:auto;padding:9px 11px;white-space:nowrap}
       .shop-admin.mobile-nav-top .admin-main{width:100%;padding:18px 12px 64px}
+      .shop-admin.mobile-nav-left.nav-collapsed{grid-template-columns:64px minmax(0,1fr)}
+      .shop-admin.mobile-nav-left.nav-collapsed .admin-side{width:64px;padding-left:7px;padding-right:7px}
     }
   </style>`;
 }
@@ -1085,7 +1091,8 @@ function renderLogin() {
 
 function renderAdminWelcome() {
   const welcomeBrand = escapeHtml(astate.settings?.store_name || "Your Studio");
-  const welcomeIcon = escapeHtml(astate.settings?.admin_welcome_icon_url || "slow-studio-icon.svg");
+  const welcomeIcon = escapeHtml(astate.settings?.logo_url || "logo.png");
+  const welcomeLogoSize = Math.max(120, Math.min(220, Number(astate.settings?.welcome_logo_circle_size || 160)));
   const welcomeDurationMs = Math.max(2, Math.min(10, Number(astate.settings?.admin_welcome_duration_seconds || 5))) * 1000;
   if (!astate.welcomeTimer) {
     astate.welcomeTimer = setTimeout(() => {
@@ -1100,15 +1107,29 @@ function renderAdminWelcome() {
     @keyframes slowStudioHalo{0%{opacity:0;transform:scale(.6)}55%{opacity:.5}100%{opacity:0;transform:scale(1.45)}}
     .admin-welcome{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:24px;background:linear-gradient(145deg,#f7f0e5 0%,#eef4e7 48%,#e3eddb 100%);color:#263125;text-align:center;overflow:hidden}
     .admin-welcome-inner{animation:shizukuWelcomeIn .75s cubic-bezier(.2,.8,.2,1) both}
-    .admin-welcome-mark{position:relative;width:88px;height:88px;margin:0 auto 24px;display:grid;place-items:center}
-    .admin-welcome-icon{position:relative;z-index:2;width:74px;height:74px;object-fit:contain;animation:slowStudioIconIn .9s cubic-bezier(.2,.8,.2,1) both}
-    .admin-welcome-fallback{position:relative;z-index:2;width:70px;height:70px;border-radius:20px;display:grid;place-items:center;background:#263125;color:#f7f0e5;font:700 25px/1 Georgia,serif;letter-spacing:-.05em;animation:slowStudioIconIn .9s cubic-bezier(.2,.8,.2,1) both}
-    .admin-welcome-halo{position:absolute;inset:7px;border:1.5px solid #71865c;border-radius:50%;animation:slowStudioHalo 1.4s .12s ease-out both}
+    .admin-welcome-mark{position:relative;width:${welcomeLogoSize + 18}px;height:${welcomeLogoSize + 18}px;margin:0 auto 24px;display:grid;place-items:center}
+    .admin-welcome-icon{position:relative;z-index:2;width:${welcomeLogoSize}px;height:${welcomeLogoSize}px;border-radius:50%;border:5px solid rgba(255,255,255,.72);box-shadow:0 16px 42px rgba(38,49,37,.12);padding:12px;background:#fff;object-fit:contain;animation:slowStudioIconIn .9s cubic-bezier(.2,.8,.2,1) both}
+    .admin-welcome-halo{position:absolute;inset:0;border:1.5px solid #71865c;border-radius:50%;animation:slowStudioHalo 1.4s .12s ease-out both}
     .admin-welcome-kicker{font:800 11px/1.2 'Work Sans',sans-serif;letter-spacing:.18em;color:#7a8c65;text-transform:uppercase;margin-bottom:10px}
     .admin-welcome h1{font:700 clamp(38px,7vw,68px)/.98 Georgia,serif;letter-spacing:-.035em;margin:0}
     .admin-welcome p{font:500 15px/1.5 'Work Sans',sans-serif;color:#68725e;margin:14px 0 0}
-    @media(prefers-reduced-motion:reduce){.admin-welcome-inner,.admin-welcome-icon,.admin-welcome-fallback,.admin-welcome-halo{animation:none}}
-  </style><div class="admin-welcome" role="status" aria-live="polite"><div class="admin-welcome-inner"><div class="admin-welcome-mark"><span class="admin-welcome-halo"></span><img class="admin-welcome-icon" src="${welcomeIcon}" alt="Slow Studio" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="admin-welcome-fallback" hidden>SS</span></div><div class="admin-welcome-kicker">Powered by Slow Studio</div><h1>Welcome back,<br>${welcomeBrand}.</h1><p>Everything is ready for today’s slow moments.</p></div></div>`;
+    .admin-welcome-enter{margin-top:24px;border:0;border-radius:999px;padding:13px 28px;background:#263125;color:#fff;font:700 14px/1 'Work Sans',sans-serif;cursor:pointer;box-shadow:0 10px 24px rgba(38,49,37,.16)}
+    .admin-welcome-enter:hover{transform:translateY(-1px);background:#354434}
+    @media(prefers-reduced-motion:reduce){.admin-welcome-inner,.admin-welcome-icon,.admin-welcome-halo{animation:none}}
+  </style><div class="admin-welcome" role="status" aria-live="polite"><div class="admin-welcome-inner"><div class="admin-welcome-mark"><span class="admin-welcome-halo"></span><img class="admin-welcome-icon" src="${welcomeIcon}" alt="${welcomeBrand} logo"></div><div class="admin-welcome-kicker">Powered by Slow Studio</div><h1>Welcome back,<br>${welcomeBrand}.</h1><p>Everything is ready for today’s slow moments.</p><button class="admin-welcome-enter" onclick="enterAdminNow()">Enter Admin →</button></div></div>`;
+}
+
+function enterAdminNow() {
+  if (astate.welcomeTimer) clearTimeout(astate.welcomeTimer);
+  astate.welcomeTimer = null;
+  astate.welcomePending = false;
+  render();
+}
+
+function toggleAdminNav() {
+  astate.navCollapsed = !astate.navCollapsed;
+  try { localStorage.setItem("shizuku-admin-nav-collapsed", astate.navCollapsed ? "1" : "0"); } catch (_) {}
+  render();
 }
 
 function setOrderFilter(filter) { astate.orderFilter = filter; render(); }
@@ -1637,9 +1658,8 @@ function renderSettingsTab() {
     ${field("Website button text", "welcome_website_button_text", "Visit Shizuku Lab website ↗")}
     ${fontSelect("Welcome body & button font", "welcome_body_font", "work_sans")}
     <div class="divider"></div>
-    <div class="display" style="font-size:20px;margin:4px 0 8px;">Admin welcome icon</div>
-    <p class="hint" style="text-align:left;margin:0 0 12px;">Upload the Slow Studio platform icon shown after Admin login. SVG or transparent PNG works best.</p>
-    <div class="field"><label>Slow Studio icon</label><input value="${escapeHtml(s.admin_welcome_icon_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('admin_welcome_icon_url',this.value)"><input type="file" accept="image/svg+xml,image/png,image/webp" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'admin_welcome_icon_url')">${s.admin_welcome_icon_url ? `<img src="${escapeHtml(s.admin_welcome_icon_url)}" alt="Admin welcome icon preview" style="display:block;width:84px;height:84px;object-fit:contain;margin-top:10px;border:1px solid #E1D9C8;border-radius:18px;padding:8px;background:#fff;">` : ""}</div>
+    <div class="display" style="font-size:20px;margin:4px 0 8px;">Admin Welcome screen</div>
+    <p class="hint" style="text-align:left;margin:0 0 12px;">The Welcome back screen now uses your Store Logo in a large circle. Change the picture and circle size in the Logo section.</p>
     <div class="field"><label>Admin welcome duration <span id="admin-welcome-duration-value" style="float:right;font-weight:600;color:#4B5D3A;">${Math.max(2, Math.min(10, Number(s.admin_welcome_duration_seconds || 5)))} seconds</span></label><input type="range" min="2" max="10" step="1" value="${Math.max(2, Math.min(10, Number(s.admin_welcome_duration_seconds || 5)))}" oninput="onSettingsField('admin_welcome_duration_seconds',Number(this.value));document.getElementById('admin-welcome-duration-value').textContent=this.value+' seconds'"><div class="hint" style="text-align:left;margin-top:5px;">Choose how long Welcome back appears after Admin login.</div></div>
     </section>
     <section ${active === "logo" ? "" : "hidden"}>
@@ -1778,7 +1798,7 @@ function renderWordingTab() {
 }
 
 function renderCheckoutCommunicationTab() {
-  return `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Checkout fields</h2><span>Choose what customers see</span></div>${cmsToggle("Show Instagram field","show_checkout_instagram","Optional Instagram handle at Checkout.")}${cmsToggle("Show Notes field","show_checkout_notes","For allergies, ice level or special requests.")}<div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:12px;">Payment wording</div>${cmsField("Payment instructions","payment_instructions","Scan with your banking app, or PayNow to the account below.",3)}<div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:12px;">Live chat</div>${cmsToggle("Enable order live chat","chat_enabled","Only customers who can verify an order can open its chat.")}${cmsField("Chat heading","chat_heading","Message us")}${cmsField("Automatic reply","chat_auto_reply","Thanks for your message. We will reply as soon as possible.",3)}${cmsField("Chat business hours","chat_business_hours","e.g. Replies daily, 10 AM – 8 PM")}<div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:12px;">Customer reviews</div>${cmsToggle("Enable customer reviews","reviews_enabled","Collected and paid orders can submit a review.")}${cmsField("Reviews heading","reviews_heading","お客様の声 · REVIEWS")}${cmsSaveButton()}</section>`;
+  return `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Checkout fields</h2><span>Choose what customers see</span></div>${cmsToggle("Show customer email field","show_checkout_email","Customers can enter an email to receive order updates. Untick this to hide the field and stop collecting customer email at Checkout.")}${cmsToggle("Show Instagram field","show_checkout_instagram","Optional Instagram handle at Checkout.")}${cmsToggle("Show Notes field","show_checkout_notes","For allergies, ice level or special requests.")}<div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:12px;">Payment wording</div>${cmsField("Payment instructions","payment_instructions","Scan with your banking app, or PayNow to the account below.",3)}<div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:12px;">Live chat</div>${cmsToggle("Enable order live chat","chat_enabled","Only customers who can verify an order can open its chat.")}${cmsField("Chat heading","chat_heading","Message us")}${cmsField("Automatic reply","chat_auto_reply","Thanks for your message. We will reply as soon as possible.",3)}${cmsField("Chat business hours","chat_business_hours","e.g. Replies daily, 10 AM – 8 PM")}<div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:12px;">Customer reviews</div>${cmsToggle("Enable customer reviews","reviews_enabled","Collected and paid orders can submit a review.")}${cmsField("Reviews heading","reviews_heading","お客様の声 · REVIEWS")}${cmsSaveButton()}</section>`;
 }
 
 function renderPaymentPageTab() {
@@ -1908,8 +1928,8 @@ function render() {
     </div>`;
   app.innerHTML = `
     ${dashboardStyles()}
-    <div class="shop-admin ${(astate.settings?.admin_mobile_nav_position || "left") === "top" ? "mobile-nav-top" : "mobile-nav-left"}">
-      <aside class="admin-side"><div class="admin-logo">${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</div><div class="admin-caption">SHOP ADMIN</div><div class="admin-nav-label">MAIN</div><nav class="admin-nav">${nav.map(([tab, icon, label]) => `<button class="${astate.tab === tab ? "active" : ""}" onclick="setTab('${tab}')"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="admin-side-bottom"><button class="link-btn" onclick="logoutAdmin()">Sign out</button></div></aside>
+    <div class="shop-admin ${(astate.settings?.admin_mobile_nav_position || "left") === "top" ? "mobile-nav-top" : "mobile-nav-left"} ${astate.navCollapsed ? "nav-collapsed" : ""}">
+      <aside class="admin-side"><button class="admin-collapse-toggle" onclick="toggleAdminNav()" title="${astate.navCollapsed ? "Expand menu" : "Collapse menu"}" aria-label="${astate.navCollapsed ? "Expand menu" : "Collapse menu"}">${astate.navCollapsed ? "›" : "‹"}</button><div class="admin-logo">${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</div><div class="admin-caption">SHOP ADMIN</div><div class="admin-nav-label">MAIN</div><nav class="admin-nav">${nav.map(([tab, icon, label]) => `<button class="${astate.tab === tab ? "active" : ""}" onclick="setTab('${tab}')"><span class="nav-icon">${icon}</span><span class="nav-text">${label}</span></button>`).join("")}</nav><div class="admin-side-bottom"><button class="link-btn" onclick="logoutAdmin()">Sign out</button></div></aside>
       <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}${astate.newMessageAlert ? `<div class="new-order-alert" role="alert"><div><strong>New customer message</strong><span>${escapeHtml(astate.newMessageAlert.orderNumber)} · ${escapeHtml(astate.newMessageAlert.text)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="astate.newMessageAlert=null;setTab('messages')">Open message</button><button class="btn-secondary" onclick="astate.newMessageAlert=null;render()">Dismiss</button></div></div>` : ""}${astate.newOrderAlert ? `<div class="new-order-alert" role="alert"><div><strong>New order received</strong><span>${escapeHtml(astate.newOrderAlert.orderNumber)} · ${escapeHtml(astate.newOrderAlert.customer)} · ${money(astate.newOrderAlert.total)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="setTab('orders')">Open order</button><button class="btn-secondary" onclick="dismissNewOrderAlert()">Dismiss</button></div></div>` : ""}${page}</main>
     </div>
     ${renderEditOverlay()}

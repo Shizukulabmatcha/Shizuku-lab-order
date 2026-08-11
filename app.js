@@ -84,6 +84,7 @@ const state = {
     loyalty_card_accent_color: "#CAE4B3",
     show_checkout_instagram: true,
     show_checkout_notes: true,
+    show_checkout_email: true,
     payment_instructions: "Scan with your banking app, or PayNow to the account below.",
     payment_qr_size: 220,
     payment_compact_layout: false,
@@ -710,7 +711,7 @@ async function submitOrder() {
   const f = state.form;
   if (!f.name.trim()) { alert("Please enter your name."); return; }
   if (!isValidPhone(f.phone)) { alert("Please enter a valid Singapore phone number (for example, 91234567)."); return; }
-  if (f.email && !/^\S+@\S+\.\S+$/.test(f.email.trim())) { alert("Please enter a valid email address, or leave it blank."); return; }
+  if (state.store.show_checkout_email !== false && f.email && !/^\S+@\S+\.\S+$/.test(f.email.trim())) { alert("Please enter a valid email address, or leave it blank."); return; }
   if (!f.slotId) { alert("Please select a pickup slot."); return; }
   if (!f.collectionPoint) { alert("Please select a collection point."); return; }
   if (cartLines().length === 0) { alert("Your cart is empty."); setScreen("menu"); return; }
@@ -750,7 +751,7 @@ async function submitOrder() {
     order_number: orderNumber,
     customer_name: f.name.trim(),
     customer_phone: normalisePhone(f.phone),
-    customer_email: f.email.trim() || null,
+    customer_email: state.store.show_checkout_email === false ? null : (f.email.trim() || null),
     collection_date: slot.date,
     collection_time: slot.time,
     collection_point: f.collectionPoint,
@@ -1278,7 +1279,7 @@ function renderCheckout() {
       <button class="back-link" onclick="setScreen('cart')">${ICONS.back} Back to cart</button>
       <div class="field"><label>Name</label><input id="f-name" value="${escapeHtml(f.name)}" placeholder="Your name" oninput="onFormInput('name', this.value)"></div>
       <div class="field"><label>Phone</label><input id="f-phone" value="${escapeHtml(f.phone)}" placeholder="e.g. 91234567" inputmode="tel" autocomplete="tel" oninput="this.value=cleanPhoneInput(this.value);onFormInput('phone', this.value)"></div>
-      <div class="field"><label>Email (for order confirmation)</label><input id="f-email" type="email" value="${escapeHtml(f.email)}" placeholder="you@example.com" autocomplete="email" oninput="onFormInput('email', this.value)"></div>
+      ${state.store.show_checkout_email === false ? "" : `<div class="field"><label>Email (for order confirmation)</label><input id="f-email" type="email" value="${escapeHtml(f.email)}" placeholder="you@example.com" autocomplete="email" oninput="onFormInput('email', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">Enter an email to receive order updates.</div></div>`}
       ${state.store.show_checkout_instagram === false ? "" : `<div class="field"><label>Instagram (optional)</label><input id="f-instagram" value="${escapeHtml(f.instagram)}" placeholder="@yourhandle" oninput="onFormInput('instagram', this.value)"></div>`}
       <div class="field"><label>Collection date</label>
         <select class="checkout-select" onchange="onPickupDateChange(this.value)">
