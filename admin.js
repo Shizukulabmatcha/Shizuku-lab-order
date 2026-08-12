@@ -834,6 +834,7 @@ function dashboardStyles() {
     .shop-admin .admin-logo{font-family:Georgia,serif;font-size:27px;font-weight:700;line-height:1.05}.shop-admin .admin-caption{margin:6px 8px 32px;color:#75845d;font-size:13px;letter-spacing:.06em}
     .shop-admin .admin-nav-label{margin:0 8px 10px;color:#877d70;font-size:11px;font-weight:800;letter-spacing:.12em}.shop-admin .admin-nav{display:grid;gap:6px;flex:1;min-height:0;overflow-y:auto;align-content:start;padding:0 4px 8px 0}
     .shop-admin .admin-nav button{appearance:none;width:100%;border:0;border-radius:14px;background:transparent;padding:13px 14px;color:#504a42;font:600 15px/1.2 inherit;text-align:left;cursor:pointer}.shop-admin .admin-nav button:hover{background:#f5ede2}.shop-admin .admin-nav button.active{background:#263125;color:#fff;box-shadow:0 10px 24px rgba(47,63,36,.16)}
+    .shop-admin .admin-nav-sortable{display:grid;grid-template-columns:minmax(0,1fr) 24px;align-items:center;border-radius:14px}.shop-admin .admin-nav-sortable>button:first-child{min-width:0}.shop-admin .admin-nav-drag{appearance:none;border:0;background:transparent!important;box-shadow:none!important;color:var(--admin-muted)!important;padding:8px 2px!important;width:24px!important;cursor:grab!important;touch-action:none;font-size:17px!important;text-align:center!important}.shop-admin .admin-nav-drag:active{cursor:grabbing!important}.shop-admin .admin-nav-sortable.admin-drag-source{opacity:.45;background:var(--admin-soft)}
     .shop-admin .admin-nav .nav-icon{display:inline-block;width:27px;color:#fa7439;font-size:18px;text-align:center;margin-right:5px}.shop-admin .admin-nav button.active .nav-icon{color:#ffe4d8}
     .shop-admin .admin-collapse-toggle{position:absolute;top:18px;right:10px;z-index:3;width:32px;height:32px;border:1px solid #e5d8ca;border-radius:10px;background:#fff;color:#4b5d3a;font:700 24px/1 Georgia,serif;cursor:pointer;display:grid;place-items:center;padding:0}.shop-admin .admin-collapse-toggle:hover{background:#f5ede2}
     .shop-admin.nav-collapsed .admin-side{width:76px;flex-basis:76px;padding-left:9px;padding-right:9px}.shop-admin.nav-collapsed .admin-logo,.shop-admin.nav-collapsed .admin-caption,.shop-admin.nav-collapsed .admin-nav-label,.shop-admin.nav-collapsed .admin-side-bottom,.shop-admin.nav-collapsed .nav-text{display:none}.shop-admin.nav-collapsed .admin-collapse-toggle{position:relative;top:auto;right:auto;margin:0 auto 18px}.shop-admin.nav-collapsed .admin-nav{padding-right:0}.shop-admin.nav-collapsed .admin-nav button{padding:12px 5px;text-align:center}.shop-admin.nav-collapsed .admin-nav .nav-icon{width:auto;margin:0;font-size:19px}
@@ -856,6 +857,7 @@ function dashboardStyles() {
       .shop-admin .admin-side-bottom .link-btn{width:100%;min-height:40px;padding:9px 7px;border:1px solid var(--admin-line);border-radius:10px;background:var(--admin-card);color:var(--admin-primary);font:700 12px/1 inherit;text-align:center;cursor:pointer}
       .shop-admin .admin-nav{grid-template-columns:1fr;overflow-x:hidden;overflow-y:auto;gap:5px;padding:0 2px 12px 0}
       .shop-admin .admin-nav button{padding:10px 9px;font-size:12px;text-align:left;white-space:normal;border-radius:11px;line-height:1.25}
+      .shop-admin .admin-nav-sortable{grid-template-columns:minmax(0,1fr) 20px}.shop-admin .admin-nav-drag{width:20px!important;padding:7px 0!important;font-size:15px!important}
       .shop-admin .admin-nav .nav-icon{display:inline-block;width:18px;margin-right:3px;font-size:14px}
       .shop-admin .admin-main{min-width:0;padding:22px 12px 64px}
       .shop-admin .admin-top{display:block;margin-bottom:18px;padding-bottom:18px}
@@ -875,6 +877,7 @@ function dashboardStyles() {
       .shop-admin.mobile-nav-top .admin-nav{display:flex;overflow-x:auto;overflow-y:hidden;gap:5px;padding:7px 0 2px;scrollbar-width:none}
       .shop-admin.mobile-nav-top .admin-nav::-webkit-scrollbar{display:none}
       .shop-admin.mobile-nav-top .admin-nav button{flex:0 0 auto;width:auto;padding:9px 11px;white-space:nowrap}
+      .shop-admin.mobile-nav-top .admin-nav-sortable{display:flex;flex:0 0 auto}.shop-admin.mobile-nav-top .admin-nav-drag{width:20px!important;padding:7px 1px!important}
       .shop-admin.mobile-nav-top .admin-side-bottom{position:absolute;right:12px;top:8px;margin:0;padding:0;border:0}
       .shop-admin.mobile-nav-top .admin-side-bottom .link-btn{width:auto;min-height:34px;padding:7px 10px;background:var(--admin-card)}
       .shop-admin.mobile-nav-top .admin-main{width:100%;padding:18px 12px 64px}
@@ -1026,6 +1029,53 @@ function setTab(tab) {
   astate.tab = tab;
   render();
   requestAnimationFrame(() => { const nextNav = document.querySelector(".admin-nav"); if (nextNav) nextNav.scrollTop = astate.navScrollTop; });
+}
+
+function orderedAdminNav(items) {
+  const saved = Array.isArray(astate.settingsDraft?.admin_sidebar_order) ? astate.settingsDraft.admin_sidebar_order.map(String) : [];
+  const map = new Map(items.map((item) => [String(item[0]), item]));
+  return [...saved.map((key) => map.get(key)).filter(Boolean), ...items.filter((item) => !saved.includes(String(item[0])))];
+}
+let sidebarDrag = null;
+function startSidebarDrag(event) {
+  if (event.button != null && event.button !== 0) return;
+  event.preventDefault();
+  const row = event.currentTarget.closest(".admin-nav-sortable");
+  const list = row?.parentElement;
+  if (!row || !list) return;
+  row.classList.add("admin-drag-source");
+  sidebarDrag = { row, list };
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+  document.body.classList.add("admin-is-dragging");
+  document.addEventListener("pointermove", moveSidebarDrag, { passive:false });
+  document.addEventListener("pointerup", endSidebarDrag, { once:true });
+  document.addEventListener("pointercancel", endSidebarDrag, { once:true });
+}
+function moveSidebarDrag(event) {
+  if (!sidebarDrag) return;
+  event.preventDefault();
+  const candidates = [...sidebarDrag.list.querySelectorAll(".admin-nav-sortable")].filter((item) => item !== sidebarDrag.row);
+  const target = candidates.find((item) => { const rect=item.getBoundingClientRect(); return event.clientY>=rect.top && event.clientY<=rect.bottom; });
+  if (!target) return;
+  const rect=target.getBoundingClientRect();
+  if (event.clientY < rect.top + rect.height/2) sidebarDrag.list.insertBefore(sidebarDrag.row,target);
+  else sidebarDrag.list.insertBefore(sidebarDrag.row,target.nextSibling);
+}
+async function endSidebarDrag() {
+  if (!sidebarDrag) return;
+  const { row, list } = sidebarDrag;
+  const order=[...list.querySelectorAll(".admin-nav-sortable")].map((item)=>item.dataset.navKey);
+  row.classList.remove("admin-drag-source");
+  document.body.classList.remove("admin-is-dragging");
+  document.removeEventListener("pointermove",moveSidebarDrag);
+  sidebarDrag=null;
+  astate.settingsDraft.admin_sidebar_order=order;
+  astate.settings.admin_sidebar_order=order;
+  if (IS_CONFIGURED) {
+    const { error }=await db.from("store_settings").update({admin_sidebar_order:order}).eq("id",astate.settings.id);
+    if(error){alert("Could not save menu order: "+error.message);await loadAll();return;}
+  }
+  render();
 }
 
 function messageThreads() {
@@ -2077,6 +2127,7 @@ function render() {
     ["checkout_comms", "☏", "Checkout & chat"],
     ["settings", "⚙", "Store settings"],
   ];
+  const sortedNav = orderedAdminNav(nav);
   const tabTitle = { preparation: "Today's preparation", orders: "Orders", menu: "Products", inventory: "Inventory & food cost", wholesale:"Wholesale / B2B", inspiration:"Inspiration", promos: "Promos", rewards: "Rewards", customers: "Customers", messages: "Messages", reviews: "Reviews", availability: "Availability", faq: "FAQ", notifications: "Notifications", theme: "Theme", design: "Design", wording: "Customer wording", checkout_comms: "Checkout & communication", settings: "Store settings" };
   const tabSubtitle = { preparation: "See every paid drink to prepare and print today's list.", orders: "Review payments and edit every customer order.", menu: "Keep your drinks, prices and availability up to date.", inventory: "Track stock and review every product cost in one place.", wholesale:"Manage private B2B products, pricing and suppliers.", inspiration:"Capture, pin and organise private business ideas.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", messages: "Read and reply to order-linked customer messages.", reviews: "Approve the customer reviews shown on your ordering page.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose where you receive new-order alerts.", design: "Change the customer shop and loyalty card colours and fonts.", wording: "Edit the main words customers see across your shop.", checkout_comms: "Control checkout fields, payment wording, chat and reviews.", settings: "Manage your store details, images, contact information and payment details." };
   const page = astate.tab === "dashboard" ? renderDashboardTab() : `
@@ -2087,7 +2138,7 @@ function render() {
   app.innerHTML = `
     ${dashboardStyles()}
     <div class="shop-admin theme-${escapeHtml(astate.settingsDraft?.admin_theme || astate.settingsDraft?.system_theme || "zen")} ${(astate.settings?.admin_mobile_nav_position || "left") === "top" ? "mobile-nav-top" : "mobile-nav-left"} ${astate.navCollapsed ? "nav-collapsed" : ""}" style="--admin-primary:${escapeHtml(astate.settingsDraft?.admin_theme_primary || '#4B5D3A')};--admin-bg:${escapeHtml(astate.settingsDraft?.admin_theme_background || '#F3EEE3')};--admin-card:${escapeHtml(astate.settingsDraft?.admin_theme_card || '#FFFFFF')};--admin-text:${escapeHtml(astate.settingsDraft?.admin_theme_text || '#2A2A22')};--admin-on-primary:${escapeHtml(astate.settingsDraft?.admin_theme_background || '#F3EEE3')};--admin-soft:color-mix(in srgb,${escapeHtml(astate.settingsDraft?.admin_theme_primary || '#4B5D3A')} 10%,${escapeHtml(astate.settingsDraft?.admin_theme_card || '#FFFFFF')});--admin-line:color-mix(in srgb,${escapeHtml(astate.settingsDraft?.admin_theme_text || '#2A2A22')} 18%,transparent);--admin-muted:color-mix(in srgb,${escapeHtml(astate.settingsDraft?.admin_theme_text || '#2A2A22')} 66%,transparent);--admin-radius:${(astate.settingsDraft?.admin_theme || 'zen') === 'editorial' ? '0px' : (astate.settingsDraft?.admin_theme || 'zen') === 'retro' ? '7px' : (astate.settingsDraft?.admin_theme || 'zen') === 'threed' ? '24px' : '18px'};--admin-card-shadow:${(astate.settingsDraft?.admin_theme || 'zen') === 'retro' ? '4px 4px 0 var(--admin-text)' : (astate.settingsDraft?.admin_theme || 'zen') === 'threed' ? '0 10px 0 color-mix(in srgb,var(--admin-primary) 18%,transparent),0 17px 28px rgba(45,38,75,.11)' : '0 8px 24px rgba(42,42,34,.06)'};--admin-shadow:0 10px 24px color-mix(in srgb,var(--admin-primary) 25%,transparent);">
-      <aside class="admin-side"><button class="admin-collapse-toggle" onclick="toggleAdminNav()" title="${astate.navCollapsed ? "Expand menu" : "Collapse menu"}" aria-label="${astate.navCollapsed ? "Expand menu" : "Collapse menu"}">${astate.navCollapsed ? "›" : "‹"}</button><div class="admin-logo">${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</div><div class="admin-caption">SHOP ADMIN</div><div class="admin-nav-label">MAIN</div><nav class="admin-nav">${nav.map(([tab, icon, label]) => `<button class="${astate.tab === tab ? "active" : ""}" onclick="setTab('${tab}')"><span class="nav-icon">${icon}</span><span class="nav-text">${label}</span></button>`).join("")}</nav><div class="admin-side-bottom"><button class="link-btn" onclick="logoutAdmin()" aria-label="Sign out"><span class="signout-icon">↪</span> <span class="signout-label">Sign out</span></button></div></aside>
+      <aside class="admin-side"><button class="admin-collapse-toggle" onclick="toggleAdminNav()" title="${astate.navCollapsed ? "Expand menu" : "Collapse menu"}" aria-label="${astate.navCollapsed ? "Expand menu" : "Collapse menu"}">${astate.navCollapsed ? "›" : "‹"}</button><div class="admin-logo">${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</div><div class="admin-caption">SHOP ADMIN</div><div class="admin-nav-label">MAIN · DRAG TO REORDER</div><nav class="admin-nav">${sortedNav.map(([tab, icon, label]) => `<div class="admin-nav-sortable" data-nav-key="${tab}"><button class="${astate.tab === tab ? "active" : ""}" onclick="setTab('${tab}')"><span class="nav-icon">${icon}</span><span class="nav-text">${label}</span></button><button class="admin-nav-drag" aria-label="Move ${escapeHtml(label)}" title="Drag to reorder" onpointerdown="startSidebarDrag(event)">⋮⋮</button></div>`).join("")}</nav><div class="admin-side-bottom"><button class="link-btn" onclick="logoutAdmin()" aria-label="Sign out"><span class="signout-icon">↪</span> <span class="signout-label">Sign out</span></button></div></aside>
       <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}${astate.newMessageAlert ? `<div class="new-order-alert" role="alert"><div><strong>New customer message</strong><span>${escapeHtml(astate.newMessageAlert.orderNumber)} · ${escapeHtml(astate.newMessageAlert.text)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="astate.newMessageAlert=null;setTab('messages')">Open message</button><button class="btn-secondary" onclick="astate.newMessageAlert=null;render()">Dismiss</button></div></div>` : ""}${astate.newOrderAlert ? `<div class="new-order-alert" role="alert"><div><strong>New order received</strong><span>${escapeHtml(astate.newOrderAlert.orderNumber)} · ${escapeHtml(astate.newOrderAlert.customer)} · ${money(astate.newOrderAlert.total)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="setTab('orders')">Open order</button><button class="btn-secondary" onclick="dismissNewOrderAlert()">Dismiss</button></div></div>` : ""}${page}</main>
     </div>
     ${renderEditOverlay()}
