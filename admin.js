@@ -1827,9 +1827,15 @@ const SYSTEM_THEMES = {
   threed:{label:"3D Bento",note:"Lavender tiles and raised controls",primary:"#6254A3",background:"#EEEAFB",card:"#FFFFFF",text:"#292638",heading:"work_sans",body:"work_sans",menu:"gallery"}
 };
 
-function applySystemTheme(name) {
+function applyOrderingTheme(name) {
   const theme = SYSTEM_THEMES[name] || SYSTEM_THEMES.zen;
-  Object.assign(astate.settingsDraft, {system_theme:name,theme_primary_color:theme.primary,theme_background_color:theme.background,theme_card_color:theme.card,theme_text_color:theme.text,theme_heading_font:theme.heading,theme_body_font:theme.body,default_menu_view:theme.menu,admin_theme_primary:theme.primary,admin_theme_background:theme.background,admin_theme_card:theme.card,admin_theme_text:theme.text});
+  Object.assign(astate.settingsDraft, {ordering_theme:name,theme_primary_color:theme.primary,theme_background_color:theme.background,theme_card_color:theme.card,theme_text_color:theme.text,theme_heading_font:theme.heading,theme_body_font:theme.body,default_menu_view:theme.menu});
+  render();
+}
+
+function applyAdminTheme(name) {
+  const theme = SYSTEM_THEMES[name] || SYSTEM_THEMES.zen;
+  Object.assign(astate.settingsDraft, {admin_theme:name,admin_theme_primary:theme.primary,admin_theme_background:theme.background,admin_theme_card:theme.card,admin_theme_text:theme.text});
   render();
 }
 
@@ -1840,8 +1846,9 @@ function themeMiniPreview(surface) {
 }
 
 function renderThemeTab() {
-  const current = astate.settingsDraft?.system_theme || "zen";
-  return `<div style="display:grid;gap:16px;">${Object.entries(SYSTEM_THEMES).map(([name,theme]) => `<section class="dashboard-card theme-preview-theme-${name}" style="padding:20px;background:${theme.background};color:${theme.text};border-color:${theme.primary};"><div class="dashboard-card-head" style="padding:0 0 14px;"><div><h2 style="color:${theme.text};">${theme.label}</h2><span style="color:${theme.text};opacity:.7;">${theme.note}</span></div>${current === name ? `<span style="color:${theme.primary};font-weight:700;">Currently selected ✓</span>` : ""}</div><div class="theme-preview-grid">${themeMiniPreview("welcome")}${themeMiniPreview("order")}${themeMiniPreview("dashboard")}</div><button class="btn-primary" style="margin-top:14px;background:${theme.primary};color:${theme.background};" onclick="applySystemTheme('${name}')">${current === name ? "Selected" : "Apply theme"}</button></section>`).join("")}${cmsSaveButton()}</div>`;
+  const ordering = astate.settingsDraft?.ordering_theme || astate.settingsDraft?.system_theme || "zen";
+  const admin = astate.settingsDraft?.admin_theme || astate.settingsDraft?.system_theme || "zen";
+  return `<div style="display:grid;gap:16px;"><section class="dashboard-card" style="padding:16px 20px;"><b>Ordering theme:</b> ${escapeHtml(SYSTEM_THEMES[ordering]?.label || "Zen")} &nbsp; · &nbsp; <b>Admin theme:</b> ${escapeHtml(SYSTEM_THEMES[admin]?.label || "Zen")}</section>${Object.entries(SYSTEM_THEMES).map(([name,theme]) => `<section class="dashboard-card theme-preview-theme-${name}" style="padding:20px;background:${theme.background};color:${theme.text};border-color:${theme.primary};"><div class="dashboard-card-head" style="padding:0 0 14px;"><div><h2 style="color:${theme.text};">${theme.label}</h2><span style="color:${theme.text};opacity:.7;">${theme.note}</span></div><div style="text-align:right;font-size:11px;line-height:1.6;">${ordering === name ? `<div>Ordering selected ✓</div>` : ""}${admin === name ? `<div>Admin selected ✓</div>` : ""}</div></div><div class="theme-preview-grid">${themeMiniPreview("welcome")}${themeMiniPreview("order")}${themeMiniPreview("dashboard")}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px;"><button class="btn-primary" style="background:${theme.primary};color:${theme.background};" onclick="applyOrderingTheme('${name}')">${ordering === name ? "Ordering selected" : "Apply to Ordering"}</button><button class="btn-secondary" style="border-color:${theme.primary};color:${theme.primary};" onclick="applyAdminTheme('${name}')">${admin === name ? "Admin selected" : "Apply to Admin"}</button></div></section>`).join("")}${cmsSaveButton()}</div>`;
 }
 
 function renderDesignTab() {
@@ -1993,7 +2000,7 @@ function render() {
     </div>`;
   app.innerHTML = `
     ${dashboardStyles()}
-    <div class="shop-admin theme-${escapeHtml(astate.settingsDraft?.system_theme || "zen")} ${(astate.settings?.admin_mobile_nav_position || "left") === "top" ? "mobile-nav-top" : "mobile-nav-left"} ${astate.navCollapsed ? "nav-collapsed" : ""}">
+    <div class="shop-admin theme-${escapeHtml(astate.settingsDraft?.admin_theme || astate.settingsDraft?.system_theme || "zen")} ${(astate.settings?.admin_mobile_nav_position || "left") === "top" ? "mobile-nav-top" : "mobile-nav-left"} ${astate.navCollapsed ? "nav-collapsed" : ""}">
       <aside class="admin-side"><button class="admin-collapse-toggle" onclick="toggleAdminNav()" title="${astate.navCollapsed ? "Expand menu" : "Collapse menu"}" aria-label="${astate.navCollapsed ? "Expand menu" : "Collapse menu"}">${astate.navCollapsed ? "›" : "‹"}</button><div class="admin-logo">${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</div><div class="admin-caption">SHOP ADMIN</div><div class="admin-nav-label">MAIN</div><nav class="admin-nav">${nav.map(([tab, icon, label]) => `<button class="${astate.tab === tab ? "active" : ""}" onclick="setTab('${tab}')"><span class="nav-icon">${icon}</span><span class="nav-text">${label}</span></button>`).join("")}</nav><div class="admin-side-bottom"><button class="link-btn" onclick="logoutAdmin()">Sign out</button></div></aside>
       <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}${astate.newMessageAlert ? `<div class="new-order-alert" role="alert"><div><strong>New customer message</strong><span>${escapeHtml(astate.newMessageAlert.orderNumber)} · ${escapeHtml(astate.newMessageAlert.text)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="astate.newMessageAlert=null;setTab('messages')">Open message</button><button class="btn-secondary" onclick="astate.newMessageAlert=null;render()">Dismiss</button></div></div>` : ""}${astate.newOrderAlert ? `<div class="new-order-alert" role="alert"><div><strong>New order received</strong><span>${escapeHtml(astate.newOrderAlert.orderNumber)} · ${escapeHtml(astate.newOrderAlert.customer)} · ${money(astate.newOrderAlert.total)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="setTab('orders')">Open order</button><button class="btn-secondary" onclick="dismissNewOrderAlert()">Dismiss</button></div></div>` : ""}${page}</main>
     </div>

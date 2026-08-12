@@ -84,6 +84,7 @@ const state = {
     theme_price_size: 14,
     theme_button_size: 14,
     system_theme: "zen",
+    ordering_theme: "zen",
     default_menu_view: "list",
     show_menu_view_switch: true,
     product_detail_image_height: 180,
@@ -1812,7 +1813,7 @@ function render() {
   app.classList.toggle("compact-product-options", state.store.product_option_compact !== false);
   app.classList.toggle("contain-product-image", state.store.product_detail_image_fit === "contain");
   app.classList.toggle("product-options-screen", state.screen === "options" || state.screen === "bundle");
-  ["zen","korean","editorial","retro","threed"].forEach((name) => app.classList.toggle(`theme-${name}`, (state.store.system_theme || "zen") === name));
+  ["zen","korean","editorial","retro","threed"].forEach((name) => app.classList.toggle(`theme-${name}`, (state.store.ordering_theme || state.store.system_theme || "zen") === name));
   if (state.loading) { app.innerHTML = `<div class="loading">Loading Shizuku Lab…</div>`; return; }
   let html = "";
   if (state.screen === "menu") html = renderMenu();
