@@ -40,6 +40,7 @@
     const trackButton = app.querySelector(".welcome-track");
     const loyaltyButton = app.querySelector(".welcome-loyalty");
     const poweredBy = app.querySelector("#welcome-powered-by");
+    ["zen","korean","editorial","retro","threed"].forEach((name) => app.classList.toggle(`theme-${name}`, (data.system_theme || "zen") === name));
     app.style.fontFamily = fontStacks[data.welcome_body_font] || fontStacks.work_sans;
     title.style.fontFamily = fontStacks[data.welcome_title_font] || fontStacks.fraunces;
     title.style.fontSize = `${Math.max(28, Math.min(64, Number(data.welcome_title_size || 39)))}px`;

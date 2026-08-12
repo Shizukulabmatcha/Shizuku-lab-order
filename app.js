@@ -83,6 +83,7 @@ const state = {
     theme_product_name_size: 15,
     theme_price_size: 14,
     theme_button_size: 14,
+    system_theme: "zen",
     default_menu_view: "list",
     show_menu_view_switch: true,
     product_detail_image_height: 180,
@@ -135,6 +136,8 @@ const state = {
     show_payment_transaction_reference: true,
     show_instagram_payment_help: true,
     payment_submit_button_text: "Submit payment proof",
+    show_customer_receipt: true,
+    receipt_button_text: "View receipt",
     chat_enabled: true,
     chat_heading: "Message us",
     chat_auto_reply: "Thanks for your message. We will reply as soon as possible.",
@@ -1534,9 +1537,17 @@ function renderConfirmation() {
         <div class="row"><span class="label">Status</span><span>Payment sent — pending confirmation</span></div>
         <div class="row"><span class="label">Total</span><span>${money(order.total)}</span></div>
       </div>
-      <button class="primary-btn" style="margin-top:22px;" onclick="setScreen('menu')">Back to menu</button>
+      ${state.store.show_customer_receipt === false ? "" : `<button class="primary-btn" style="margin-top:22px;" onclick="setScreen('receipt')">${escapeHtml(state.store.receipt_button_text || "View receipt")}</button>`}
+      <button class="btn-secondary" style="width:100%;margin-top:10px;" onclick="setScreen('menu')">Back to menu</button>
     </div>
   `;
+}
+
+function renderReceipt() {
+  const order = state.lastOrder;
+  if (!order) return renderMenu();
+  const items = Array.isArray(order.items) ? order.items : [];
+  return `${header()}<div class="screen receipt-screen"><style>@media print{body{background:#fff}.header,.receipt-actions,.powered-by-footer{display:none!important}.wrap{max-width:none;padding:0}.receipt-screen{padding:0}.receipt-card{border:0!important;box-shadow:none!important}}</style><button class="back-link receipt-actions" onclick="setScreen('confirmation')">${ICONS.back} Back</button><div class="summary-card receipt-card"><div class="center"><div class="display" style="font-size:25px;">${escapeHtml(state.store.store_name || "Shizuku Lab")}</div><div class="hint" style="margin-top:4px;">Payment submission receipt</div><div class="mono" style="margin-top:13px;font-weight:700;">${escapeHtml(order.order_number || order.id || "")}</div></div><div class="divider"></div><div class="row"><span class="label">Customer</span><span>${escapeHtml(order.customer_name || "—")}</span></div><div class="row"><span class="label">Pickup</span><span>${escapeHtml(order.collection_date || "")} · ${escapeHtml(order.collection_time || "")}</span></div><div class="row"><span class="label">Collection point</span><span>${escapeHtml(order.collection_point || "—")}</span></div><div class="divider"></div>${items.length ? items.map((item) => `<div class="row"><span>${Number(item.qty || item.quantity || 1)} × ${escapeHtml(item.productName || item.product_name || "Item")}</span><b>${money(Number(item.unitPrice || item.unit_price || 0) * Number(item.qty || item.quantity || 1))}</b></div>`).join("") : `<div class="hint">Order items are available in Track Order.</div>`}<div class="divider"></div><div class="row" style="font-size:17px;"><b>Total</b><b>${money(order.total)}</b></div><div class="hint" style="text-align:left;margin-top:13px;line-height:1.5;">Payment screenshot submitted. Final confirmation will appear in Track Order after verification.</div></div><div class="receipt-actions" style="display:grid;gap:9px;margin-top:14px;"><button class="primary-btn" onclick="window.print()">Print / Save receipt</button><button class="btn-secondary" onclick="setScreen('menu')">Back to menu</button></div></div>`;
 }
 
 /* ---------- order tracking ---------- */
@@ -1801,6 +1812,7 @@ function render() {
   app.classList.toggle("compact-product-options", state.store.product_option_compact !== false);
   app.classList.toggle("contain-product-image", state.store.product_detail_image_fit === "contain");
   app.classList.toggle("product-options-screen", state.screen === "options" || state.screen === "bundle");
+  ["zen","korean","editorial","retro","threed"].forEach((name) => app.classList.toggle(`theme-${name}`, (state.store.system_theme || "zen") === name));
   if (state.loading) { app.innerHTML = `<div class="loading">Loading Shizuku Lab…</div>`; return; }
   let html = "";
   if (state.screen === "menu") html = renderMenu();
@@ -1808,6 +1820,7 @@ function render() {
   else if (state.screen === "bundle") html = renderBundle();
   else if (state.screen === "cart") html = renderCart();
   else if (state.screen === "checkout") html = renderCheckout();
+  else if (state.screen === "receipt") html = renderReceipt();
   else if (state.screen === "payment") html = renderPayment();
   else if (state.screen === "confirmation") html = renderConfirmation();
   else if (state.screen === "track") html = renderTrackOrder();
