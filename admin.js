@@ -46,6 +46,11 @@ const astate = {
   calendarMonth: null,
   orderFilter: "all",
   orderSearch: "",
+  expandedOrderIds: [],
+  selectedOrderIds: [],
+  bulkOrderMode: false,
+  welcomePhase: "idle",
+  welcomeError: "",
   inventory: [],
   recipes: [],
   inventoryReady: true,
@@ -326,9 +331,60 @@ async function openPaymentProof(path) {
   proofWindow.location.href = data.signedUrl;
 }
 async function updateOrderStatus(id, order_status) {
+  const order = astate.orders.find((o) => String(o.id) === String(id));
+  if (!order || order.order_status === order_status) return;
+  const nextLabel = ORDER_LABEL[order_status] || order_status;
+  if (!confirm(`Change ${order.order_number || "this order"} to ${nextLabel}?`)) { render(); return; }
+  const previousStatus = order.order_status;
   astate.orders = astate.orders.map((o) => (String(o.id) === String(id) ? { ...o, order_status } : o));
   render();
-  if (IS_CONFIGURED) await db.from("orders").update({ order_status }).eq("id", id);
+  if (IS_CONFIGURED) {
+    const { error } = await db.from("orders").update({ order_status }).eq("id", id);
+    if (error) {
+      astate.orders = astate.orders.map((o) => (String(o.id) === String(id) ? { ...o, order_status: previousStatus } : o));
+      render();
+      alert("Could not update this order: " + error.message);
+    }
+  }
+}
+
+function toggleOrderExpanded(id) {
+  const key = String(id);
+  astate.expandedOrderIds = astate.expandedOrderIds.includes(key) ? astate.expandedOrderIds.filter((item) => item !== key) : [...astate.expandedOrderIds, key];
+  render();
+}
+function toggleBulkOrderMode() { astate.bulkOrderMode = !astate.bulkOrderMode; if (!astate.bulkOrderMode) astate.selectedOrderIds = []; render(); }
+function toggleOrderSelected(id, checked) {
+  const key = String(id);
+  astate.selectedOrderIds = checked ? [...new Set([...astate.selectedOrderIds, key])] : astate.selectedOrderIds.filter((item) => item !== key);
+  render();
+}
+function bulkEligible(order, status) {
+  if (order.payment_status !== "paid" || ["cancelled", "collected"].includes(order.order_status)) return false;
+  if (status === "preparing") return ["confirmed", "preparing"].includes(order.order_status);
+  if (status === "ready") return ["confirmed", "preparing", "ready"].includes(order.order_status);
+  return status === "collected" && ["ready", "collected"].includes(order.order_status);
+}
+async function bulkUpdateOrderStatus(status) {
+  const selected = astate.orders.filter((order) => astate.selectedOrderIds.includes(String(order.id)));
+  const eligible = selected.filter((order) => bulkEligible(order, status) && order.order_status !== status);
+  const skipped = selected.length - eligible.length;
+  if (!eligible.length) return alert("None of the selected orders can safely move to this status.");
+  if (!confirm(`Change ${eligible.length} order${eligible.length === 1 ? "" : "s"} to ${ORDER_LABEL[status]}?${skipped ? `\n\n${skipped} incompatible order(s) will be skipped.` : ""}`)) return;
+  const ids = eligible.map((order) => order.id);
+  const previous = new Map(eligible.map((order) => [String(order.id), order.order_status]));
+  astate.orders = astate.orders.map((order) => ids.map(String).includes(String(order.id)) ? { ...order, order_status: status } : order);
+  render();
+  const { error } = await db.from("orders").update({ order_status: status }).in("id", ids);
+  if (error) {
+    astate.orders = astate.orders.map((order) => previous.has(String(order.id)) ? { ...order, order_status: previous.get(String(order.id)) } : order);
+    render();
+    return alert("Could not update selected orders: " + error.message);
+  }
+  astate.selectedOrderIds = [];
+  astate.bulkOrderMode = false;
+  render();
+  if (skipped) alert(`${eligible.length} updated. ${skipped} incompatible order(s) were safely skipped.`);
 }
 async function cancelOrder(id) {
   if (!confirm("Cancel this order? This can't be undone from here.")) return;
@@ -846,6 +902,7 @@ function dashboardStyles() {
     .shop-admin{background:var(--admin-bg)!important;color:var(--admin-text)!important}.shop-admin .admin-main{background:var(--admin-bg)!important}.shop-admin .admin-side{background:var(--admin-card)!important;border-color:var(--admin-line)!important}.shop-admin .admin-logo,.shop-admin .admin-title,.shop-admin .tab-page-title,.shop-admin .dashboard-card-head h2{color:var(--admin-text)!important}.shop-admin .admin-caption,.shop-admin .admin-eyebrow,.shop-admin .nav-icon,.shop-admin .link-btn{color:var(--admin-primary)!important}.shop-admin .admin-nav button{color:var(--admin-text)!important}.shop-admin .admin-nav button:hover,.shop-admin .queue-row:hover{background:var(--admin-soft)!important}.shop-admin .admin-nav button.active{background:var(--admin-primary)!important;color:var(--admin-on-primary)!important;box-shadow:var(--admin-shadow)!important}.shop-admin .admin-nav button.active .nav-icon{color:var(--admin-on-primary)!important}.shop-admin .dashboard-card,.shop-admin .stat,.shop-admin .order-card,.shop-admin .summary-card,.shop-admin .slot,.shop-admin .overlay-card,.shop-admin .edit-card,.shop-admin .modal-card{background:var(--admin-card)!important;border-color:var(--admin-line)!important;border-radius:var(--admin-radius)!important;box-shadow:var(--admin-card-shadow)!important}.shop-admin input,.shop-admin textarea,.shop-admin select{background:var(--admin-card)!important;color:var(--admin-text)!important;border-color:var(--admin-line)!important;border-radius:calc(var(--admin-radius) * .65)!important}.shop-admin .btn-primary,.shop-admin .small-btn{background:var(--admin-primary)!important;color:var(--admin-on-primary)!important;border-radius:calc(var(--admin-radius) * .65)!important}.shop-admin .btn-secondary,.shop-admin .open-shop{background:var(--admin-card)!important;color:var(--admin-primary)!important;border-color:var(--admin-primary)!important;border-radius:calc(var(--admin-radius) * .65)!important}.shop-admin .admin-top,.shop-admin .dashboard-card-head,.shop-admin .queue-row,.shop-admin .action,.shop-admin .divider,.shop-admin .row{border-color:var(--admin-line)!important}.shop-admin .stat:nth-child(n){background:var(--admin-card)!important;border-color:var(--admin-line)!important}.shop-admin .admin-subtitle,.shop-admin .tab-page-subtitle,.shop-admin .dashboard-card-head span,.shop-admin .queue-name,.shop-admin .action p,.shop-admin .hint,.shop-admin .label{color:var(--admin-muted)!important}.shop-admin.theme-zen{font-family:'Noto Sans JP','Work Sans',sans-serif}.shop-admin.theme-zen .admin-logo,.shop-admin.theme-zen .admin-title,.shop-admin.theme-zen .tab-page-title,.shop-admin.theme-zen h1,.shop-admin.theme-zen h2{font-family:'Noto Serif JP',Georgia,serif!important}.shop-admin.theme-korean{font-family:'Work Sans',sans-serif}.shop-admin.theme-korean .admin-logo,.shop-admin.theme-korean .admin-title,.shop-admin.theme-korean .tab-page-title,.shop-admin.theme-korean h1,.shop-admin.theme-korean h2{font-family:'Work Sans',sans-serif!important}.shop-admin.theme-editorial{font-family:'Work Sans',sans-serif}.shop-admin.theme-editorial .admin-logo,.shop-admin.theme-editorial .admin-title,.shop-admin.theme-editorial .tab-page-title,.shop-admin.theme-editorial h1,.shop-admin.theme-editorial h2{font-family:Georgia,serif!important;text-transform:uppercase}.shop-admin.theme-retro{font-family:'Work Sans',sans-serif}.shop-admin.theme-retro .admin-logo,.shop-admin.theme-retro .admin-title,.shop-admin.theme-retro .tab-page-title,.shop-admin.theme-retro h1,.shop-admin.theme-retro h2{font-family:Georgia,serif!important}.shop-admin.theme-threed{font-family:'Work Sans',sans-serif}.shop-admin.theme-threed .admin-logo,.shop-admin.theme-threed .admin-title,.shop-admin.theme-threed .tab-page-title,.shop-admin.theme-threed h1,.shop-admin.theme-threed h2{font-family:'Work Sans',sans-serif!important}
     .shop-admin [data-theme-preview]{background:var(--preview-bg)!important;color:var(--preview-text)!important;border-color:var(--preview-primary)!important;box-shadow:var(--preview-shadow)!important}.shop-admin [data-theme-preview] .dashboard-card-head{border-color:color-mix(in srgb,var(--preview-text) 18%,transparent)!important}.shop-admin [data-theme-preview] .dashboard-card-head h2,.shop-admin [data-theme-preview] .dashboard-card-head span{color:var(--preview-text)!important}.shop-admin [data-theme-preview] .theme-preview-screen{background:var(--preview-card)!important;color:var(--preview-text)!important;border-color:color-mix(in srgb,var(--preview-text) 22%,transparent)!important}.shop-admin [data-theme-preview] .theme-preview-button,.shop-admin [data-theme-preview] .btn-primary{background:var(--preview-primary)!important;color:var(--preview-bg)!important}.shop-admin [data-theme-preview] .btn-secondary{background:var(--preview-card)!important;color:var(--preview-primary)!important;border-color:var(--preview-primary)!important}
     .costing-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}.costing-table{width:100%;border-collapse:collapse;min-width:860px}.costing-table th,.costing-table td{padding:13px 14px;text-align:left;border-bottom:1px solid var(--admin-line);font-size:13px}.costing-table th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--admin-muted)}.costing-table tbody tr:hover{background:var(--admin-soft)}.idea-board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.idea-card{min-height:190px}.idea-card.idea-archived{opacity:.6}
+    .orders-mobile-list{display:none}.orders-bulk-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px}.orders-bulk-tools button{padding:9px 12px}.orders-table-card{overflow:hidden}.orders-table-wrap{overflow-x:auto}.orders-table{width:100%;border-collapse:collapse;min-width:940px}.orders-table th,.orders-table td{padding:12px 11px;border-bottom:1px solid var(--admin-line);text-align:left;font-size:13px;vertical-align:middle}.orders-table th{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--admin-muted)}.orders-table td small{display:block;margin-top:4px;color:var(--admin-muted)}.orders-table tbody tr:not(.orders-detail-row):hover{background:var(--admin-soft)}.orders-table .btn-secondary{padding:7px 10px}.orders-detail-row td{padding:0 18px 18px;background:var(--admin-soft)}.order-expanded-detail{padding:15px 0}.order-status-select{width:auto!important;min-width:118px;padding:7px 27px 7px 9px!important;font-size:12px!important;font-weight:750;border-width:1px!important}.order-status-pill{display:inline-block;border:1px solid var(--admin-line);border-radius:999px;padding:7px 9px;font-size:11px;color:var(--admin-muted);white-space:nowrap}.status-preparing{color:#9b6616!important}.status-ready{color:#267a47!important}.status-collected{color:#356b45!important}.status-cancelled{color:#b33333!important}
     @media(max-width:1100px){.shop-admin .dashboard-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
     @media(max-width:800px){
       .shop-admin{display:grid;grid-template-columns:142px minmax(0,1fr);align-items:start}
@@ -887,6 +944,7 @@ function dashboardStyles() {
       .shop-admin.mobile-nav-left.nav-collapsed .admin-side-bottom .signout-label{display:none}
       .shop-admin.mobile-nav-left.nav-collapsed .admin-side-bottom .link-btn{font-size:18px;padding:7px 3px}
       .idea-board{grid-template-columns:1fr}.costing-table{min-width:760px}.costing-table th,.costing-table td{padding:10px;font-size:12px}
+      .orders-table-card{display:none}.orders-mobile-list{display:grid;gap:10px}.orders-bulk-tools{position:sticky;top:8px;z-index:20;background:var(--admin-bg);padding:8px 0}.order-compact-card{background:var(--admin-card);border:1px solid var(--admin-line);border-radius:var(--admin-radius);box-shadow:var(--admin-card-shadow);padding:14px}.order-compact-summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start;cursor:pointer}.order-compact-summary.has-select{grid-template-columns:auto minmax(0,1fr) auto}.order-compact-summary>input{width:auto!important;margin-top:3px}.order-compact-summary .mono{font-size:14px}.order-compact-summary>div>div{font-size:13px;margin-top:5px}.order-compact-muted{color:var(--admin-muted)}.order-compact-right{text-align:right;display:grid;gap:7px;justify-items:end;font-size:12px}.order-compact-right>b{font-size:14px}.order-compact-status{margin-top:12px}.order-compact-card .order-expanded-detail{border-top:1px solid var(--admin-line);margin-top:13px;padding-top:13px}.order-status-select{max-width:100%;min-width:132px}
     }
   </style>`;
 }
@@ -1175,39 +1233,48 @@ function renderLogin() {
 
 function renderAdminWelcome() {
   const welcomeBrand = escapeHtml(astate.settings?.store_name || "Your Studio");
-  const welcomeIcon = escapeHtml(astate.settings?.logo_url || "logo.png");
-  const welcomeLogoSize = Math.max(120, Math.min(220, Number(astate.settings?.welcome_logo_circle_size || 160)));
-  const welcomeDurationMs = Math.max(2, Math.min(10, Number(astate.settings?.admin_welcome_duration_seconds || 5))) * 1000;
-  if (!astate.welcomeTimer) {
-    astate.welcomeTimer = setTimeout(() => {
-      astate.welcomePending = false;
-      astate.welcomeTimer = null;
-      render();
-    }, welcomeDurationMs);
-  }
+  const phase = astate.welcomePhase || "idle";
+  const busy = phase === "loading";
+  const success = phase === "success";
+  const failed = phase === "error";
   return `<style>
     @keyframes shizukuWelcomeIn{0%{opacity:0;transform:translateY(18px) scale(.985)}100%{opacity:1;transform:none}}
-    @keyframes slowStudioIconIn{0%{opacity:0;transform:translateY(18px) scale(.78) rotate(-5deg)}70%{transform:translateY(-2px) scale(1.04) rotate(1deg)}100%{opacity:1;transform:none}}
-    @keyframes slowStudioHalo{0%{opacity:0;transform:scale(.6)}55%{opacity:.5}100%{opacity:0;transform:scale(1.45)}}
-    .admin-welcome{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:24px;background:linear-gradient(145deg,#f7f0e5 0%,#eef4e7 48%,#e3eddb 100%);color:#263125;text-align:center;overflow:hidden}
+    @keyframes lumiBreathe{0%,100%{opacity:.68;filter:saturate(.6) brightness(.88)}50%{opacity:.94;filter:saturate(.82) brightness(1)}}
+    @keyframes lumiReady{0%{box-shadow:0 12px 38px rgba(38,49,37,.1)}55%{box-shadow:0 0 0 18px rgba(242,199,107,.12),0 18px 55px rgba(242,199,107,.3)}100%{box-shadow:0 14px 42px rgba(38,49,37,.12)}}
+    .admin-welcome{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:24px;background:linear-gradient(145deg,#f7f0e5 0%,#eef4e7 48%,#e3eddb 100%);color:#263125;text-align:center;overflow:auto}
     .admin-welcome-inner{animation:shizukuWelcomeIn .75s cubic-bezier(.2,.8,.2,1) both}
-    .admin-welcome-mark{position:relative;width:${welcomeLogoSize + 18}px;height:${welcomeLogoSize + 18}px;margin:0 auto 24px;display:grid;place-items:center}
-    .admin-welcome-icon{position:relative;z-index:2;width:${welcomeLogoSize}px;height:${welcomeLogoSize}px;border-radius:50%;border:5px solid rgba(255,255,255,.72);box-shadow:0 16px 42px rgba(38,49,37,.12);padding:12px;background:#fff;object-fit:contain;animation:slowStudioIconIn .9s cubic-bezier(.2,.8,.2,1) both}
-    .admin-welcome-halo{position:absolute;inset:0;border:1.5px solid #71865c;border-radius:50%;animation:slowStudioHalo 1.4s .12s ease-out both}
+    .admin-welcome-mark{width:min(230px,58vw);aspect-ratio:1/1;margin:0 auto 16px;display:grid;place-items:center;overflow:hidden}
+    .admin-welcome-icon{display:block;width:100%;height:100%;object-fit:cover;object-position:center;opacity:.76;filter:saturate(.65) brightness(.92);transition:filter .3s ease,opacity .3s ease,drop-shadow .3s ease}
+    .admin-welcome.is-loading .admin-welcome-icon{animation:lumiBreathe 1.15s ease-in-out infinite}.admin-welcome.is-ready .admin-welcome-mark{animation:lumiReady .55s ease-out}.admin-welcome.is-ready .admin-welcome-icon{opacity:1;filter:saturate(1) brightness(1.04) drop-shadow(0 0 18px rgba(242,199,107,.24))}
     .admin-welcome-kicker{font:800 11px/1.2 'Work Sans',sans-serif;letter-spacing:.18em;color:#7a8c65;text-transform:uppercase;margin-bottom:10px}
     .admin-welcome h1{font:700 clamp(38px,7vw,68px)/.98 Georgia,serif;letter-spacing:-.035em;margin:0}
     .admin-welcome p{font:500 15px/1.5 'Work Sans',sans-serif;color:#68725e;margin:14px 0 0}
     .admin-welcome-enter{margin-top:24px;border:0;border-radius:999px;padding:13px 28px;background:#263125;color:#fff;font:700 14px/1 'Work Sans',sans-serif;cursor:pointer;box-shadow:0 10px 24px rgba(38,49,37,.16)}
     .admin-welcome-enter:hover{transform:translateY(-1px);background:#354434}
-    @media(prefers-reduced-motion:reduce){.admin-welcome-inner,.admin-welcome-icon,.admin-welcome-halo{animation:none}}
-  </style><div class="admin-welcome" role="status" aria-live="polite"><div class="admin-welcome-inner"><div class="admin-welcome-mark"><span class="admin-welcome-halo"></span><img class="admin-welcome-icon" src="${welcomeIcon}" alt="${welcomeBrand} logo"></div><div class="admin-welcome-kicker">Powered by Slow Studio</div><h1>Welcome back,<br>${welcomeBrand}.</h1><p>Everything is ready for today’s slow moments.</p><button class="admin-welcome-enter" onclick="enterAdminNow()">Enter Admin →</button></div></div>`;
+    .admin-welcome-enter:disabled{opacity:.74;cursor:wait}.admin-welcome-error{color:#8e3d32}.admin-welcome-success{color:#4b5d3a;font-weight:800}
+    @media(prefers-reduced-motion:reduce){.admin-welcome-inner,.admin-welcome-icon,.admin-welcome-mark{animation:none!important}}
+  </style><div class="admin-welcome ${busy ? "is-loading" : success ? "is-ready" : ""}" role="status" aria-live="polite"><div class="admin-welcome-inner"><div class="admin-welcome-mark"><img class="admin-welcome-icon" src="lumi-slow-studio.png" alt="Lumi, the little light of Slow Studio"></div><div class="admin-welcome-kicker">Powered by Slow Studio</div><h1>Welcome back,<br>${welcomeBrand}.</h1><p class="${failed ? "admin-welcome-error" : success ? "admin-welcome-success" : ""}">${failed ? "Something needs attention." : success ? "Everything is ready." : "Everything is ready for today’s slow moments."}</p>${failed ? `<div class="hint" style="max-width:360px;margin:8px auto 0;">${escapeHtml(astate.welcomeError || "Please try again.")}</div>` : ""}<button class="admin-welcome-enter" ${busy || success ? "disabled" : ""} onclick="enterAdminNow()">${busy ? "Getting things ready…" : failed ? "Try again" : success ? "All ready." : "Enter Admin →"}</button></div></div>`;
 }
 
-function enterAdminNow() {
-  if (astate.welcomeTimer) clearTimeout(astate.welcomeTimer);
-  astate.welcomeTimer = null;
-  astate.welcomePending = false;
+async function enterAdminNow() {
+  if (astate.welcomePhase === "loading" || astate.welcomePhase === "success") return;
+  astate.welcomePhase = "loading";
+  astate.welcomeError = "";
   render();
+  const started = Date.now();
+  try {
+    if (!astate.settings || astate.loading) await loadAll();
+    if (astate.loadError) throw new Error(astate.loadError);
+    const remaining = Math.max(0, 550 - (Date.now() - started));
+    if (remaining) await new Promise((resolve) => setTimeout(resolve, remaining));
+    astate.welcomePhase = "success";
+    render();
+    setTimeout(() => { astate.welcomePending = false; astate.welcomePhase = "idle"; render(); }, 420);
+  } catch (error) {
+    astate.welcomePhase = "error";
+    astate.welcomeError = (error && error.message) || "Please try again.";
+    render();
+  }
 }
 
 function toggleAdminNav() {
@@ -1494,29 +1561,25 @@ function renderOrders() {
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:13px;">${filters.map(([key, label]) => `<button class="${astate.orderFilter === key ? "btn-primary" : "btn-secondary"}" style="padding:8px 11px;font-size:12px;" onclick="setOrderFilter('${key}')">${label}</button>`).join("")}</div>
   </section>`;
-  if (astate.orders.length === 0) return controls + `<div class="empty">No orders yet.</div>`;
-  if (orders.length === 0) return controls + `<div class="empty">No orders match this search or filter.</div>`;
-  return controls + orders.map((o) => {
+  const statusOptions = (o) => [
+    ["confirmed", "Paid"], ["preparing", "Preparing"], ["ready", "Ready"], ["collected", "Collected"], ["cancelled", "Cancelled"]
+  ].map(([value,label]) => `<option value="${value}" ${o.order_status === value ? "selected" : ""}>${label}</option>`).join("");
+  const quickStatus = (o) => o.payment_status === "paid" ? `<select class="order-status-select status-${escapeHtml(o.order_status || "confirmed")}" aria-label="Change status for ${escapeHtml(o.order_number || "order")}" onchange="updateOrderStatus('${o.id}',this.value)">${statusOptions(o)}</select>` : `<span class="order-status-pill">${escapeHtml(PAY_LABEL[o.payment_status] || ORDER_LABEL[o.order_status] || "Payment review")}</span>`;
+  const details = (o) => {
     const redemption = astate.promoRedemptions.find((row) => String(row.order_id) === String(o.id));
     const subtotal = (o.order_items || []).reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
     const discount = redemption ? Math.max(0, subtotal - Number(o.total || 0)) : 0;
-    return `
-    <div class="order-card">
-      <div class="order-top">
-        <div class="mono">${o.order_number || o.id}</div>
-        <div class="status-tag" style="color:${PAY_COLOR[o.payment_status] || "#8A8478"}">${PAY_LABEL[o.payment_status] || o.payment_status || "—"}</div>
-      </div>
-      <div class="order-meta">${o.customer_name || ""} · ${o.customer_phone || ""}${o.instagram ? " · @" + o.instagram : ""}</div>
-      <div class="order-meta">Pickup: ${o.collection_date || ""} ${o.collection_time || ""}</div>
+    return `<div class="order-expanded-detail">
+      <div class="order-meta">Phone: ${escapeHtml(o.customer_phone || "—")}${o.instagram ? " · @" + escapeHtml(o.instagram) : ""}</div>
       <div class="order-meta">Collection point: <b>${escapeHtml(o.collection_point || "—")}</b></div>
-      <div class="order-meta">Order status: <b style="color:${ORDER_COLOR[o.order_status] || "inherit"}">${ORDER_LABEL[o.order_status] || o.order_status || "—"}</b></div>
+      ${astate.customerNotes[customerKey(o)] ? `<div class="ref-note">Seller note: ${escapeHtml(astate.customerNotes[customerKey(o)])}</div>` : ""}
       <div style="margin-top:8px;">
         ${(o.order_items || []).map((it) => `
-          <div class="row"><span>${it.product_name} × ${it.quantity}</span><span>${money(it.subtotal)}</span></div>
-          ${(it.order_item_options || []).length ? `<div class="hint" style="margin:0 0 4px;text-align:left;">${it.order_item_options.map((op) => op.option_name).join(", ")}</div>` : ""}
+          <div class="row"><span>${escapeHtml(it.product_name)} × ${it.quantity}</span><span>${money(it.subtotal)}</span></div>
+          ${(it.order_item_options || []).length ? `<div class="hint" style="margin:0 0 4px;text-align:left;">${it.order_item_options.map((op) => escapeHtml(op.option_name)).join(", ")}</div>` : ""}
         `).join("")}
       </div>
-      ${o.notes ? `<div class="ref-note">Note: ${o.notes}</div>` : ""}
+      ${o.notes ? `<div class="ref-note">Customer note: ${escapeHtml(o.notes)}</div>` : ""}
       ${o.payment_transaction_reference ? `<div class="ref-note">PayNow transaction reference: <b>${escapeHtml(o.payment_transaction_reference)}</b></div>` : ""}
       ${o.payment_screenshot_url ? `<div style="margin-top:8px;"><button class="small-btn" onclick='openPaymentProof(${JSON.stringify(o.payment_screenshot_url)})'>View payment screenshot</button></div>` : ""}
       <div class="divider"></div>
@@ -1524,16 +1587,20 @@ function renderOrders() {
       <div class="row bold"><span class="label">Total</span><span>${money(o.total)}</span></div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center;">
         <button class="btn-secondary" onclick="editOrder('${o.id}')">Edit order</button>
+        <button class="btn-secondary" onclick="setTab('messages')">Message customer</button>
         ${o.order_status !== "cancelled" && (o.payment_status === "submitted" || o.payment_status === "awaiting_payment") ? `<button class="small-btn" onclick="confirmPayment('${o.id}')">✓ Confirm payment</button>` : ""}
         ${o.order_status !== "cancelled" && o.payment_status === "submitted" ? `<button class="link-danger" onclick="rejectPayment('${o.id}')">Reject proof</button>` : ""}
         ${o.payment_status === "awaiting_payment" ? `<span class="hint" style="margin:0;">Check the Instagram DM payment screenshot before confirming.</span>` : ""}
-        ${o.payment_status === "paid" && o.order_status === "confirmed" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','preparing')">Start preparing</button>` : ""}
-        ${o.payment_status === "paid" && o.order_status === "preparing" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','ready')">Mark ready for collection</button>` : ""}
-        ${o.payment_status === "paid" && o.order_status === "ready" ? `<button class="small-btn" onclick="updateOrderStatus('${o.id}','collected')">Mark collected</button>` : ""}
         ${o.order_status !== "cancelled" && o.order_status !== "collected" ? `<button class="link-danger" onclick="cancelOrder('${o.id}')">Cancel order</button>` : ""}
       </div>
     </div>`;
-  }).join("");
+  };
+  const bulkBar = `<div class="orders-bulk-tools"><button class="${astate.bulkOrderMode ? "btn-primary" : "btn-secondary"}" onclick="toggleBulkOrderMode()">${astate.bulkOrderMode ? "Exit bulk mode" : "Select multiple"}</button>${astate.bulkOrderMode ? `<span><b>${astate.selectedOrderIds.length}</b> selected</span><button class="btn-secondary" onclick="bulkUpdateOrderStatus('preparing')">Mark Preparing</button><button class="btn-secondary" onclick="bulkUpdateOrderStatus('ready')">Mark Ready</button><button class="btn-secondary" onclick="bulkUpdateOrderStatus('collected')">Mark Collected</button>` : ""}</div>`;
+  if (astate.orders.length === 0) return controls + `<div class="empty">No orders yet.</div>`;
+  if (orders.length === 0) return controls + `<div class="empty">No orders match this search or filter.</div>`;
+  const mobile = orders.map((o) => { const expanded = astate.expandedOrderIds.includes(String(o.id)); return `<article class="order-compact-card ${expanded ? "is-expanded" : ""}"><div class="order-compact-summary ${astate.bulkOrderMode ? "has-select" : ""}" onclick="toggleOrderExpanded('${o.id}')">${astate.bulkOrderMode ? `<input type="checkbox" aria-label="Select ${escapeHtml(o.order_number)}" ${astate.selectedOrderIds.includes(String(o.id)) ? "checked" : ""} onclick="event.stopPropagation()" onchange="toggleOrderSelected('${o.id}',this.checked)">` : ""}<div><b class="mono">${escapeHtml(o.order_number || o.id)}</b><div>${escapeHtml(o.customer_name || "Customer")}</div><div class="order-compact-muted">${escapeHtml(o.collection_date || "")} · ${escapeHtml(o.collection_time || "")}</div></div><div class="order-compact-right"><b>${money(o.total)}</b><span style="color:${PAY_COLOR[o.payment_status] || "var(--admin-muted)"}">● ${escapeHtml(PAY_LABEL[o.payment_status] || o.payment_status || "—")}</span><span>${expanded ? "⌃" : "⌄"}</span></div></div><div class="order-compact-status" onclick="event.stopPropagation()">${quickStatus(o)}</div>${expanded ? details(o) : ""}</article>`; }).join("");
+  const desktop = `<section class="dashboard-card orders-table-card"><div class="orders-table-wrap"><table class="orders-table"><thead><tr><th>${astate.bulkOrderMode ? "Select" : ""}</th><th>Order</th><th>Customer</th><th>Pickup</th><th>Payment</th><th>Status</th><th>Total</th><th>Actions</th></tr></thead><tbody>${orders.map((o) => { const expanded=astate.expandedOrderIds.includes(String(o.id)); return `<tr><td>${astate.bulkOrderMode ? `<input type="checkbox" ${astate.selectedOrderIds.includes(String(o.id)) ? "checked" : ""} onchange="toggleOrderSelected('${o.id}',this.checked)">` : ""}</td><td><b class="mono">${escapeHtml(o.order_number || o.id)}</b></td><td><b>${escapeHtml(o.customer_name || "Customer")}</b><small>${escapeHtml(o.customer_phone || "")}</small></td><td>${escapeHtml(o.collection_date || "")}<small>${escapeHtml(o.collection_time || "")}</small></td><td><span style="color:${PAY_COLOR[o.payment_status] || "inherit"}">${escapeHtml(PAY_LABEL[o.payment_status] || o.payment_status || "—")}</span></td><td>${quickStatus(o)}</td><td><b>${money(o.total)}</b></td><td><button class="btn-secondary" onclick="toggleOrderExpanded('${o.id}')">${expanded ? "Close" : "View"}</button></td></tr>${expanded ? `<tr class="orders-detail-row"><td colspan="8">${details(o)}</td></tr>` : ""}`; }).join("")}</tbody></table></div></section>`;
+  return controls + bulkBar + `<div class="orders-mobile-list">${mobile}</div>` + desktop;
 }
 
 async function saveProductOrder() {

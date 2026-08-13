@@ -1612,6 +1612,9 @@ function startLiveOrderTracking() {
   state.tracking.live = true;
   orderTrackingTimer = setInterval(refreshTrackedOrder, 15000);
 }
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && state.tracking.order) refreshTrackedOrder();
+});
 async function refreshTrackedOrder() {
   const t = state.tracking;
   if (!t.order || document.visibilityState !== "visible") return;
@@ -1681,7 +1684,7 @@ function renderReviewForm() {
 function renderTrackOrder() {
   const t = state.tracking;
   const status = trackingStatus(t.order);
-  const stages = [state.store.track_stage_payment || "Payment review", state.store.track_stage_confirmed || "Confirmed", state.store.track_stage_preparing || "Preparing", state.store.track_stage_ready || "Ready"];
+  const stages = [state.store.track_stage_payment || "Order received", state.store.track_stage_confirmed || "Payment confirmed", state.store.track_stage_preparing || "Preparing", state.store.track_stage_ready || "Ready for collection", state.store.track_stage_collected || "Collected"];
   return `
     ${header()}
     <div class="screen">
@@ -1695,7 +1698,7 @@ function renderTrackOrder() {
         <button class="primary-btn" style="margin-top:16px;" ${t.loading ? "disabled" : ""} onclick="findOrder()">${t.loading ? "Checking…" : escapeHtml(state.store.track_button_text || "Track order")}</button>
         ${t.message ? `<div class="ref-note" style="color:#B33333;">${escapeHtml(t.message)}</div>` : ""}
       </div>
-      ${t.order ? `<div class="summary-card" style="margin-top:16px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;"><span style="font-size:11px;font-weight:800;letter-spacing:.08em;color:#4B5D3A;">● ${escapeHtml(state.store.track_live_updates_text || "LIVE UPDATES")}</span><button class="pill" style="padding:6px 9px;font-size:11px;" onclick="refreshTrackedOrder()">${escapeHtml(state.store.track_refresh_text || "Refresh now")}</button></div><div class="row"><span class="label">${escapeHtml(state.store.track_order_label || "Order")}</span><span class="mono">${escapeHtml(t.order.order_number)}</span></div><div class="row"><span class="label">${escapeHtml(state.store.track_pickup_label || "Pickup")}</span><span>${escapeHtml(t.order.collection_date || "")} · ${escapeHtml(t.order.collection_time || "")}</span></div><div class="divider"></div><div class="center" style="padding:12px 0 8px;"><div style="display:inline-flex;width:54px;height:54px;align-items:center;justify-content:center;background:var(--matcha);color:var(--cream);border-radius:999px;font-size:24px;">✓</div><div class="display" style="font-size:20px;margin-top:12px;">${escapeHtml(status.title)}</div><div class="hint" style="margin:8px 0 14px;line-height:1.5;">${escapeHtml(status.note)}</div></div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:4px 0 2px;">${stages.map((stage, index) => `<div style="text-align:center;"><div style="height:6px;border-radius:99px;background:${index <= status.step ? "var(--matcha)" : "var(--line)"};"></div><div style="font-size:9px;color:var(--muted);line-height:1.25;margin-top:6px;">${escapeHtml(stage)}</div></div>`).join("")}</div></div>${renderOrderChat()}${t.order.order_status === "collected" && t.order.payment_status === "paid" ? renderReviewForm() : ""}` : ""}
+      ${t.order ? `<div class="summary-card" style="margin-top:16px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;"><span style="font-size:11px;font-weight:800;letter-spacing:.08em;color:#4B5D3A;">● ${escapeHtml(state.store.track_live_updates_text || "LIVE UPDATES")}</span><span class="hint" style="margin:0;font-size:10px;">Updates automatically</span></div><div class="row"><span class="label">${escapeHtml(state.store.track_order_label || "Order")}</span><span class="mono">${escapeHtml(t.order.order_number)}</span></div><div class="row"><span class="label">${escapeHtml(state.store.track_pickup_label || "Pickup")}</span><span>${escapeHtml(t.order.collection_date || "")} · ${escapeHtml(t.order.collection_time || "")}</span></div><div class="divider"></div><div class="center" style="padding:12px 0 8px;"><div style="display:inline-flex;width:54px;height:54px;align-items:center;justify-content:center;background:var(--matcha);color:var(--cream);border-radius:999px;font-size:24px;">✓</div><div class="display" style="font-size:20px;margin-top:12px;">${escapeHtml(status.title)}</div><div class="hint" style="margin:8px 0 14px;line-height:1.5;">${escapeHtml(status.note)}</div></div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin:4px 0 2px;">${stages.map((stage, index) => `<div style="text-align:center;"><div style="height:6px;border-radius:99px;background:${index <= status.step ? "var(--matcha)" : "var(--line)"};"></div><div style="font-size:8px;color:var(--muted);line-height:1.25;margin-top:6px;">${escapeHtml(stage)}</div></div>`).join("")}</div></div>${renderOrderChat()}${t.order.order_status === "collected" && t.order.payment_status === "paid" ? renderReviewForm() : ""}` : ""}
     </div>`;
 }
 
