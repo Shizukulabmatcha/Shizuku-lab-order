@@ -59,6 +59,7 @@ const astate = {
   recipeDraftProductId: null,
   recipeDraft: null,
   recipeDirty: false,
+  recipeZeroCost: false,
   suppliers: [],
   wholesaleItems: [],
   inspirationIdeas: [],
@@ -1025,9 +1026,9 @@ function dashboardStats() {
   const missingRecipeProducts = new Map();
   const foodCost = monthly.reduce((orderSum, order) => orderSum + (order.order_items || []).reduce((itemSum, item) => {
     const recipeRows = astate.recipes.filter((row) => String(row.product_id) === String(item.product_id));
-    if (!recipeRows.length) {
-      const product = astate.menu.find((row) => String(row.id) === String(item.product_id))
-        || astate.menu.find((row) => String(row.name) === String(item.product_name));
+    const product = astate.menu.find((row) => String(row.id) === String(item.product_id))
+      || astate.menu.find((row) => String(row.name) === String(item.product_name));
+    if (!recipeRows.length && product?.food_cost_confirmed_zero !== true) {
       const id = product?.id || item.product_id;
       if (id) missingRecipeProducts.set(String(id), { id, name: product?.name || item.product_name || "Unknown product" });
     }
@@ -1244,7 +1245,7 @@ function renderDashboardTab() {
     : "Not refreshed yet";
   const foodCostWarnings = stats.missingRecipeProducts.map((product) => `<button class="dashboard-warning-link" onclick="focusDashboardIssue('food_cost','${escapeHtml(product.id)}')">${escapeHtml(product.name)} is missing Food Cost →</button>`).join("");
   return `
-    <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</h1><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><div class="dashboard-top-actions"><button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing ? "disabled" : ""}>${astate.dashboardRefreshing ? "Refreshing…" : "↻ Refresh"}</button><span class="dashboard-refresh-meta">Last updated: ${escapeHtml(updatedTime)}</span><a class="open-shop" href="order.html">Open customer shop ↗</a></div></div>
+    <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</h1><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><div class="dashboard-top-actions">${astate.settings?.show_dashboard_refresh !== false ? `<button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing ? "disabled" : ""}>${astate.dashboardRefreshing ? "Refreshing…" : "↻ Refresh"}</button><span class="dashboard-refresh-meta">Last updated: ${escapeHtml(updatedTime)}</span>` : ""}<a class="open-shop" href="order.html">Open customer shop ↗</a></div></div>
     <div class="stat-grid dashboard-summary-grid">
       <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Revenue this month</div><div class="stat-value">${money(stats.revenue)}</div><div class="stat-help">Paid orders only</div></div>
       <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Orders this month</div><div class="stat-value">${stats.orders}</div><div class="stat-help">${stats.paymentReview ? `<button class="dashboard-warning-link" onclick="focusDashboardIssue('payment_review')">${stats.paymentReview} need payment review →</button>` : "Everything is up to date"}</div></div>
@@ -1421,8 +1422,10 @@ function inventoryField(key, value) { if (!astate.inventoryDraft) return; astate
 async function saveInventoryItem() { const d = astate.inventoryDraft; if (!d || !String(d.name).trim()) return alert("Enter the ingredient name."); const payload = { name: String(d.name).trim(), unit: String(d.unit || "g").trim(), stock_quantity: Number(d.stock_quantity || 0), low_stock_level: Number(d.low_stock_level || 0), pack_size: Math.max(.0001, Number(d.pack_size || 1)), pack_cost: Number(d.pack_cost || 0), supplier: String(d.supplier || "").trim() || null, cost_type: d.cost_type === "packaging" ? "packaging" : "ingredient" }; const result = d.id ? await db.from("inventory_items").update(payload).eq("id", d.id).select().single() : await db.from("inventory_items").insert(payload).select().single(); if (result.error) return alert("Could not save ingredient: " + result.error.message); astate.inventoryDraft = null; await loadAll(); }
 async function deleteInventoryItem(id) { if (!confirm("Delete this ingredient and its recipe links?")) return; const { error } = await db.from("inventory_items").delete().eq("id", id); if (error) return alert(error.message); await loadAll(); }
 function beginRecipeDraft(productId) {
+  const product = astate.menu.find((row) => String(row.id) === String(productId));
   astate.recipeDraftProductId = productId;
   astate.recipeDraft = astate.recipes.filter((row) => String(row.product_id) === String(productId)).map((row) => ({ ...row, draft_id: String(row.id) }));
+  astate.recipeZeroCost = product?.food_cost_confirmed_zero === true;
   astate.recipeDirty = false;
 }
 function activeRecipeRows(productId) {
@@ -1445,6 +1448,14 @@ function addRecipeIngredient(inventoryId) {
     inventory_item_id: inventoryId,
     quantity_used: 0,
   });
+  astate.recipeZeroCost = false;
+  astate.recipeDirty = true;
+  render();
+}
+function setRecipeZeroCost(checked) {
+  if (checked && (astate.recipeDraft || []).length && !confirm("Marking this product as $0 cost will remove its current ingredient recipe when you save. Continue?")) { render(); return; }
+  astate.recipeZeroCost = !!checked;
+  if (checked) astate.recipeDraft = [];
   astate.recipeDirty = true;
   render();
 }
@@ -1470,6 +1481,11 @@ async function saveProductRecipe() {
   if (error) {
     if (button) { button.disabled = false; button.textContent = "Save food cost"; }
     return alert("Could not save food cost: " + error.message + "\n\nRun the latest supabase-customer-product-stock.sql once if this is the first time using the Save button.");
+  }
+  const zeroResult = await db.from("products").update({ food_cost_confirmed_zero: astate.recipeZeroCost === true }).eq("id", productId);
+  if (zeroResult.error) {
+    if (button) { button.disabled = false; button.textContent = "Save food cost"; }
+    return alert("Food cost recipe was saved, but the $0 cost choice could not be saved: " + zeroResult.error.message + "\n\nRun supabase-zero-food-cost-option.sql once, then save again.");
   }
   astate.recipeDraft = null;
   astate.recipeDraftProductId = null;
@@ -1560,7 +1576,8 @@ function renderInventoryTab() {
       <section id="food-cost-editor" class="dashboard-card"><div class="dashboard-card-head"><div><h2>Food cost recipe</h2><span id="recipe-cost-header">${money(cost)} per serving</span></div><button id="save-food-cost-btn" class="btn-primary" ${astate.recipeDirty ? "" : "disabled"} onclick="saveProductRecipe()">Save food cost</button></div>
         <div style="padding:20px"><div class="field"><label>Product</label><select onchange="setRecipeProduct(this.value)">${astate.menu.map((product) => `<option value="${product.id}" ${String(product.id) === String(productId) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div>
           ${recipeHtml}
-          <div class="field" style="margin-top:18px"><label>Add ingredient or packaging</label><select id="food-cost-add-item" onchange="if(this.value){addRecipeIngredient(this.value)}"><option value="">Choose cost item…</option>${astate.inventory.filter((item) => !recipeRows.some((row) => String(row.inventory_item_id) === String(item.id))).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></div>
+          <label class="slot" style="cursor:pointer;gap:10px;margin:16px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${astate.recipeZeroCost ? "checked" : ""} onchange="setRecipeZeroCost(this.checked)"><span><b>This product intentionally has $0 cost</b><br><span class="hint">Use this only when there is genuinely no direct food or packaging cost.</span></span></label>
+          <div class="field" style="margin-top:18px"><label>Add ingredient or packaging</label><select id="food-cost-add-item" ${astate.recipeZeroCost ? "disabled" : ""} onchange="if(this.value){addRecipeIngredient(this.value)}"><option value="">Choose cost item…</option>${astate.inventory.filter((item) => !recipeRows.some((row) => String(row.inventory_item_id) === String(item.id))).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></div>
           <div class="ref-note">Add both ingredients and packaging (cup, lid, straw, sticker or carrier). Edit everything first, then press Save food cost once.</div>
         </div>
       </section>
@@ -1963,6 +1980,7 @@ function renderSettingsTab() {
     ${field("Store name", "store_name")}
     ${field("Store tagline", "store_tagline", "雫ラボ · crafted drop by drop")}
     <div class="field"><label>Admin mobile menu position</label><select onchange="onSettingsField('admin_mobile_nav_position',this.value)"><option value="left" ${(s.admin_mobile_nav_position || "left") === "left" ? "selected" : ""}>Left sidebar</option><option value="top" ${s.admin_mobile_nav_position === "top" ? "selected" : ""}>Top menu</option></select><div class="hint" style="text-align:left;margin-top:5px;">Only changes the Admin layout on phones. Desktop stays on the left.</div></div>
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_dashboard_refresh !== false ? "checked" : ""} onchange="onSettingsField('show_dashboard_refresh',this.checked)"><span><b>Show Dashboard Refresh and Last updated</b><br><span class="hint">Untick to hide both items from the top of the Admin Dashboard.</span></span></label>
     ${field("Instagram (without @)", "instagram")}
     ${field("Shizuku Lab website link (optional)", "website_url", "https://your-brand-website.com")}
     <div class="divider"></div>
@@ -2141,7 +2159,15 @@ const SYSTEM_THEMES = {
   korean:{label:"Korean Minimal",note:"Soft banner and rounded cards",primary:"#9B8172",background:"#FAF7F2",card:"#F0EAE4",text:"#4B4742",heading:"work_sans",body:"work_sans",menu:"gallery"},
   editorial:{label:"Editorial Café",note:"Magazine-style monochrome menu",primary:"#111111",background:"#FFFFFF",card:"#FFFFFF",text:"#111111",heading:"georgia",body:"work_sans",menu:"list"},
   retro:{label:"Retro Menu Board",note:"Cream, brick red and printed edges",primary:"#9A3E2F",background:"#F4E1B8",card:"#FFF8E8",text:"#3D2B20",heading:"georgia",body:"work_sans",menu:"list"},
-  threed:{label:"3D Bento",note:"Lavender tiles and raised controls",primary:"#6254A3",background:"#EEEAFB",card:"#FFFFFF",text:"#292638",heading:"work_sans",body:"work_sans",menu:"gallery"}
+  threed:{label:"3D Bento",note:"Lavender tiles and raised controls",primary:"#6254A3",background:"#EEEAFB",card:"#FFFFFF",text:"#292638",heading:"work_sans",body:"work_sans",menu:"gallery"},
+  sakura:{label:"Sakura Wash",note:"Dusty rose, warm paper and soft rounded cards",primary:"#A75568",background:"#F8EEF0",card:"#FFF9F7",text:"#402F34",heading:"fraunces",body:"work_sans",menu:"gallery"},
+  coastal:{label:"Coastal Glass",note:"Airy blue panels with crisp navy details",primary:"#326A7C",background:"#EAF4F5",card:"#F9FFFF",text:"#20383F",heading:"work_sans",body:"work_sans",menu:"gallery"},
+  cocoa:{label:"Cocoa Atelier",note:"Espresso lines, oat paper and crafted warmth",primary:"#6B4636",background:"#EFE2D2",card:"#FFF9EF",text:"#33251F",heading:"georgia",body:"work_sans",menu:"list"},
+  matcha_modern:{label:"Matcha Modern",note:"Deep matcha green, warm cream and clean premium spacing",primary:"#173F32",background:"#F4F0E4",card:"#FFFCF5",text:"#17342B",heading:"fraunces",body:"work_sans",menu:"gallery"},
+  japanese_paper:{label:"Japanese Paper",note:"Warm washi paper, black ink and restrained vermilion",primary:"#B94735",background:"#F3EBDD",card:"#FBF7EE",text:"#2E2A27",heading:"noto_serif_jp",body:"noto_sans_jp",menu:"list"},
+  strawberry_milk:{label:"Strawberry Milk",note:"Soft blush, berry pink and extra-rounded friendly cards",primary:"#C64D68",background:"#FFF0F3",card:"#FFFBFB",text:"#552F39",heading:"fraunces",body:"work_sans",menu:"gallery"},
+  midnight_studio:{label:"Midnight Studio",note:"Deep navy, champagne gold and softly illuminated panels",primary:"#E0BE74",background:"#111827",card:"#1D2738",text:"#F6EDD8",heading:"georgia",body:"work_sans",menu:"gallery"},
+  nordic_cafe:{label:"Nordic Café",note:"Soft grey, sage green and calm functional simplicity",primary:"#71836A",background:"#EEF0EB",card:"#FAFAF7",text:"#343B33",heading:"work_sans",body:"work_sans",menu:"list"}
 };
 
 function applyOrderingTheme(name) {

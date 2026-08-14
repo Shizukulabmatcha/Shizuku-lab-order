@@ -174,6 +174,16 @@ function storefrontThemeStyle() {
   const s = state.store;
   return `<style>:root{--matcha:${escapeHtml(s.theme_primary_color || "#4B5D3A")};--cream:${escapeHtml(s.theme_background_color || "#F3EEE3")};--card:${escapeHtml(s.theme_card_color || "#FFFFFF")};--ink:${escapeHtml(s.theme_text_color || "#2A2A22")};--loyalty-card-bg:${escapeHtml(s.loyalty_card_background || "#1E473E")};--loyalty-card-text:${escapeHtml(s.loyalty_card_text_color || "#F9F4E8")};--loyalty-card-accent:${escapeHtml(s.loyalty_card_accent_color || "#CAE4B3")};--cms-body-size:${Math.max(12,Math.min(22,Number(s.theme_body_size||14)))}px;--cms-product-size:${Math.max(12,Math.min(26,Number(s.theme_product_name_size||15)))}px;--cms-price-size:${Math.max(12,Math.min(24,Number(s.theme_price_size||14)))}px;--cms-button-size:${Math.max(12,Math.min(22,Number(s.theme_button_size||14)))}px;}body{font-family:${themeFont(s.theme_body_font,"'Work Sans',sans-serif")};font-size:var(--cms-body-size)}.display{font-family:${themeFont(s.theme_heading_font,"'Fraunces',serif")}}.item-name{font-size:var(--cms-product-size)!important}.item-price,.discount-price{font-size:var(--cms-price-size)!important}.primary-btn,.pill{font-size:var(--cms-button-size)!important}.screen>div[style*="linear-gradient(135deg,#1e473e"]{background:var(--loyalty-card-bg)!important;color:var(--loyalty-card-text)!important}.screen>div[style*="linear-gradient(135deg,#1e473e"] [style*="background:#cae4b3"]{background:var(--loyalty-card-accent)!important}</style>`;
 }
+function applyStorefrontThemeVariables() {
+  const root = document.documentElement;
+  const s = state.store || {};
+  root.style.setProperty("--matcha", s.theme_primary_color || "#4B5D3A");
+  root.style.setProperty("--cream", s.theme_background_color || "#F3EEE3");
+  root.style.setProperty("--card", s.theme_card_color || "#FFFFFF");
+  root.style.setProperty("--ink", s.theme_text_color || "#2A2A22");
+  document.body.style.backgroundColor = s.theme_background_color || "#F3EEE3";
+  document.body.style.color = s.theme_text_color || "#2A2A22";
+}
 function originalPrice(item) { return Number(item?.price || 0); }
 function salePrice(item) {
   const original = originalPrice(item);
@@ -1810,13 +1820,14 @@ function render() {
   if (!app) return;
   const screenChanged = lastRenderedScreen !== null && lastRenderedScreen !== state.screen;
   lastRenderedScreen = state.screen;
+  applyStorefrontThemeVariables();
   app.style.setProperty("--cms-heading-size", `${Math.max(18, Math.min(48, Number(state.store.theme_heading_size || 25)))}px`);
   app.style.setProperty("--product-detail-image-height", `${Math.max(100, Math.min(420, Number(state.store.product_detail_image_height || 180)))}px`);
   app.style.setProperty("--product-option-text-size", `${Math.max(12, Math.min(24, Number(state.store.product_option_text_size || 15)))}px`);
   app.classList.toggle("compact-product-options", state.store.product_option_compact !== false);
   app.classList.toggle("contain-product-image", state.store.product_detail_image_fit === "contain");
   app.classList.toggle("product-options-screen", state.screen === "options" || state.screen === "bundle");
-  ["zen","korean","editorial","retro","threed"].forEach((name) => app.classList.toggle(`theme-${name}`, (state.store.ordering_theme || state.store.system_theme || "zen") === name));
+  ["zen","korean","editorial","retro","threed","sakura","coastal","cocoa","matcha_modern","japanese_paper","strawberry_milk","midnight_studio","nordic_cafe"].forEach((name) => app.classList.toggle(`theme-${name}`, (state.store.ordering_theme || state.store.system_theme || "zen") === name));
   if (state.loading) { app.innerHTML = `<div class="loading">Loading Shizuku Lab…</div>`; return; }
   let html = "";
   if (state.screen === "menu") html = renderMenu();
