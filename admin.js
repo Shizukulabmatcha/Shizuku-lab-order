@@ -70,6 +70,9 @@ const astate = {
   editingOrder: null,
   loading: true,
   loadError: null,
+  dashboardRefreshing: false,
+  dashboardLastUpdated: null,
+  dashboardFocusTarget: null,
   editing: null,
 };
 
@@ -159,8 +162,10 @@ async function clearAvailabilityOverride() {
   render();
 }
 
-async function loadAll() {
-  astate.loading = true; astate.loadError = null; render();
+async function loadAll(options = {}) {
+  const silent = !!options.silent;
+  let loadSucceeded = true;
+  if (!silent) { astate.loading = true; astate.loadError = null; render(); }
   if (IS_CONFIGURED) {
     try {
       // try the nested query first (needs FKs orders<-order_items<-order_item_options)
@@ -272,6 +277,7 @@ async function loadAll() {
       if (!astate.calendarMonth) astate.calendarMonth = astate.selectedAvailabilityDate.slice(0, 7) + "-01";
       setAvailabilityDraft(astate.selectedAvailabilityDate);
     } catch (e) {
+      loadSucceeded = false;
       astate.loadError = (e && e.message) || String(e);
       astate.orders = []; astate.menu = [];
     }
@@ -279,8 +285,44 @@ async function loadAll() {
     astate.orders = []; astate.menu = [];
   }
   astate.loading = false;
+  if (loadSucceeded) astate.dashboardLastUpdated = new Date();
   render();
   subscribeToOrderChanges();
+}
+
+async function refreshDashboard() {
+  if (astate.dashboardRefreshing) return;
+  astate.dashboardRefreshing = true;
+  astate.loadError = null;
+  render();
+  try {
+    await loadAll({ silent: true });
+  } finally {
+    astate.dashboardRefreshing = false;
+    render();
+  }
+}
+
+function focusDashboardIssue(type, id = "") {
+  if (type === "food_cost") {
+    astate.dashboardFocusTarget = { type, id: String(id) };
+    astate.tab = "inventory";
+    astate.recipeProductId = id;
+    beginRecipeDraft(id);
+    render();
+    requestAnimationFrame(() => {
+      const target = document.getElementById("food-cost-editor");
+      if (target) { target.scrollIntoView({ behavior: "smooth", block: "center" }); target.classList.add("dashboard-target-highlight"); }
+      const field = document.getElementById("food-cost-add-item");
+      if (field) field.focus({ preventScroll: true });
+    });
+    return;
+  }
+  if (type === "payment_review") {
+    astate.orderFilter = "payment";
+    astate.tab = "orders";
+    render();
+  }
 }
 
 async function confirmPayment(id) {
@@ -909,6 +951,8 @@ function dashboardStyles() {
     .shop-admin.nav-collapsed .admin-side{width:76px;flex-basis:76px;padding-left:9px;padding-right:9px}.shop-admin.nav-collapsed .admin-logo,.shop-admin.nav-collapsed .admin-caption,.shop-admin.nav-collapsed .admin-nav-label,.shop-admin.nav-collapsed .admin-side-bottom,.shop-admin.nav-collapsed .nav-text{display:none}.shop-admin.nav-collapsed .admin-collapse-toggle{position:relative;top:auto;right:auto;margin:0 auto 18px}.shop-admin.nav-collapsed .admin-nav{padding-right:0}.shop-admin.nav-collapsed .admin-nav button{padding:12px 5px;text-align:center}.shop-admin.nav-collapsed .admin-nav .nav-icon{width:auto;margin:0;font-size:19px}
     .shop-admin .admin-side-bottom{margin:16px 8px 0;border-top:1px solid #eadfd2;padding:18px 0 0;color:#6b645b;font-size:13px;flex:0 0 auto}.shop-admin .admin-side-bottom a{color:#4d633d;text-decoration:none;font-weight:700}
     .shop-admin .admin-main{width:100%;max-width:1500px;margin:0 auto;padding:42px 54px 80px}.shop-admin .admin-top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;border-bottom:1px solid #eadfd2;padding-bottom:26px;margin-bottom:28px}.shop-admin .admin-eyebrow{font-size:12px;font-weight:800;letter-spacing:.12em;color:#ef7138;text-transform:uppercase;margin-bottom:9px}.shop-admin .admin-title{font:700 40px/1.05 Georgia,serif;margin:0;letter-spacing:-.02em}.shop-admin .admin-subtitle{color:#6e6b63;margin:9px 0 0;font-size:16px}.shop-admin .open-shop{border:1px solid #e8d9ca;background:#fff;border-radius:13px;padding:12px 16px;color:#33492c;font:700 14px inherit;white-space:nowrap;cursor:pointer}
+    .shop-admin .dashboard-top-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}.shop-admin .dashboard-refresh-meta{font-size:12px;color:var(--admin-muted);white-space:nowrap}.shop-admin .dashboard-warning-list{display:grid;gap:6px;margin-top:9px}.shop-admin .dashboard-warning-link{appearance:none;border:0;padding:0;background:transparent;color:#a62d2d;font:750 12px/1.35 inherit;text-align:left;text-decoration:underline;text-underline-offset:2px;cursor:pointer}.shop-admin .dashboard-warning-link:hover{color:#7a1f1f}.shop-admin .dashboard-action{appearance:none;width:100%;background:transparent;border:0;color:inherit;font:inherit;text-align:left;cursor:pointer}.shop-admin .dashboard-action:hover{background:var(--admin-soft)}
+    @keyframes dashboardTargetPulse{0%,100%{box-shadow:var(--admin-card-shadow)}35%{box-shadow:0 0 0 5px color-mix(in srgb,#d98a2b 28%,transparent),var(--admin-card-shadow)}}.shop-admin .dashboard-target-highlight{border-color:#d98a2b!important;animation:dashboardTargetPulse 1.15s ease 2}
     .shop-admin .stat-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:22px}.shop-admin .dashboard-summary-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.shop-admin .stat{border:1px solid #eadfd2;border-radius:18px;padding:19px 20px;background:#fff;min-height:120px}.shop-admin .stat:nth-child(1){background:#f0f7e8;border-color:#d7e8c8}.shop-admin .stat:nth-child(2){background:#fff1e7;border-color:#f2d7c4}.shop-admin .stat:nth-child(3){background:#f3efff;border-color:#dfd6ff}.shop-admin .stat.profit-stat{background:#eef7f0;border-color:#cfe3d3}.shop-admin .stat-label{display:flex;gap:8px;align-items:center;color:#69675f;font-weight:700;font-size:14px}.shop-admin .stat-icon{font-size:19px}.shop-admin .stat-value{font:700 30px/1 Georgia,serif;margin-top:18px}.shop-admin .stat-help{font-size:13px;color:#756e64;margin-top:7px}
     .shop-admin .dashboard-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(280px,.75fr);gap:20px}.shop-admin .dashboard-card{border:1px solid #eadfd2;border-radius:18px;background:#fff;overflow:hidden}.shop-admin .dashboard-card-head{display:flex;justify-content:space-between;align-items:center;padding:19px 20px;border-bottom:1px solid #eee3d8}.shop-admin .dashboard-card-head h2{font:700 19px/1.1 Georgia,serif;margin:0}.shop-admin .dashboard-card-head span{color:#756e64;font-size:13px}.shop-admin .queue-row{padding:16px 20px;border-bottom:1px solid #f0e7de;cursor:pointer}.shop-admin .queue-row:last-child{border-bottom:0}.shop-admin .queue-row:hover{background:#fffaf6}.shop-admin .queue-top{display:flex;justify-content:space-between;gap:14px;align-items:center}.shop-admin .queue-number{font-family:ui-monospace,monospace;font-size:14px;font-weight:800}.shop-admin .queue-name{color:#6d665d;font-size:14px;margin-top:6px}.shop-admin .queue-amount{font-weight:800}.shop-admin .queue-status{font-size:12px;font-weight:800;padding:6px 9px;border-radius:99px;background:#f5efe7;color:#756950;white-space:nowrap}.shop-admin .dashboard-empty{padding:30px 20px;color:#756e64;text-align:center}.shop-admin .action-list{padding:8px 20px 12px}.shop-admin .action{display:flex;gap:12px;padding:17px 0;border-bottom:1px solid #f0e7de}.shop-admin .action:last-child{border:0}.shop-admin .action-icon{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:#fff0e7;color:#ef7138}.shop-admin .action strong{font-size:14px}.shop-admin .action p{font-size:13px;color:#756e64;line-height:1.4;margin:4px 0 0}
     .shop-admin .tab-page-title{font:700 32px/1.1 Georgia,serif;margin:0 0 8px}.shop-admin .tab-page-subtitle{margin:0 0 24px;color:#6e6b63}.shop-admin .admin-content .tabs{margin-bottom:22px}.shop-admin .admin-content .screen{max-width:none}.shop-admin .admin-content .order-card{box-shadow:none}
@@ -931,6 +975,7 @@ function dashboardStyles() {
       .shop-admin .admin-nav .nav-icon{display:inline-block;width:18px;margin-right:3px;font-size:14px}
       .shop-admin .admin-main{min-width:0;padding:22px 12px 64px}
       .shop-admin .admin-top{display:block;margin-bottom:18px;padding-bottom:18px}
+      .shop-admin .dashboard-top-actions{justify-content:flex-start;margin-top:14px}.shop-admin .dashboard-refresh-meta{width:100%}
       .shop-admin .admin-title,.shop-admin .tab-page-title{font-size:25px}
       .shop-admin .admin-subtitle,.shop-admin .tab-page-subtitle{font-size:13px;line-height:1.45}
       .shop-admin .open-shop{display:inline-block;margin-top:13px;padding:9px 10px;font-size:11px}
@@ -977,15 +1022,20 @@ function dashboardStats() {
   const monthly = paid.filter((order) => { const d = new Date(order.created_at); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); });
   const customerKeys = new Set(astate.orders.map((order) => String(order.customer_phone || order.instagram || order.customer_name || "").trim()).filter(Boolean));
   const revenue = monthly.reduce((sum, order) => sum + Number(order.total || 0), 0);
-  const missingRecipeProducts = new Set();
+  const missingRecipeProducts = new Map();
   const foodCost = monthly.reduce((orderSum, order) => orderSum + (order.order_items || []).reduce((itemSum, item) => {
     const recipeRows = astate.recipes.filter((row) => String(row.product_id) === String(item.product_id));
-    if (!recipeRows.length) missingRecipeProducts.add(String(item.product_name || item.product_id || "Unknown product"));
+    if (!recipeRows.length) {
+      const product = astate.menu.find((row) => String(row.id) === String(item.product_id))
+        || astate.menu.find((row) => String(row.name) === String(item.product_name));
+      const id = product?.id || item.product_id;
+      if (id) missingRecipeProducts.set(String(id), { id, name: product?.name || item.product_name || "Unknown product" });
+    }
     return itemSum + savedProductFoodCost(item.product_id) * Number(item.quantity || 0);
   }, 0), 0);
   const grossProfit = revenue - foodCost;
   const profitMargin = revenue > 0 ? grossProfit / revenue * 100 : 0;
-  return { revenue, foodCost, grossProfit, profitMargin, missingRecipeProducts: [...missingRecipeProducts], orders: monthly.length, customers: customerKeys.size, paymentReview: astate.orders.filter((order) => order.payment_status === "submitted").length };
+  return { revenue, foodCost, grossProfit, profitMargin, missingRecipeProducts: [...missingRecipeProducts.values()], orders: monthly.length, customers: customerKeys.size, paymentReview: astate.orders.filter((order) => order.payment_status === "submitted").length };
 }
 function salesPerformance() {
   const now = new Date();
@@ -1189,16 +1239,20 @@ function renderDashboardTab() {
   const production = nextPickupProduction();
   const insights = customerInsights();
   const highestDailySale = Math.max(...performance.days.map((day) => day.total), 1);
+  const updatedTime = astate.dashboardLastUpdated
+    ? astate.dashboardLastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : "Not refreshed yet";
+  const foodCostWarnings = stats.missingRecipeProducts.map((product) => `<button class="dashboard-warning-link" onclick="focusDashboardIssue('food_cost','${escapeHtml(product.id)}')">${escapeHtml(product.name)} is missing Food Cost →</button>`).join("");
   return `
-    <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</h1><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
+    <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</h1><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><div class="dashboard-top-actions"><button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing ? "disabled" : ""}>${astate.dashboardRefreshing ? "Refreshing…" : "↻ Refresh"}</button><span class="dashboard-refresh-meta">Last updated: ${escapeHtml(updatedTime)}</span><a class="open-shop" href="order.html">Open customer shop ↗</a></div></div>
     <div class="stat-grid dashboard-summary-grid">
       <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Revenue this month</div><div class="stat-value">${money(stats.revenue)}</div><div class="stat-help">Paid orders only</div></div>
-      <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Orders this month</div><div class="stat-value">${stats.orders}</div><div class="stat-help">${stats.paymentReview ? `${stats.paymentReview} need payment review` : "Everything is up to date"}</div></div>
+      <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Orders this month</div><div class="stat-value">${stats.orders}</div><div class="stat-help">${stats.paymentReview ? `<button class="dashboard-warning-link" onclick="focusDashboardIssue('payment_review')">${stats.paymentReview} need payment review →</button>` : "Everything is up to date"}</div></div>
       <div class="stat"><div class="stat-label"><span class="stat-icon">◉</span>Customers</div><div class="stat-value">${stats.customers}</div><div class="stat-help">Across all orders</div></div>
-      <div class="stat profit-stat"><div class="stat-label"><span class="stat-icon">$</span>Gross profit this month</div><div class="stat-value">${money(stats.grossProfit)}</div><div class="stat-help">Sales ${money(stats.revenue)} − food cost ${money(stats.foodCost)} · ${stats.profitMargin.toFixed(1)}% margin${stats.missingRecipeProducts.length ? `<br><span style="color:#b33333">Incomplete: ${stats.missingRecipeProducts.length} sold product${stats.missingRecipeProducts.length === 1 ? "" : "s"} missing Food Cost</span>` : ""}</div></div>
+      <div class="stat profit-stat"><div class="stat-label"><span class="stat-icon">$</span>Gross profit this month</div><div class="stat-value">${money(stats.grossProfit)}</div><div class="stat-help">Sales ${money(stats.revenue)} − food cost ${money(stats.foodCost)} · ${stats.profitMargin.toFixed(1)}% margin${stats.missingRecipeProducts.length ? `<div class="dashboard-warning-list">${foodCostWarnings}</div>` : ""}</div></div>
     </div>
     <div class="dashboard-grid"><section class="dashboard-card"><div class="dashboard-card-head"><h2>Order queue</h2><button class="link-btn" onclick="setTab('orders')">View all</button></div>${liveOrders.length ? liveOrders.map((order) => `<div class="queue-row" onclick="setTab('orders')"><div class="queue-top"><div class="queue-number">${escapeHtml(order.order_number || order.id)}</div><div class="queue-status">${escapeHtml(PAY_LABEL[order.payment_status] || order.payment_status || "Pending")}</div></div><div class="queue-top"><div class="queue-name">${escapeHtml(order.customer_name || "Customer")} · ${escapeHtml(order.collection_date || "Pickup date pending")}</div><div class="queue-amount">${money(order.total)}</div></div></div>`).join("") : `<div class="dashboard-empty">You’re all caught up — no active orders right now.</div>`}</section>
-    <section class="dashboard-card"><div class="dashboard-card-head"><h2>Next steps</h2><span>Shop checklist</span></div><div class="action-list"><div class="action"><div class="action-icon">✓</div><div><strong>Review payment proofs</strong><p>${stats.paymentReview ? `${stats.paymentReview} customer payment${stats.paymentReview === 1 ? "" : "s"} waiting for confirmation.` : "No payment proof waiting right now."}</p></div></div><div class="action"><div class="action-icon">◷</div><div><strong>Set pickup availability</strong><p>Open or close special collection days in your calendar.</p></div></div><div class="action"><div class="action-icon">✦</div><div><strong>Keep your menu fresh</strong><p>Edit prices, availability and products whenever you need.</p></div></div></div></section></div>
+    <section class="dashboard-card"><div class="dashboard-card-head"><h2>Next steps</h2><span>Shop checklist</span></div><div class="action-list"><button class="action dashboard-action" onclick="focusDashboardIssue('payment_review')"><span class="action-icon">✓</span><span><strong>Review payment proofs</strong><p>${stats.paymentReview ? `${stats.paymentReview} customer payment${stats.paymentReview === 1 ? "" : "s"} waiting for confirmation.` : "No payment proof waiting right now."}</p></span></button><button class="action dashboard-action" onclick="setTab('availability')"><span class="action-icon">◷</span><span><strong>Set pickup availability</strong><p>Open or close special collection days in your calendar.</p></span></button><button class="action dashboard-action" onclick="setTab('menu')"><span class="action-icon">✦</span><span><strong>Keep your menu fresh</strong><p>Edit prices, availability and products whenever you need.</p></span></button></div></section></div>
     <div style="margin-top:28px"><div class="admin-eyebrow">Next pickup production</div><section class="dashboard-card"><div class="dashboard-card-head"><h2>${production.date ? escapeHtml(production.date) : "No upcoming paid orders"}</h2><span>${production.orders.length ? `${production.orders.length} drink order${production.orders.length === 1 ? "" : "s"}` : "Your paid pickup orders will appear here"}</span></div>${production.orders.length ? production.orders.map((order) => `<div class="queue-row" onclick="setTab('orders')"><div class="queue-top"><div><div class="queue-number">${escapeHtml(order.collection_time || "Time pending")} · ${escapeHtml(order.customer_name || "Customer")}</div><div class="queue-name">${(order.order_items || []).map((item) => `${escapeHtml(item.product_name)} × ${item.quantity}`).join(" · ") || "Order items loading"}</div></div><div class="queue-status">${escapeHtml(ORDER_LABEL[order.order_status] || order.order_status)}</div></div></div>`).join("") : `<div class="dashboard-empty">When you confirm payment, the order will show here for its collection day.</div>`}</section></div>
     <div style="margin-top:28px"><div class="admin-eyebrow">Sales performance</div><div class="dashboard-grid"><section class="dashboard-card"><div class="dashboard-card-head"><h2>Last 7 days</h2><span>Paid sales only</span></div><div style="height:210px;padding:24px 20px 15px;display:flex;align-items:flex-end;gap:12px">${performance.days.map((day) => `<div style="height:100%;flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px"><div title="${money(day.total)}" style="width:min(44px,100%);height:${day.total ? Math.max(10, Math.round(day.total / highestDailySale * 145)) : 4}px;background:${day.total ? "#ef7138" : "#eee3d8"};border-radius:8px 8px 3px 3px"></div><div style="font-size:12px;font-weight:700;color:#756e64">${day.label}</div><div style="font-size:11px;color:#8a8177">${day.total ? money(day.total) : "—"}</div></div>`).join("")}</div></section>
     <section class="dashboard-card"><div class="dashboard-card-head"><h2>Top drinks this month</h2><span>By sales</span></div>${performance.topProducts.length ? performance.topProducts.map((product, index) => `<div class="queue-row"><div class="queue-top"><div><div class="queue-number">${index + 1}. ${escapeHtml(product.name)}</div><div class="queue-name">${product.quantity} cup${product.quantity === 1 ? "" : "s"} sold</div></div><div class="queue-amount">${money(product.revenue)}</div></div></div>`).join("") : `<div class="dashboard-empty">Your top drinks will appear here after paid orders come in.</div>`}</section></div></div>
@@ -1420,7 +1474,8 @@ async function saveProductRecipe() {
   astate.recipeDraft = null;
   astate.recipeDraftProductId = null;
   astate.recipeDirty = false;
-  await loadAll();
+  astate.dashboardFocusTarget = null;
+  await loadAll({ silent: true });
   alert("Food cost saved.");
 }
 function ingredientUnitCost(item) { return Number(item?.pack_cost || 0) / Math.max(.0001, Number(item?.pack_size || 1)); }
@@ -1502,10 +1557,10 @@ function renderInventoryTab() {
     </div>
     <div class="dashboard-grid">
       <section class="dashboard-card"><div class="dashboard-card-head"><h2>Inventory stock</h2><button class="btn-primary" onclick="newInventoryItem()">+ Ingredient / packaging</button></div>${inventoryHtml}</section>
-      <section class="dashboard-card"><div class="dashboard-card-head"><div><h2>Food cost recipe</h2><span id="recipe-cost-header">${money(cost)} per serving</span></div><button id="save-food-cost-btn" class="btn-primary" ${astate.recipeDirty ? "" : "disabled"} onclick="saveProductRecipe()">Save food cost</button></div>
+      <section id="food-cost-editor" class="dashboard-card"><div class="dashboard-card-head"><div><h2>Food cost recipe</h2><span id="recipe-cost-header">${money(cost)} per serving</span></div><button id="save-food-cost-btn" class="btn-primary" ${astate.recipeDirty ? "" : "disabled"} onclick="saveProductRecipe()">Save food cost</button></div>
         <div style="padding:20px"><div class="field"><label>Product</label><select onchange="setRecipeProduct(this.value)">${astate.menu.map((product) => `<option value="${product.id}" ${String(product.id) === String(productId) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div>
           ${recipeHtml}
-          <div class="field" style="margin-top:18px"><label>Add ingredient or packaging</label><select onchange="if(this.value){addRecipeIngredient(this.value)}"><option value="">Choose cost item…</option>${astate.inventory.filter((item) => !recipeRows.some((row) => String(row.inventory_item_id) === String(item.id))).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></div>
+          <div class="field" style="margin-top:18px"><label>Add ingredient or packaging</label><select id="food-cost-add-item" onchange="if(this.value){addRecipeIngredient(this.value)}"><option value="">Choose cost item…</option>${astate.inventory.filter((item) => !recipeRows.some((row) => String(row.inventory_item_id) === String(item.id))).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></div>
           <div class="ref-note">Add both ingredients and packaging (cup, lid, straw, sticker or carrier). Edit everything first, then press Save food cost once.</div>
         </div>
       </section>
@@ -1557,6 +1612,53 @@ function renderPreparationTab() {
   orders.forEach((order) => (order.order_items || []).forEach((item) => totals.set(item.product_name, (totals.get(item.product_name) || 0) + Number(item.quantity || 0))));
   return `<style>@media print{.admin-side,.admin-top,.no-print{display:none!important}.admin-main{padding:0!important}.prep-print{box-shadow:none!important;border:0!important}}</style><section class="dashboard-card prep-print" style="padding:22px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Today · ${escapeHtml(today)}</h2><div><span>${orders.length} active paid order${orders.length === 1 ? "" : "s"}</span><button class="btn-secondary no-print" style="margin-left:10px;" onclick="window.print()">Print list</button></div></div><div class="display" style="font-size:20px;margin:6px 0 10px;">Total drinks to prepare</div>${totals.size ? [...totals.entries()].map(([name,qty]) => `<div class="row" style="padding:9px 0;border-bottom:1px solid #eee5da;"><b>${escapeHtml(name)}</b><b>× ${qty}</b></div>`).join("") : `<div class="dashboard-empty">No paid drinks scheduled for today.</div>`}<div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:10px;">Preparation order</div>${orders.map((order) => `<div style="padding:14px 0;border-bottom:1px solid #eee5da;"><div class="queue-top"><b>${escapeHtml(order.collection_time || "Time pending")} · ${escapeHtml(order.customer_name || "Customer")}</b><span class="mono">${escapeHtml(order.order_number || order.id)}</span></div><div class="queue-name" style="margin-top:7px;">${(order.order_items || []).map((item) => `${escapeHtml(item.product_name)} × ${Number(item.quantity || 0)}`).join(" · ")}</div><div class="queue-name">${escapeHtml(order.collection_point || "")}${order.notes ? ` · Note: ${escapeHtml(order.notes)}` : ""}</div></div>`).join("")}</section>`;
 }
+function whatsappPhoneNumber(value) {
+  let digits = String(value || "").replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (digits.length === 8) digits = `65${digits}`;
+  return digits;
+}
+function friendlyCollectionDate(value) {
+  const text = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return text || "your selected date";
+  const [year, month, day] = text.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString("en-SG", { day: "numeric", month: "short", year: "numeric" });
+}
+const DEFAULT_WHATSAPP_CONFIRMATION_TEMPLATE = "Hi {customer_name}, Shizuku Lab here! Just to let you know that your order has been confirmed. See you on {date} at {time}, at {collection_point}.";
+function fillWhatsAppConfirmationTemplate(template, values) {
+  return String(template || DEFAULT_WHATSAPP_CONFIRMATION_TEMPLATE)
+    .replaceAll("{customer_name}", values.customer_name)
+    .replaceAll("{date}", values.date)
+    .replaceAll("{time}", values.time)
+    .replaceAll("{collection_point}", values.collection_point);
+}
+function updateWhatsAppTemplatePreview() {
+  const preview = document.getElementById("whatsapp-template-preview");
+  if (!preview) return;
+  preview.textContent = fillWhatsAppConfirmationTemplate(astate.settingsDraft?.whatsapp_confirmation_template, {
+    customer_name: "Shermin",
+    date: "16 Aug 2026",
+    time: "11:30 AM",
+    collection_point: "Blk 130A Lift Lobby",
+  });
+}
+function sendOrderWhatsApp(orderId) {
+  const order = astate.orders.find((row) => String(row.id) === String(orderId));
+  if (!order) return alert("Could not find this order.");
+  const phone = whatsappPhoneNumber(order.customer_phone);
+  if (!phone) return alert("This customer does not have a WhatsApp number saved.");
+  const name = String(order.customer_name || "there").trim();
+  const date = friendlyCollectionDate(order.collection_date);
+  const time = String(order.collection_time || "your selected time").trim();
+  const point = String(order.collection_point || "your selected collection point").trim();
+  const message = fillWhatsAppConfirmationTemplate(astate.settings?.whatsapp_confirmation_template, {
+    customer_name: name,
+    date,
+    time,
+    collection_point: point,
+  });
+  window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
+}
 function renderOrders() {
   const search = String(astate.orderSearch || "").trim().toLowerCase();
   const orders = astate.orders.filter((order) => {
@@ -1604,6 +1706,7 @@ function renderOrders() {
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center;">
         <button class="btn-secondary" onclick="editOrder('${o.id}')">Edit order</button>
         <button class="btn-secondary" onclick="setTab('messages')">Message customer</button>
+        <button class="btn-secondary" style="border-color:#2f8f55!important;color:#267647!important;" onclick="sendOrderWhatsApp('${o.id}')" ${o.customer_phone && o.payment_status === "paid" && o.order_status !== "cancelled" ? "" : `disabled title="${o.customer_phone ? "Confirm payment before sending" : "No phone number saved"}"`}>WhatsApp customer</button>
         ${o.order_status !== "cancelled" && (o.payment_status === "submitted" || o.payment_status === "awaiting_payment") ? `<button class="small-btn" onclick="confirmPayment('${o.id}')">✓ Confirm payment</button>` : ""}
         ${o.order_status !== "cancelled" && o.payment_status === "submitted" ? `<button class="link-danger" onclick="rejectPayment('${o.id}')">Reject proof</button>` : ""}
         ${o.payment_status === "awaiting_payment" ? `<span class="hint" style="margin:0;">Check the Instagram DM payment screenshot before confirming.</span>` : ""}
@@ -2078,7 +2181,9 @@ function renderDesignTab() {
 }
 
 function renderWordingTab() {
-  return `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Customer wording</h2><span>Main customer-facing titles</span></div>${cmsField("Store name","store_name","Shizuku Lab")}${cmsField("Store tagline","store_tagline","雫ラボ · crafted drop by drop")}${cmsField("Menu heading","menu_heading","メニュー · DRINK MENU")}${cmsField("Reviews heading","reviews_heading","お客様の声 · REVIEWS")}${cmsField("Loyalty programme name","loyalty_heading","Shizuku Club")}${cmsField("Chat heading","chat_heading","Message us")}<div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:6px;">Track order wording</div><div class="hint" style="text-align:left;margin-bottom:14px;">Edit every main label and every order-status message shown to customers.</div>${cmsField("Page heading","track_order_heading","Track my order")}${cmsField("Intro sentence","track_intro_text","Enter either your order number or the phone number used at checkout.",2)}<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">${cmsField("Order number label","track_order_number_label","Order number")}${cmsField("Phone number label","track_phone_label","Phone number")}${cmsField("Between fields","track_or_text","OR")}${cmsField("Track button","track_button_text","Track order")}${cmsField("Live updates label","track_live_updates_text","LIVE UPDATES")}${cmsField("Refresh button","track_refresh_text","Refresh now")}${cmsField("Order detail label","track_order_label","Order")}${cmsField("Pickup detail label","track_pickup_label","Pickup")}${cmsField("Stage 1","track_stage_payment","Payment review")}${cmsField("Stage 2","track_stage_confirmed","Confirmed")}${cmsField("Stage 3","track_stage_preparing","Preparing")}${cmsField("Stage 4","track_stage_ready","Ready")}</div><div class="divider"></div>${trackStatusFields("Awaiting payment","track_awaiting","Awaiting payment","Please complete payment and submit your payment screenshot.")}${trackStatusFields("Payment under review","track_review","Payment under review","We’ll confirm your order once your payment proof is verified.")}${trackStatusFields("Order confirmed","track_confirmed","Order confirmed","Payment verified — we’ll prepare your order closer to pickup.")}${trackStatusFields("Preparing","track_preparing","Preparing your order","We’re freshly preparing your drinks now.")}${trackStatusFields("Ready","track_ready","Ready for collection","Your order is ready — see you at your pickup time!")}${trackStatusFields("Collected","track_collected","Collected with care ✨","We hope you enjoyed every sip. Looking forward to making your next Shizuku drink.")}${trackStatusFields("Cancelled","track_cancelled","Order cancelled","This order can no longer accept payment. Please place a new order.")}${trackStatusFields("Payment rejected","track_rejected","Payment proof needs attention","Please upload a new payment screenshot.")}${cmsSaveButton()}</section>`;
+  const whatsappTemplate = astate.settingsDraft?.whatsapp_confirmation_template || DEFAULT_WHATSAPP_CONFIRMATION_TEMPLATE;
+  const whatsappPreview = fillWhatsAppConfirmationTemplate(whatsappTemplate, { customer_name:"Shermin", date:"16 Aug 2026", time:"11:30 AM", collection_point:"Blk 130A Lift Lobby" });
+  return `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Customer wording</h2><span>Main customer-facing titles</span></div>${cmsField("Store name","store_name","Shizuku Lab")}${cmsField("Store tagline","store_tagline","雫ラボ · crafted drop by drop")}${cmsField("Menu heading","menu_heading","メニュー · DRINK MENU")}${cmsField("Reviews heading","reviews_heading","お客様の声 · REVIEWS")}${cmsField("Loyalty programme name","loyalty_heading","Shizuku Club")}${cmsField("Chat heading","chat_heading","Message us")}<div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:6px;">WhatsApp order confirmation</div><div class="hint" style="text-align:left;margin-bottom:12px;">Edit the message opened by the WhatsApp customer button. Keep any variables you want inserted automatically.</div><div class="field"><label>Confirmation message</label><textarea rows="5" oninput="onSettingsField('whatsapp_confirmation_template',this.value);updateWhatsAppTemplatePreview()">${escapeHtml(whatsappTemplate)}</textarea></div><div class="hint" style="text-align:left;margin:-5px 0 12px;">Available variables: <code>{customer_name}</code> <code>{date}</code> <code>{time}</code> <code>{collection_point}</code></div><div class="ref-note"><b>Message preview</b><div id="whatsapp-template-preview" style="margin-top:8px;white-space:pre-wrap;line-height:1.55;">${escapeHtml(whatsappPreview)}</div></div><div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:6px;">Track order wording</div><div class="hint" style="text-align:left;margin-bottom:14px;">Edit every main label and every order-status message shown to customers.</div>${cmsField("Page heading","track_order_heading","Track my order")}${cmsField("Intro sentence","track_intro_text","Enter either your order number or the phone number used at checkout.",2)}<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">${cmsField("Order number label","track_order_number_label","Order number")}${cmsField("Phone number label","track_phone_label","Phone number")}${cmsField("Between fields","track_or_text","OR")}${cmsField("Track button","track_button_text","Track order")}${cmsField("Live updates label","track_live_updates_text","LIVE UPDATES")}${cmsField("Refresh button","track_refresh_text","Refresh now")}${cmsField("Order detail label","track_order_label","Order")}${cmsField("Pickup detail label","track_pickup_label","Pickup")}${cmsField("Stage 1","track_stage_payment","Payment review")}${cmsField("Stage 2","track_stage_confirmed","Confirmed")}${cmsField("Stage 3","track_stage_preparing","Preparing")}${cmsField("Stage 4","track_stage_ready","Ready")}</div><div class="divider"></div>${trackStatusFields("Awaiting payment","track_awaiting","Awaiting payment","Please complete payment and submit your payment screenshot.")}${trackStatusFields("Payment under review","track_review","Payment under review","We’ll confirm your order once your payment proof is verified.")}${trackStatusFields("Order confirmed","track_confirmed","Order confirmed","Payment verified — we’ll prepare your order closer to pickup.")}${trackStatusFields("Preparing","track_preparing","Preparing your order","We’re freshly preparing your drinks now.")}${trackStatusFields("Ready","track_ready","Ready for collection","Your order is ready — see you at your pickup time!")}${trackStatusFields("Collected","track_collected","Collected with care ✨","We hope you enjoyed every sip. Looking forward to making your next Shizuku drink.")}${trackStatusFields("Cancelled","track_cancelled","Order cancelled","This order can no longer accept payment. Please place a new order.")}${trackStatusFields("Payment rejected","track_rejected","Payment proof needs attention","Please upload a new payment screenshot.")}${cmsSaveButton()}</section>`;
 }
 
 function trackStatusFields(label, prefix, title, note) {
@@ -2222,7 +2327,7 @@ function render() {
     ${dashboardStyles()}
     <div class="shop-admin theme-${escapeHtml(astate.settingsDraft?.admin_theme || astate.settingsDraft?.system_theme || "zen")} ${(astate.settings?.admin_mobile_nav_position || "left") === "top" ? "mobile-nav-top" : "mobile-nav-left"} ${astate.navCollapsed ? "nav-collapsed" : ""}" style="--admin-primary:${escapeHtml(astate.settingsDraft?.admin_theme_primary || '#4B5D3A')};--admin-bg:${escapeHtml(astate.settingsDraft?.admin_theme_background || '#F3EEE3')};--admin-card:${escapeHtml(astate.settingsDraft?.admin_theme_card || '#FFFFFF')};--admin-text:${escapeHtml(astate.settingsDraft?.admin_theme_text || '#2A2A22')};--admin-on-primary:${escapeHtml(astate.settingsDraft?.admin_theme_background || '#F3EEE3')};--admin-soft:color-mix(in srgb,${escapeHtml(astate.settingsDraft?.admin_theme_primary || '#4B5D3A')} 10%,${escapeHtml(astate.settingsDraft?.admin_theme_card || '#FFFFFF')});--admin-line:color-mix(in srgb,${escapeHtml(astate.settingsDraft?.admin_theme_text || '#2A2A22')} 18%,transparent);--admin-muted:color-mix(in srgb,${escapeHtml(astate.settingsDraft?.admin_theme_text || '#2A2A22')} 66%,transparent);--admin-radius:${(astate.settingsDraft?.admin_theme || 'zen') === 'editorial' ? '0px' : (astate.settingsDraft?.admin_theme || 'zen') === 'retro' ? '7px' : (astate.settingsDraft?.admin_theme || 'zen') === 'threed' ? '24px' : '18px'};--admin-card-shadow:${(astate.settingsDraft?.admin_theme || 'zen') === 'retro' ? '4px 4px 0 var(--admin-text)' : (astate.settingsDraft?.admin_theme || 'zen') === 'threed' ? '0 10px 0 color-mix(in srgb,var(--admin-primary) 18%,transparent),0 17px 28px rgba(45,38,75,.11)' : '0 8px 24px rgba(42,42,34,.06)'};--admin-shadow:0 10px 24px color-mix(in srgb,var(--admin-primary) 25%,transparent);">
       <aside class="admin-side"><button class="admin-collapse-toggle" onclick="toggleAdminNav()" title="${astate.navCollapsed ? "Expand menu" : "Collapse menu"}" aria-label="${astate.navCollapsed ? "Expand menu" : "Collapse menu"}">${astate.navCollapsed ? "›" : "‹"}</button><div class="admin-logo">${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</div><div class="admin-caption">SHOP ADMIN</div><div class="admin-nav-label">MAIN · DRAG TO REORDER</div><nav class="admin-nav">${sortedNav.map(([tab, icon, label]) => `<div class="admin-nav-sortable" data-nav-key="${tab}"><button class="${astate.tab === tab ? "active" : ""}" onclick="setTab('${tab}')"><span class="nav-icon">${icon}</span><span class="nav-text">${label}</span></button><button class="admin-nav-drag" aria-label="Move ${escapeHtml(label)}" title="Drag to reorder" onpointerdown="startSidebarDrag(event)">⋮⋮</button></div>`).join("")}</nav><div class="admin-side-bottom"><button class="link-btn" onclick="logoutAdmin()" aria-label="Sign out"><span class="signout-icon">↪</span> <span class="signout-label">Sign out</span></button></div></aside>
-      <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load data: <code>${astate.loadError}</code></div>` : ""}${astate.newMessageAlert ? `<div class="new-order-alert" role="alert"><div><strong>New customer message</strong><span>${escapeHtml(astate.newMessageAlert.orderNumber)} · ${escapeHtml(astate.newMessageAlert.text)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="astate.newMessageAlert=null;setTab('messages')">Open message</button><button class="btn-secondary" onclick="astate.newMessageAlert=null;render()">Dismiss</button></div></div>` : ""}${astate.newOrderAlert ? `<div class="new-order-alert" role="alert"><div><strong>New order received</strong><span>${escapeHtml(astate.newOrderAlert.orderNumber)} · ${escapeHtml(astate.newOrderAlert.customer)} · ${money(astate.newOrderAlert.total)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="setTab('orders')">Open order</button><button class="btn-secondary" onclick="dismissNewOrderAlert()">Dismiss</button></div></div>` : ""}${page}</main>
+      <main class="admin-main">${!IS_CONFIGURED ? `<div class="setup-banner">Demo mode — connect Supabase in <code>config.js</code> to see real orders and save changes.</div>` : ""}${astate.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;"><span>Could not load data: <code>${escapeHtml(astate.loadError)}</code></span><button class="btn-secondary" onclick="refreshDashboard()">Retry</button></div>` : ""}${astate.newMessageAlert ? `<div class="new-order-alert" role="alert"><div><strong>New customer message</strong><span>${escapeHtml(astate.newMessageAlert.orderNumber)} · ${escapeHtml(astate.newMessageAlert.text)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="astate.newMessageAlert=null;setTab('messages')">Open message</button><button class="btn-secondary" onclick="astate.newMessageAlert=null;render()">Dismiss</button></div></div>` : ""}${astate.newOrderAlert ? `<div class="new-order-alert" role="alert"><div><strong>New order received</strong><span>${escapeHtml(astate.newOrderAlert.orderNumber)} · ${escapeHtml(astate.newOrderAlert.customer)} · ${money(astate.newOrderAlert.total)}</span></div><div style="display:flex;gap:8px;"><button class="btn-primary" onclick="setTab('orders')">Open order</button><button class="btn-secondary" onclick="dismissNewOrderAlert()">Dismiss</button></div></div>` : ""}${page}</main>
     </div>
     ${renderEditOverlay()}
   `;
