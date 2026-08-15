@@ -74,6 +74,7 @@ const astate = {
   dashboardRefreshing: false,
   dashboardLastUpdated: null,
   dashboardFocusTarget: null,
+  whatsappError: null,
   editing: null,
 };
 
@@ -1036,7 +1037,7 @@ function dashboardStats() {
   }, 0), 0);
   const grossProfit = revenue - foodCost;
   const profitMargin = revenue > 0 ? grossProfit / revenue * 100 : 0;
-  return { revenue, foodCost, grossProfit, profitMargin, missingRecipeProducts: [...missingRecipeProducts.values()], orders: monthly.length, customers: customerKeys.size, paymentReview: astate.orders.filter((order) => order.payment_status === "submitted").length };
+  return { revenue, foodCost, grossProfit, profitMargin, missingRecipeProducts: [...missingRecipeProducts.values()], orders: monthly.length, customers: customerKeys.size, paymentReview: astate.orders.filter(AdminOrderRules.isPaymentReviewOrder).length };
 }
 function salesPerformance() {
   const now = new Date();
@@ -1248,7 +1249,7 @@ function renderDashboardTab() {
     <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</h1><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><div class="dashboard-top-actions">${astate.settings?.show_dashboard_refresh !== false ? `<button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing ? "disabled" : ""}>${astate.dashboardRefreshing ? "Refreshing…" : "↻ Refresh"}</button><span class="dashboard-refresh-meta">Last updated: ${escapeHtml(updatedTime)}</span>` : ""}<a class="open-shop" href="order.html">Open customer shop ↗</a></div></div>
     <div class="stat-grid dashboard-summary-grid">
       <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Revenue this month</div><div class="stat-value">${money(stats.revenue)}</div><div class="stat-help">Paid orders only</div></div>
-      <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Orders this month</div><div class="stat-value">${stats.orders}</div><div class="stat-help">${stats.paymentReview ? `<button class="dashboard-warning-link" onclick="focusDashboardIssue('payment_review')">${stats.paymentReview} need payment review →</button>` : "Everything is up to date"}</div></div>
+      <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Non-cancelled paid orders this month</div><div class="stat-value">${stats.orders}</div><div class="stat-help">${stats.paymentReview ? `<button class="dashboard-warning-link" onclick="focusDashboardIssue('payment_review')">${stats.paymentReview} need payment review →</button>` : "Everything is up to date"}</div></div>
       <div class="stat"><div class="stat-label"><span class="stat-icon">◉</span>Customers</div><div class="stat-value">${stats.customers}</div><div class="stat-help">Across all orders</div></div>
       <div class="stat profit-stat"><div class="stat-label"><span class="stat-icon">$</span>Gross profit this month</div><div class="stat-value">${money(stats.grossProfit)}</div><div class="stat-help">Sales ${money(stats.revenue)} − food cost ${money(stats.foodCost)} · ${stats.profitMargin.toFixed(1)}% margin${stats.missingRecipeProducts.length ? `<div class="dashboard-warning-list">${foodCostWarnings}</div>` : ""}</div></div>
     </div>
@@ -1612,16 +1613,7 @@ async function updateIdea(id,fields){const{error}=await db.from("inspiration_ide
 async function deleteIdea(id){if(!confirm("Delete this idea?"))return;const{error}=await db.from("inspiration_ideas").delete().eq("id",id);if(error)return alert(error.message);await loadAll();}
 function renderInspirationTab(){const ideas=[...astate.inspirationIdeas].sort((a,b)=>Number(b.is_pinned)-Number(a.is_pinned)||new Date(b.created_at)-new Date(a.created_at));return `<section class="dashboard-card" style="padding:18px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 14px"><div><h2>Quick capture</h2><span>Save an idea in a few seconds</span></div></div><div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9px"><input placeholder="What are you thinking about?" value="${escapeHtml(astate.quickIdea)}" oninput="astate.quickIdea=this.value" onkeydown="if(event.key==='Enter')quickAddIdea()"><button class="btn-primary" onclick="quickAddIdea()">+ New idea</button></div></section><div class="idea-board">${ideas.map(i=>`<article class="dashboard-card idea-card ${i.status==='archived'?'idea-archived':''}" style="padding:17px"><div style="display:flex;justify-content:space-between;gap:10px"><span class="queue-status">${escapeHtml(i.category||"Other")}</span><button class="link-btn" title="${i.is_pinned?"Unpin":"Pin"}" onclick="updateIdea('${i.id}',{is_pinned:${!i.is_pinned}})">${i.is_pinned?"★":"☆"}</button></div><h3 style="margin:14px 0 8px">${escapeHtml(i.title)}</h3>${i.notes?`<div style="white-space:pre-wrap;line-height:1.5;color:var(--admin-muted)">${escapeHtml(i.notes)}</div>`:""}<div class="hint" style="text-align:left;margin:14px 0 10px">${new Date(i.created_at).toLocaleDateString()} · ${i.status==='archived'?"Archived":"Active"}</div><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="link-btn" onclick="editIdea('${i.id}')">Edit</button><button class="link-btn" onclick="updateIdea('${i.id}',{status:'${i.status==='archived'?"active":"archived"}'})">${i.status==='archived'?"Restore":"Done / archive"}</button><button class="link-danger" onclick="deleteIdea('${i.id}')">Delete</button></div></article>`).join("")||`<div class="dashboard-card dashboard-empty">Your newest ideas will appear here. Pinned ideas stay at the top.</div>`}</div>${astate.ideaDraft?renderIdeaEditor():""}`;}
 function renderIdeaEditor(){const d=astate.ideaDraft;return `<div class="overlay"><div class="overlay-card"><div class="display overlay-title">${d.id?"Edit":"New"} idea</div><div class="field"><label>Title</label><input value="${escapeHtml(d.title||"")}" oninput="ideaField('title',this.value)"></div><div class="field"><label>Notes</label><textarea rows="6" oninput="ideaField('notes',this.value)">${escapeHtml(d.notes||"")}</textarea></div><div class="field"><label>Category</label><select onchange="ideaField('category',this.value)">${IDEA_CATEGORIES.map(x=>`<option ${d.category===x?"selected":""}>${x}</option>`).join("")}</select></div><div class="field"><label>Status</label><select onchange="ideaField('status',this.value)"><option value="active" ${d.status!=="archived"?"selected":""}>Active</option><option value="archived" ${d.status==="archived"?"selected":""}>Done / archived</option></select></div><label class="slot"><input type="checkbox" style="width:auto" ${d.is_pinned?"checked":""} onchange="ideaField('is_pinned',this.checked)"> Pin this idea</label><div class="btn-row"><button class="btn-secondary" onclick="astate.ideaDraft=null;render()">Cancel</button><button class="btn-primary" onclick="saveIdea()">Save idea</button></div></div></div>`;}
-function orderMatchesFilter(order, filter) {
-  if (filter === "payment") return order.payment_status === "submitted";
-  if (filter === "awaiting") return order.payment_status === "awaiting_payment";
-  if (filter === "paid") return order.payment_status === "paid" && order.order_status === "confirmed";
-  if (filter === "preparing") return order.order_status === "preparing";
-  if (filter === "ready") return order.order_status === "ready";
-  if (filter === "collected") return order.order_status === "collected";
-  if (filter === "cancelled") return order.order_status === "cancelled";
-  return true;
-}
+function orderMatchesFilter(order, filter) { return AdminOrderRules.orderMatchesFilter(order, filter); }
 function renderPreparationTab() {
   const today = localDateText(new Date());
   const orders = astate.orders.filter((order) => order.collection_date === today && order.payment_status === "paid" && !["cancelled","collected"].includes(order.order_status)).sort((a,b) => String(a.collection_time || "").localeCompare(String(b.collection_time || "")));
@@ -1629,12 +1621,7 @@ function renderPreparationTab() {
   orders.forEach((order) => (order.order_items || []).forEach((item) => totals.set(item.product_name, (totals.get(item.product_name) || 0) + Number(item.quantity || 0))));
   return `<style>@media print{.admin-side,.admin-top,.no-print{display:none!important}.admin-main{padding:0!important}.prep-print{box-shadow:none!important;border:0!important}}</style><section class="dashboard-card prep-print" style="padding:22px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Today · ${escapeHtml(today)}</h2><div><span>${orders.length} active paid order${orders.length === 1 ? "" : "s"}</span><button class="btn-secondary no-print" style="margin-left:10px;" onclick="window.print()">Print list</button></div></div><div class="display" style="font-size:20px;margin:6px 0 10px;">Total drinks to prepare</div>${totals.size ? [...totals.entries()].map(([name,qty]) => `<div class="row" style="padding:9px 0;border-bottom:1px solid #eee5da;"><b>${escapeHtml(name)}</b><b>× ${qty}</b></div>`).join("") : `<div class="dashboard-empty">No paid drinks scheduled for today.</div>`}<div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:10px;">Preparation order</div>${orders.map((order) => `<div style="padding:14px 0;border-bottom:1px solid #eee5da;"><div class="queue-top"><b>${escapeHtml(order.collection_time || "Time pending")} · ${escapeHtml(order.customer_name || "Customer")}</b><span class="mono">${escapeHtml(order.order_number || order.id)}</span></div><div class="queue-name" style="margin-top:7px;">${(order.order_items || []).map((item) => `${escapeHtml(item.product_name)} × ${Number(item.quantity || 0)}`).join(" · ")}</div><div class="queue-name">${escapeHtml(order.collection_point || "")}${order.notes ? ` · Note: ${escapeHtml(order.notes)}` : ""}</div></div>`).join("")}</section>`;
 }
-function whatsappPhoneNumber(value) {
-  let digits = String(value || "").replace(/\D/g, "");
-  if (digits.startsWith("00")) digits = digits.slice(2);
-  if (digits.length === 8) digits = `65${digits}`;
-  return digits;
-}
+function whatsappPhoneNumber(value) { return AdminOrderRules.normalizeSingaporeWhatsAppNumber(value); }
 function friendlyCollectionDate(value) {
   const text = String(value || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return text || "your selected date";
@@ -1649,6 +1636,21 @@ function fillWhatsAppConfirmationTemplate(template, values) {
     .replaceAll("{time}", values.time)
     .replaceAll("{collection_point}", values.collection_point);
 }
+function orderWhatsAppUrl(order) {
+  const phone = whatsappPhoneNumber(order?.customer_phone);
+  if (!phone) return "";
+  const message = fillWhatsAppConfirmationTemplate(astate.settings?.whatsapp_confirmation_template, {
+    customer_name: String(order.customer_name || "there").trim(),
+    date: friendlyCollectionDate(order.collection_date),
+    time: String(order.collection_time || "your selected time").trim(),
+    collection_point: String(order.collection_point || "your selected collection point").trim(),
+  });
+  return AdminOrderRules.buildWhatsAppUrl(phone, message);
+}
+function showWhatsAppNumberError(orderId) {
+  astate.whatsappError = { orderId: String(orderId), message: "This customer’s phone number is missing or is not a valid Singapore number. Edit the order and save a valid number before trying again." };
+  render();
+}
 function updateWhatsAppTemplatePreview() {
   const preview = document.getElementById("whatsapp-template-preview");
   if (!preview) return;
@@ -1661,20 +1663,12 @@ function updateWhatsAppTemplatePreview() {
 }
 function sendOrderWhatsApp(orderId) {
   const order = astate.orders.find((row) => String(row.id) === String(orderId));
-  if (!order) return alert("Could not find this order.");
-  const phone = whatsappPhoneNumber(order.customer_phone);
-  if (!phone) return alert("This customer does not have a WhatsApp number saved.");
-  const name = String(order.customer_name || "there").trim();
-  const date = friendlyCollectionDate(order.collection_date);
-  const time = String(order.collection_time || "your selected time").trim();
-  const point = String(order.collection_point || "your selected collection point").trim();
-  const message = fillWhatsAppConfirmationTemplate(astate.settings?.whatsapp_confirmation_template, {
-    customer_name: name,
-    date,
-    time,
-    collection_point: point,
-  });
-  window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
+  if (!order) { astate.whatsappError = { orderId: String(orderId), message: "Could not find this order." }; render(); return; }
+  const whatsappUrl = orderWhatsAppUrl(order);
+  if (!whatsappUrl) { showWhatsAppNumberError(orderId); return; }
+  astate.whatsappError = null;
+  // Keep navigation synchronous inside the tap event so iPhone Safari does not block it.
+  window.location.href = whatsappUrl;
 }
 function renderOrders() {
   const search = String(astate.orderSearch || "").trim().toLowerCase();
@@ -1704,6 +1698,8 @@ function renderOrders() {
     const redemption = astate.promoRedemptions.find((row) => String(row.order_id) === String(o.id));
     const subtotal = (o.order_items || []).reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
     const discount = redemption ? Math.max(0, subtotal - Number(o.total || 0)) : 0;
+    const whatsappUrl = orderWhatsAppUrl(o);
+    const canConfirmByWhatsApp = o.payment_status === "paid" && o.order_status !== "cancelled";
     return `<div class="order-expanded-detail">
       <div class="order-meta">Phone: ${escapeHtml(o.customer_phone || "—")}${o.instagram ? " · @" + escapeHtml(o.instagram) : ""}</div>
       <div class="order-meta">Collection point: <b>${escapeHtml(o.collection_point || "—")}</b></div>
@@ -1717,13 +1713,14 @@ function renderOrders() {
       ${o.notes ? `<div class="ref-note">Customer note: ${escapeHtml(o.notes)}</div>` : ""}
       ${o.payment_transaction_reference ? `<div class="ref-note">PayNow transaction reference: <b>${escapeHtml(o.payment_transaction_reference)}</b></div>` : ""}
       ${o.payment_screenshot_url ? `<div style="margin-top:8px;"><button class="small-btn" onclick='openPaymentProof(${JSON.stringify(o.payment_screenshot_url)})'>View payment screenshot</button></div>` : ""}
+      ${astate.whatsappError && String(astate.whatsappError.orderId) === String(o.id) ? `<div class="ref-note" role="alert" style="border-color:#B33333;background:#FBEAEA;color:#7a1f1f;">${escapeHtml(astate.whatsappError.message)}</div>` : ""}
       <div class="divider"></div>
       ${redemption ? `<div class="row"><span class="label">Subtotal</span><span>${money(subtotal)}</span></div><div class="row" style="color:#A36D1E;"><span class="label">Promo code · <b>${escapeHtml(redemption.code)}</b></span><span>−${money(discount)}</span></div>` : ""}
       <div class="row bold"><span class="label">Total</span><span>${money(o.total)}</span></div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center;">
         <button class="btn-secondary" onclick="editOrder('${o.id}')">Edit order</button>
         <button class="btn-secondary" onclick="setTab('messages')">Message customer</button>
-        <button class="btn-secondary" style="border-color:#2f8f55!important;color:#267647!important;" onclick="sendOrderWhatsApp('${o.id}')" ${o.customer_phone && o.payment_status === "paid" && o.order_status !== "cancelled" ? "" : `disabled title="${o.customer_phone ? "Confirm payment before sending" : "No phone number saved"}"`}>WhatsApp customer</button>
+        ${canConfirmByWhatsApp ? (whatsappUrl ? `<a class="btn-secondary" style="border-color:#2f8f55!important;color:#267647!important;text-decoration:none;" href="${escapeHtml(whatsappUrl)}" rel="noopener">WhatsApp customer</a>` : `<button class="btn-secondary" style="border-color:#B33333!important;color:#B33333!important;" onclick="showWhatsAppNumberError('${o.id}')">WhatsApp customer</button>`) : `<button class="btn-secondary" disabled title="${o.order_status === "cancelled" ? "Cancelled orders cannot send confirmations" : "Confirm payment before sending"}">WhatsApp customer</button>`}
         ${o.order_status !== "cancelled" && (o.payment_status === "submitted" || o.payment_status === "awaiting_payment") ? `<button class="small-btn" onclick="confirmPayment('${o.id}')">✓ Confirm payment</button>` : ""}
         ${o.order_status !== "cancelled" && o.payment_status === "submitted" ? `<button class="link-danger" onclick="rejectPayment('${o.id}')">Reject proof</button>` : ""}
         ${o.payment_status === "awaiting_payment" ? `<span class="hint" style="margin:0;">Check the Instagram DM payment screenshot before confirming.</span>` : ""}
