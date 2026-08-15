@@ -69,6 +69,10 @@ const state = {
     show_paynow_name: true,
     show_paynow_number: true,
     collection_address: "Blk 130A drop off point, Near Creamier TPY, Toa Payoh Lorong 1, Singapore",
+    collection_area_label: "Near Creamier · Toa Payoh",
+    google_maps_url: "",
+    show_collection_map_home: true,
+    show_collection_map_payment: true,
     saturday_collection_time: "10:00 AM - 12:00 PM",
     sunday_collection_time: "10:00 AM - 1:00 PM",
     collection_points: ["Blk 130A", "Near Creamier"],
@@ -200,6 +204,34 @@ function escapeHtml(value) {
 function safeExternalUrl(value) {
   const text = String(value || "").trim();
   return /^https?:\/\//i.test(text) ? text : "";
+}
+function collectionMapsUrl() {
+  const saved = safeExternalUrl(state.store.google_maps_url);
+  if (saved) return saved;
+  const address = String(state.store.collection_address || "").trim();
+  return address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}` : "";
+}
+function collectionMapEmbedUrl() {
+  const address = String(state.store.collection_address || "").trim();
+  return address ? `https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed` : "";
+}
+function homeCollectionMapCard() {
+  if (state.store.show_collection_map_home === false) return "";
+  const area = String(state.store.collection_area_label || "").trim();
+  const mapsUrl = collectionMapsUrl();
+  if (!area && !mapsUrl) return "";
+  return `<div class="collection-area-card"><div><span class="collection-map-kicker">COLLECTION AREA</span><strong>${escapeHtml(area || state.store.collection_address || "View collection area")}</strong><span>Exact pickup details are shown with your order.</span></div>${mapsUrl ? `<a href="${escapeHtml(mapsUrl)}" target="_blank" rel="noopener">View map ↗</a>` : ""}</div>`;
+}
+function paymentCollectionMapCard(order) {
+  if (state.store.show_collection_map_payment === false) return "";
+  const address = String(state.store.collection_address || "").trim();
+  const mapsUrl = collectionMapsUrl();
+  const embedUrl = collectionMapEmbedUrl();
+  if (!address && !order?.collection_point) return "";
+  return `<div class="payment-map-card">
+    ${embedUrl ? `<iframe class="payment-map-frame" title="Collection point map" src="${escapeHtml(embedUrl)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>` : ""}
+    <div class="payment-map-copy"><span class="collection-map-kicker">YOUR COLLECTION POINT</span><strong>${escapeHtml(order?.collection_point || "Collection point")}</strong>${address ? `<span>${escapeHtml(address)}</span>` : ""}${mapsUrl ? `<a class="payment-map-button" href="${escapeHtml(mapsUrl)}" target="_blank" rel="noopener">Open in Google Maps ↗</a>` : ""}</div>
+  </div>`;
 }
 function isInstagramOrFacebookBrowser() { return /Instagram|FBAN|FBAV|FB_IAB|FBIOS|FB4A/i.test(navigator.userAgent || ""); }
 function uidCode() { return "SL-" + Math.random().toString(36).slice(2, 8).toUpperCase(); }
@@ -1073,6 +1105,7 @@ function storeInfoPanel() {
           <div class="hours-row"><span class="hours-label">NEXT COLLECTION</span><span class="hours-status-dark open">PRE-ORDER</span></div>
           ${nextCollections.map((item, index) => `<div class="hours-day"${index ? ` style="margin-top:8px;"` : ""}>${escapeHtml(item.label)}</div><div class="hours-time">${escapeHtml(item.time)}</div>`).join("")}
         </div>
+        ${homeCollectionMapCard()}
       </div>
     </div>
   `;
@@ -1510,6 +1543,7 @@ function renderPayment() {
         ${state.store.show_payment_order_details === false ? "" : `<div class="row"><span class="label">Collection point</span><span>${escapeHtml(order.collection_point || "—")}</span></div>`}
         ${state.store.show_payment_transaction_reference === false ? "" : `<div class="ref-note">Enter <b>${escapeHtml(order.order_number || order.id || "")}</b> as the payment reference.</div>`}
       </div>
+      ${paymentCollectionMapCard(order)}
       <div class="summary-card" style="margin-top:16px;">
         ${inAppBrowser ? `<div style="padding:14px 16px;margin-bottom:16px;border:1px solid #d8c58e;border-radius:14px;background:#fff8df;color:#5b4b22;font-size:13px;line-height:1.5;"><b>Using Instagram or Facebook?</b><br>Photo access may be blocked by the in-app browser. Please choose <b>Allow all photos/media</b>. If it still fails, do not refresh—send the screenshot through Instagram below. Your order <b>${escapeHtml(order.order_number || order.id || "")}</b> will be restored if this page reloads.</div>` : ""}
         ${state.store.show_payment_transaction_reference === false ? "" : `<div class="field">
