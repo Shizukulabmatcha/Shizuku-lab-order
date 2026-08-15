@@ -34,6 +34,9 @@ img{display:block;max-width:100%;}
 
 /* header */
 .header{padding:24px 20px 14px;}
+.order-home-back{width:max-content;min-height:40px;margin:0 0 10px;display:inline-flex;align-items:center;gap:6px;padding:8px 11px 8px 9px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--matcha);font-size:12px;font-weight:600;text-decoration:none;box-shadow:0 4px 12px rgba(42,42,34,.05);}
+.order-home-back svg{width:15px;height:15px;flex:0 0 auto;}
+.order-home-back:focus-visible{outline:3px solid color-mix(in srgb,var(--matcha) 28%,transparent);outline-offset:2px;}
 .header-row{display:flex;align-items:center;justify-content:space-between;}
 .brand-title{font-size:24px;font-weight:600;letter-spacing:-0.3px;}
 .brand-sub{font-size:11.5px;color:var(--matcha-lt);margin-top:2px;letter-spacing:0.4px;}

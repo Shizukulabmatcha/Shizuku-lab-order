@@ -1079,11 +1079,12 @@ function storeInfoPanel() {
 }
 
 /* ---------- header ---------- */
-function header({ showCart = false } = {}) {
+function header({ showCart = false, showHome = false } = {}) {
   const storeName = escapeHtml(state.store.store_name || "Shizuku Lab");
   const storeTagline = escapeHtml(state.store.store_tagline || "雫ラボ · crafted drop by drop");
   return `
     <div class="header">
+      ${showHome ? `<a class="order-home-back" href="index.html" aria-label="Back to Shizuku Lab home">${ICONS.back}<span>Back home</span></a>` : ""}
       <div class="header-row">
         <div>
           <div class="display brand-title">${storeName}</div>
@@ -1143,7 +1144,7 @@ function renderMenu() {
   const items = state.activeCategory === "All" ? state.menu : state.menu.filter((item) => productGroupName(item) === state.activeCategory);
   const groups = state.activeCategory === "All" ? categories.slice(1) : [state.activeCategory];
   return `
-    ${header({ showCart: true })}
+    ${header({ showCart: true, showHome: true })}
     ${storeInfoPanel()}
     ${pendingPaymentMarkup()}
     ${cartNoticeMarkup()}
