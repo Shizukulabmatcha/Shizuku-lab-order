@@ -76,6 +76,7 @@ const state = {
     saturday_collection_time: "10:00 AM - 12:00 PM",
     sunday_collection_time: "10:00 AM - 1:00 PM",
     collection_points: ["Blk 130A", "Near Creamier"],
+    collection_point_details: [],
     theme_primary_color: "#4B5D3A",
     theme_background_color: "#F3EEE3",
     theme_card_color: "#FFFFFF",
@@ -205,28 +206,39 @@ function safeExternalUrl(value) {
   const text = String(value || "").trim();
   return /^https?:\/\//i.test(text) ? text : "";
 }
-function collectionMapsUrl() {
-  const saved = safeExternalUrl(state.store.google_maps_url);
+function collectionPointInfo(pointName) {
+  const point = String(pointName || "").trim();
+  const details = Array.isArray(state.store.collection_point_details) ? state.store.collection_point_details : [];
+  const match = details.find((item) => String(item?.name || "").trim().toLowerCase() === point.toLowerCase()) || {};
+  return {
+    name: point || String(match.name || "Collection point"),
+    area: String(match.area || point || state.store.collection_area_label || "").trim(),
+    address: String(match.address || state.store.collection_address || "").trim(),
+    mapsUrl: String(match.google_maps_url || state.store.google_maps_url || "").trim()
+  };
+}
+function collectionMapsUrl(info = collectionPointInfo("")) {
+  const saved = safeExternalUrl(info.mapsUrl);
   if (saved) return saved;
-  const address = String(state.store.collection_address || "").trim();
+  const address = String(info.address || "").trim();
   return address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}` : "";
 }
-function collectionMapEmbedUrl() {
-  const address = String(state.store.collection_address || "").trim();
+function collectionMapEmbedUrl(info) {
+  const address = String(info?.address || "").trim();
   return address ? `https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed` : "";
 }
 function homeCollectionMapCard() {
   if (state.store.show_collection_map_home === false) return "";
-  const area = String(state.store.collection_area_label || "").trim();
-  const mapsUrl = collectionMapsUrl();
-  if (!area && !mapsUrl) return "";
-  return `<div class="collection-area-card"><div><span class="collection-map-kicker">COLLECTION AREA</span><strong>${escapeHtml(area || state.store.collection_address || "View collection area")}</strong><span>Exact pickup details are shown with your order.</span></div>${mapsUrl ? `<a href="${escapeHtml(mapsUrl)}" target="_blank" rel="noopener">View map ↗</a>` : ""}</div>`;
+  const points = Array.isArray(state.store.collection_points) && state.store.collection_points.length ? state.store.collection_points : [state.store.collection_area_label].filter(Boolean);
+  if (!points.length) return "";
+  return `<div class="collection-area-card"><div class="collection-area-list"><span class="collection-map-kicker">COLLECTION AREAS</span>${points.map((point) => { const info = collectionPointInfo(point); const url = collectionMapsUrl(info); return `<div class="collection-area-row"><strong>${escapeHtml(info.area || info.name)}</strong>${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">View map ↗</a>` : ""}</div>`; }).join("")}<span>Exact pickup details are shown with your order.</span></div></div>`;
 }
 function paymentCollectionMapCard(order) {
   if (state.store.show_collection_map_payment === false) return "";
-  const address = String(state.store.collection_address || "").trim();
-  const mapsUrl = collectionMapsUrl();
-  const embedUrl = collectionMapEmbedUrl();
+  const info = collectionPointInfo(order?.collection_point);
+  const address = info.address;
+  const mapsUrl = collectionMapsUrl(info);
+  const embedUrl = collectionMapEmbedUrl(info);
   if (!address && !order?.collection_point) return "";
   return `<div class="payment-map-card">
     ${embedUrl ? `<iframe class="payment-map-frame" title="Collection point map" src="${escapeHtml(embedUrl)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>` : ""}

@@ -743,10 +743,19 @@ function settingsCollectionPoints() {
   const points = astate.settingsDraft?.collection_points;
   return Array.isArray(points) && points.length ? points : ["Blk 130A", "Near Creamier"];
 }
-function editCollectionPoint(index, value) { const points = [...settingsCollectionPoints()]; points[index] = value; astate.settingsDraft.collection_points = points; }
-function addCollectionPoint() { astate.settingsDraft.collection_points = [...settingsCollectionPoints(), "New collection point"]; render(); }
-function deleteCollectionPoint(index) { const points = [...settingsCollectionPoints()]; if (points.length <= 1) return alert("Keep at least one collection point."); points.splice(index, 1); astate.settingsDraft.collection_points = points; render(); }
-function moveCollectionPoint(index, direction) { const points = [...settingsCollectionPoints()]; const next = index + direction; if (next < 0 || next >= points.length) return; [points[index], points[next]] = [points[next], points[index]]; astate.settingsDraft.collection_points = points; render(); }
+function settingsCollectionPointDetails() {
+  const saved = Array.isArray(astate.settingsDraft?.collection_point_details) ? astate.settingsDraft.collection_point_details : [];
+  return settingsCollectionPoints().map((name) => {
+    const match = saved.find((item) => String(item?.name || "").trim().toLowerCase() === String(name).trim().toLowerCase()) || {};
+    return { name, area: match.area || name, address: match.address || "", google_maps_url: match.google_maps_url || "" };
+  });
+}
+function syncCollectionPointDetails(details) { astate.settingsDraft.collection_point_details = details; }
+function editCollectionPoint(index, value) { const points = [...settingsCollectionPoints()]; const details = settingsCollectionPointDetails(); points[index] = value; details[index] = { ...details[index], name: value }; astate.settingsDraft.collection_points = points; syncCollectionPointDetails(details); }
+function editCollectionPointDetail(index, key, value) { const details = settingsCollectionPointDetails(); details[index] = { ...details[index], [key]: value }; syncCollectionPointDetails(details); }
+function addCollectionPoint() { const name = "New collection point"; astate.settingsDraft.collection_points = [...settingsCollectionPoints(), name]; syncCollectionPointDetails([...settingsCollectionPointDetails(), { name, area: name, address: "", google_maps_url: "" }]); render(); }
+function deleteCollectionPoint(index) { const points = [...settingsCollectionPoints()]; const details = settingsCollectionPointDetails(); if (points.length <= 1) return alert("Keep at least one collection point."); points.splice(index, 1); details.splice(index, 1); astate.settingsDraft.collection_points = points; syncCollectionPointDetails(details); render(); }
+function moveCollectionPoint(index, direction) { const points = [...settingsCollectionPoints()]; const details = settingsCollectionPointDetails(); const next = index + direction; if (next < 0 || next >= points.length) return; [points[index], points[next]] = [points[next], points[index]]; [details[index], details[next]] = [details[next], details[index]]; astate.settingsDraft.collection_points = points; syncCollectionPointDetails(details); render(); }
 function updateStorefrontPreview() {
   const circle = document.getElementById("logo-live-preview");
   const logo = document.getElementById("logo-live-preview-image");
@@ -2064,7 +2073,7 @@ function renderSettingsTab() {
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Collection points</div>
     <p class="hint" style="text-align:left;margin:0 0 12px;">Customers choose one of these at Checkout. The order shown here becomes the dropdown order.</p>
-    ${settingsCollectionPoints().map((point,index) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;margin-bottom:9px;"><input value="${escapeHtml(point)}" placeholder="Collection point name" oninput="editCollectionPoint(${index},this.value)"><div style="display:flex;gap:5px;"><button type="button" class="btn-secondary" ${index === 0 ? "disabled" : ""} onclick="moveCollectionPoint(${index},-1)" aria-label="Move up">↑</button><button type="button" class="btn-secondary" ${index === settingsCollectionPoints().length-1 ? "disabled" : ""} onclick="moveCollectionPoint(${index},1)" aria-label="Move down">↓</button><button type="button" class="link-danger" onclick="deleteCollectionPoint(${index})">Delete</button></div></div>`).join("")}
+    ${settingsCollectionPointDetails().map((point,index) => `<div class="dashboard-card" style="padding:14px;margin-bottom:12px;"><div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;margin-bottom:10px;"><input value="${escapeHtml(point.name)}" placeholder="Collection point name" oninput="editCollectionPoint(${index},this.value)"><div style="display:flex;gap:5px;"><button type="button" class="btn-secondary" ${index === 0 ? "disabled" : ""} onclick="moveCollectionPoint(${index},-1)" aria-label="Move up">↑</button><button type="button" class="btn-secondary" ${index === settingsCollectionPoints().length-1 ? "disabled" : ""} onclick="moveCollectionPoint(${index},1)" aria-label="Move down">↓</button><button type="button" class="link-danger" onclick="deleteCollectionPoint(${index})">Delete</button></div></div><div class="field" style="margin-bottom:9px;"><label>Short area shown on homepage</label><input value="${escapeHtml(point.area)}" placeholder="e.g. Near Creamier · Toa Payoh" oninput="editCollectionPointDetail(${index},'area',this.value)"></div><div class="field" style="margin-bottom:9px;"><label>Full address</label><input value="${escapeHtml(point.address)}" placeholder="Exact pickup address" oninput="editCollectionPointDetail(${index},'address',this.value)"></div><div class="field" style="margin-bottom:0;"><label>Google Maps link (optional)</label><input value="${escapeHtml(point.google_maps_url)}" placeholder="https://maps.google.com/..." oninput="editCollectionPointDetail(${index},'google_maps_url',this.value)"></div></div>`).join("")}
     <button type="button" class="btn-secondary" style="margin-bottom:16px;" onclick="addCollectionPoint()">+ Add collection point</button>
     ${field("Saturday collection time", "saturday_collection_time", "10:00 AM - 12:00 PM")}
     ${field("Sunday collection time", "sunday_collection_time", "10:00 AM - 1:00 PM")}
