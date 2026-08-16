@@ -29,6 +29,7 @@ const astate = {
   loyaltySettings: null,
   loyaltyDraft: null,
   customerLoyalty: {},
+  loyaltyTransactions: [],
   notificationSettings: null,
   notificationDraft: null,
   promoDraft: { code: "", discount_type: "fixed", discount_value: "", minimum_spend: "", usage_limit: "", valid_until: "", applicable_product_ids: [] },
@@ -258,6 +259,9 @@ async function loadAll(options = {}) {
       astate.loyaltySettings = loyaltySettings || { id: 1, enabled: false, reward_type: "stamps", stamps_required: 10, minimum_spend: 5, points_per_dollar: 1, points_required: 50, reward_description: "A free drink is on us." };
       astate.loyaltyDraft = { ...astate.loyaltySettings };
       astate.customerLoyalty = Object.fromEntries((loyaltyRows || []).map((row) => [row.customer_key, row]));
+      const { data: loyaltyTransactions, error: loyaltyTransactionsError } = await db.from("loyalty_transactions").select("*").order("created_at", { ascending: false }).limit(500);
+      if (loyaltyTransactionsError) console.warn("Reward history is not installed yet:", loyaltyTransactionsError.message);
+      astate.loyaltyTransactions = loyaltyTransactions || [];
       astate.notificationSettings = notificationSettings || { id: 1, recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true, alert_live_chat: true };
       astate.notificationDraft = { ...astate.notificationSettings };
       const [inventoryResult, recipeResult, supplierResult, wholesaleResult, inspirationResult, marginGuideResult] = await Promise.all([
@@ -388,8 +392,21 @@ async function updateOrderStatus(id, order_status, skipConfirmation = false) {
       astate.orders = astate.orders.map((o) => (String(o.id) === String(id) ? { ...o, order_status: previousStatus } : o));
       render();
       alert("Could not update this order: " + error.message);
+    } else if (order_status === "collected") {
+      await refreshLoyaltyBalances();
     }
   }
+}
+async function refreshLoyaltyBalances() {
+  if (!IS_CONFIGURED) return;
+  const [{ data, error }, { data: transactions, error: transactionError }] = await Promise.all([
+    db.from("customer_loyalty").select("*"),
+    db.from("loyalty_transactions").select("*").order("created_at", { ascending: false }).limit(500)
+  ]);
+  if (error) { console.warn("Could not refresh reward balances:", error.message); return; }
+  if (transactionError) console.warn("Could not refresh reward history:", transactionError.message);
+  astate.customerLoyalty = Object.fromEntries((data || []).map((row) => [row.customer_key, row]));
+  if (!transactionError) astate.loyaltyTransactions = transactions || [];
 }
 function nextFulfilmentStatus(order) {
   if (!order || order.payment_status !== "paid") return null;
@@ -440,6 +457,7 @@ async function bulkUpdateOrderStatus(status) {
   }
   astate.selectedOrderIds = [];
   astate.bulkOrderMode = false;
+  if (status === "collected") await refreshLoyaltyBalances();
   render();
   if (skipped) alert(`${eligible.length} updated. ${skipped} incompatible order(s) were safely skipped.`);
 }
@@ -1879,7 +1897,11 @@ function renderPromosTab() {
 }
 
 /* ---- customers ---- */
-function customerKey(order) { return String(order.customer_phone || order.instagram || order.customer_name || "Unknown customer").trim(); }
+function customerKey(order) {
+  const digits = String(order.customer_phone || "").replace(/\D/g, "");
+  const phone = digits.length === 10 && digits.startsWith("65") ? digits.slice(2) : digits;
+  return String(phone || order.instagram || order.customer_name || "Unknown customer").trim();
+}
 function customers() { const result = new Map(); astate.orders.forEach((order) => { const key = customerKey(order); const customer = result.get(key) || { key, name: order.customer_name || "Customer", phone: order.customer_phone || "", instagram: order.instagram || "", orders: [], spent: 0 }; customer.orders.push(order); if (order.payment_status === "paid" && order.order_status !== "cancelled") customer.spent += Number(order.total || 0); result.set(key, customer); }); return [...result.values()].sort((a,b) => new Date(b.orders[0]?.created_at || 0) - new Date(a.orders[0]?.created_at || 0)); }
 function chooseCustomer(key) { astate.selectedCustomerKey = key; render(); }
 function setCustomerNote(value) { if (astate.selectedCustomerKey) astate.customerNotes[astate.selectedCustomerKey] = value; }
@@ -1916,12 +1938,13 @@ function renderRewardsTab() {
   const points = d.reward_type === "points";
   const goal = Math.max(1, Number(points ? d.points_required || 50 : d.stamps_required || 10));
   const customerRows = customers();
-  const cardDots = Array.from({ length: Math.min(goal, 10) }, () => `<div style="aspect-ratio:1;border:2px solid rgba(241,247,234,.55);border-radius:50%;display:grid;place-items:center;color:#dcebd8;font-size:13px;">☆</div>`).join("");
+  const rewardLogo = escapeHtml(astate.settings?.logo_url || "logo.png");
+  const cardDots = Array.from({ length: Math.min(goal, 10) }, () => `<div style="aspect-ratio:1;border:1px solid rgba(241,247,234,.38);border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.92);padding:5px;"><img src="${rewardLogo}" alt="Shizuku Lab stamp" style="width:100%;height:100%;object-fit:contain;border-radius:50%;opacity:.45;"></div>`).join("");
   const preview = points
     ? `<div style="margin:20px 20px 4px;padding:22px;background:linear-gradient(135deg,#1e473e,#294c44 55%,#19362f);border-radius:17px;color:#f9f4e8;"><div style="font-size:10px;font-weight:800;letter-spacing:.15em;color:#b7d2bb;">SHIZUKU LAB · POINTS WALLET</div><div style="font:700 24px/1.1 Georgia,serif;margin-top:9px;">Shizuku Club</div><div style="font:700 48px/1 Georgia,serif;margin:22px 0 5px;">0 <span style="font:600 15px/1 inherit;color:#cce0ca;">points</span></div><div style="font-size:12px;color:#d6e4d4;">${goal} points to your next reward</div><div style="height:9px;background:rgba(255,255,255,.2);border-radius:99px;margin:18px 0 17px;overflow:hidden;"><div style="height:100%;width:0%;background:#cae4b3;border-radius:99px;"></div></div><div style="font-size:10px;font-weight:800;letter-spacing:.12em;color:#b7d2bb;">REDEEM</div><div style="font-size:14px;font-weight:700;margin-top:5px;">${escapeHtml(d.reward_description || "A free drink is on us.")}</div><div style="font-size:12px;color:#d6e4d4;margin-top:12px;">Earn ${escapeHtml(d.points_per_dollar || 1)} point${Number(d.points_per_dollar || 1) === 1 ? "" : "s"} for every $1 spent</div></div>`
     : `<div style="margin:20px 20px 4px;padding:22px;background:linear-gradient(135deg,#1e473e,#294c44 55%,#19362f);border-radius:17px;color:#f9f4e8;"><div style="font-size:10px;font-weight:800;letter-spacing:.15em;color:#b7d2bb;">SHIZUKU LAB · MEMBER</div><div style="font:700 24px/1.1 Georgia,serif;margin-top:9px;">Shizuku Club</div><div style="margin:20px 0 16px;display:grid;grid-template-columns:repeat(5,1fr);gap:8px;">${cardDots}</div><div style="font-size:10px;font-weight:800;letter-spacing:.12em;color:#b7d2bb;">NEXT REWARD</div><div style="font-size:14px;font-weight:700;margin-top:5px;">${escapeHtml(d.reward_description || "A free drink is on us.")}</div><div style="font-size:12px;color:#d6e4d4;margin-top:12px;">${goal} stamps to complete a card</div></div>`;
   const settings = `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Rewards programme</h2><span>${d.enabled ? "LIVE" : "OFF"}</span></div><label class="slot" style="cursor:pointer;gap:10px;margin:0 0 16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${d.enabled ? "checked" : ""} onchange="onLoyaltyField('enabled',this.checked)"><span><b>Enable rewards</b><br><span class="hint">Choose one simple programme for customers.</span></span></label><div class="field"><label>Reward type</label><select onchange="onLoyaltyField('reward_type',this.value);render()"><option value="stamps" ${!points ? "selected" : ""}>Stamp card</option><option value="points" ${points ? "selected" : ""}>Points</option></select></div>${points ? `<div class="field"><label>Points earned per $1 spent</label><input type="number" min="0.01" step="0.1" value="${escapeHtml(d.points_per_dollar)}" oninput="onLoyaltyField('points_per_dollar',this.value)"></div><div class="field"><label>Points needed for a reward</label><input type="number" min="1" value="${escapeHtml(d.points_required)}" oninput="onLoyaltyField('points_required',this.value)"></div>` : `<div class="field"><label>Stamps to complete a card</label><input type="number" min="1" max="30" value="${escapeHtml(d.stamps_required)}" oninput="onLoyaltyField('stamps_required',this.value)"></div><div class="field"><label>Minimum spend per stamp ($)</label><input type="number" min="0" step="0.10" value="${escapeHtml(d.minimum_spend)}" oninput="onLoyaltyField('minimum_spend',this.value)"></div>`}<div class="field"><label>Reward message</label><textarea rows="3" oninput="onLoyaltyField('reward_description',this.value)">${escapeHtml(d.reward_description)}</textarea></div><button class="btn-primary" id="save-loyalty-settings" style="width:100%" onclick="saveLoyaltySettings()">Save rewards</button></section>`;
-  const members = `<section class="dashboard-card">${preview}<div class="dashboard-card-head"><h2>${points ? "Points members" : "Stamp card members"}</h2><span>${customerRows.length} customers</span></div>${customerRows.length ? customerRows.map((customer) => { const balance = astate.customerLoyalty[customer.key] || {}; const value = Number(balance[points ? "points" : "stamps"] || 0); return `<div class="queue-row"><div class="queue-top"><div><b>${escapeHtml(customer.name)}</b><div class="queue-name">${value} / ${goal} ${points ? "points" : "stamps"} · ${Number(balance.rewards_available || 0)} reward${Number(balance.rewards_available || 0) === 1 ? "" : "s"} ready</div></div><div style="display:flex;gap:7px"><button class="btn-secondary" data-key="${escapeHtml(customer.key)}" onclick="adjustReward(this.dataset.key,-1)">−1</button><button class="btn-primary" data-key="${escapeHtml(customer.key)}" onclick="adjustReward(this.dataset.key,1)">+1</button></div></div></div>`; }).join("") : `<div class="dashboard-empty">Customers appear after their first order.</div>`}</section>`;
+  const members = `<section class="dashboard-card">${preview}<div class="dashboard-card-head"><h2>${points ? "Points members" : "Stamp card members"}</h2><span>${customerRows.length} customers</span></div>${customerRows.length ? customerRows.map((customer) => { const balance = astate.customerLoyalty[customer.key] || {}; const value = Number(balance[points ? "points" : "stamps"] || 0); const history = astate.loyaltyTransactions.filter((item) => String(item.customer_key) === String(customer.key)).slice(0, 8); return `<div class="queue-row"><div class="queue-top"><div><b>${escapeHtml(customer.name)}</b><div class="queue-name">Current balance: <b>${value} ${points ? "points" : "stamps"}</b> · ${Number(balance.rewards_available || 0)} reward${Number(balance.rewards_available || 0) === 1 ? "" : "s"} ready</div></div><div style="display:flex;gap:7px"><button class="btn-secondary" data-key="${escapeHtml(customer.key)}" onclick="adjustReward(this.dataset.key,-1)">−1</button><button class="btn-primary" data-key="${escapeHtml(customer.key)}" onclick="adjustReward(this.dataset.key,1)">+1</button></div></div>${history.length ? `<div style="margin-top:12px;padding-top:9px;border-top:1px solid #eee3d8;">${history.map((item) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:12px;"><span><b>+${escapeHtml(item.amount)}</b> — Order ${escapeHtml(item.order_number)}</span><span class="hint" style="margin:0;white-space:nowrap;">${new Date(item.created_at).toLocaleDateString("en-SG", { day:"numeric", month:"short" })}</span></div>`).join("")}</div>` : `<div class="hint" style="text-align:left;margin:10px 0 0;">No automatic reward activity yet.</div>`}</div>`; }).join("") : `<div class="dashboard-empty">Customers appear after their first order.</div>`}</section>`;
   return `<div class="dashboard-grid" style="grid-template-columns:minmax(300px,.88fr) minmax(360px,1.12fr);align-items:start;">${settings}${members}</div>`;
 }
 
