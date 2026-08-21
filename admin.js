@@ -12,7 +12,10 @@ const astate = {
   recoveryPassword: "",
   recoveryPasswordConfirm: "",
   loginMessage: "",
-  tab: "dashboard",
+  tab: (() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    return requested || "dashboard";
+  })(),
   orders: [],
   menu: [],
   productGroups: [],
@@ -1177,6 +1180,9 @@ function setTab(tab) {
   const nav = document.querySelector(".admin-nav");
   if (nav) astate.navScrollTop = nav.scrollTop;
   astate.tab = tab;
+  const url = new URL(window.location.href);
+  url.searchParams.set("tab", tab);
+  history.replaceState(null, "", url);
   render();
   requestAnimationFrame(() => { const nextNav = document.querySelector(".admin-nav"); if (nextNav) nextNav.scrollTop = astate.navScrollTop; });
 }
@@ -2027,7 +2033,8 @@ function renderSettingsTab() {
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_announcement ? "checked" : ""} onchange="onSettingsField('show_announcement', this.checked)"><span><b>Show announcement before Welcome page</b><br><span class="hint">The same announcement appears at most once per customer per day.</span></span></label>
     ${field("Announcement title", "announcement_title", "This week at Shizuku Lab")}
     <div class="field"><label>Announcement message</label><textarea rows="4" placeholder="Opening dates, pickup hours or an important update." oninput="onSettingsField('announcement_message', this.value)">${escapeHtml(s.announcement_message || "")}</textarea></div>
-    ${field("Promo code to show (optional)", "announcement_promo_code", "WELCOME10")}
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.include_announcement_promo === true ? "checked" : ""} onchange="onSettingsField('include_announcement_promo',this.checked);render()"><span><b>Include promo code</b><br><span class="hint">Optional. Leave this off when the announcement is only a notice.</span></span></label>
+    ${s.include_announcement_promo === true ? field("Promo code", "announcement_promo_code", "WELCOME10") : ""}
     ${field("Continue button text", "announcement_button_text", "Continue")}
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Welcome cover</div>

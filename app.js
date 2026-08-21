@@ -13,6 +13,8 @@ const ICONS = {
 
 const CART_STORAGE_KEY = "shizuku-lab-cart-v1";
 const PENDING_PAYMENT_STORAGE_KEY = "shizuku-lab-pending-payment-v1";
+const STOREFRONT_CACHE_KEY = "shizuku-lab-storefront-v1";
+const STOREFRONT_CACHE_MAX_AGE = 24 * 60 * 60 * 1000;
 function loadSavedCart() {
   try {
     const saved = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || "{}");
@@ -53,6 +55,7 @@ const state = {
   productOptionGroups: [],
   selectedProduct: null,
   selectedOptions: {},
+  openOptionGroupId: null,
   bundle: { drink1: null, drink2: null, drink1Options: {}, drink2Options: {} },
   slots: [],
   openingOverrides: [],
@@ -169,6 +172,35 @@ let stockRefreshTimer = null;
 let orderTrackingTimer = null;
 let customerChatChannel = null;
 let lastRenderedScreen = null;
+
+function restoreStorefrontCache() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(STOREFRONT_CACHE_KEY) || "null");
+    if (!cached || Date.now() - Number(cached.savedAt || 0) > STOREFRONT_CACHE_MAX_AGE || !Array.isArray(cached.menu) || !cached.menu.length) return false;
+    state.store = { ...state.store, ...(cached.store || {}) };
+    state.menu = cached.menu || [];
+    state.productGroups = cached.productGroups || [];
+    state.optionGroups = cached.optionGroups || [];
+    state.options = cached.options || [];
+    state.productOptionGroups = cached.productOptionGroups || [];
+    state.openingOverrides = cached.openingOverrides || [];
+    state.faq = cached.faq || [];
+    state.reviews = cached.reviews || [];
+    state.stockLevels = cached.stockLevels || {};
+    state.menuView = state.store.default_menu_view === "gallery" ? "gallery" : "list";
+    state.slots = computeSlots();
+    return true;
+  } catch (_) { return false; }
+}
+function saveStorefrontCache() {
+  try {
+    localStorage.setItem(STOREFRONT_CACHE_KEY, JSON.stringify({
+      savedAt: Date.now(), store: state.store, menu: state.menu, productGroups: state.productGroups,
+      optionGroups: state.optionGroups, options: state.options, productOptionGroups: state.productOptionGroups,
+      openingOverrides: state.openingOverrides, faq: state.faq, reviews: state.reviews, stockLevels: state.stockLevels
+    }));
+  } catch (_) { /* The live storefront still works if storage is unavailable. */ }
+}
 
 /* ---------- helpers ---------- */
 function money(n) { return `$${Number(n || 0).toFixed(2)}`; }
@@ -550,6 +582,9 @@ async function init() {
     } else if (pendingPayment) clearPendingPayment();
   }
 
+  const restoredFromCache = restoreStorefrontCache();
+  if (restoredFromCache) { state.loading = false; render(); }
+
   if (!IS_CONFIGURED) { state.loading = false; render(); return; }
 
   try {
@@ -560,6 +595,7 @@ async function init() {
     state.slots = computeSlots();
     await Promise.all([loadProducts(), loadOptions(), loadProductGroups(), loadCustomerStockLevels()]);
     removeUnavailableCartItems();
+    saveStorefrontCache();
     startStockRefresh();
   } catch (error) {
     console.error(error);
@@ -639,6 +675,15 @@ function selectOption(groupId, optionId) {
   const option = state.options.find((item) => String(item.id) === String(optionId));
   if (!option) return;
   state.selectedOptions[groupId] = { productId: state.selectedProduct.id, optionId: option.id, optionName: option.name, price: Number(option.price || 0) };
+  const groups = optionGroupsForProduct(state.selectedProduct);
+  const currentIndex = groups.findIndex((group) => String(group.id) === String(groupId));
+  const nextGroup = groups.slice(currentIndex + 1).find((group) => !state.selectedOptions[group.id]);
+  state.openOptionGroupId = nextGroup ? nextGroup.id : null;
+  render();
+  if (nextGroup) requestAnimationFrame(() => document.querySelector(`[data-option-group="${CSS.escape(String(nextGroup.id))}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+}
+function toggleOptionGroup(groupId) {
+  state.openOptionGroupId = String(state.openOptionGroupId) === String(groupId) ? null : groupId;
   render();
 }
 function validateRequiredOptions() {
@@ -664,6 +709,7 @@ function openProductOptions(productId) {
   if (isSoldOut(product)) { alert("Sorry, this item is sold out."); return; }
   state.selectedProduct = product;
   state.selectedOptions = {};
+  state.openOptionGroupId = optionGroupsForProduct(product)[0]?.id || null;
   if (isBundle(product)) {
     state.bundle = { drink1: null, drink2: null, drink1Options: {}, drink2Options: {} };
     state.screen = "bundle";
@@ -691,6 +737,7 @@ function addConfiguredProductToCart() {
   };
   state.selectedProduct = null;
   state.selectedOptions = {};
+  state.openOptionGroupId = null;
   state.screen = "menu";
   saveCart();
   render();
@@ -1256,10 +1303,14 @@ function renderOptions() {
       ${optionGroupsForProduct(product).length === 0 ? `<div class="hint">No customisation options for this item.</div>` : optionGroupsForProduct(product).map((group) => {
         const options = getOptionsForGroup(group.id);
         const selected = state.selectedOptions[group.id];
+        const isOpen = String(state.openOptionGroupId) === String(group.id);
         return `
-          <div class="field product-option-group" style="margin-top:20px;">
-            <label><span class="option-kana">カスタマイズ</span>${escapeHtml(group.name)}${group.required ? " *" : " (optional)"}</label>
-            <div>
+          <div class="field product-option-group ${isOpen ? "is-open" : "is-collapsed"} ${selected ? "is-complete" : ""}" data-option-group="${escapeHtml(group.id)}">
+            <button type="button" class="option-group-toggle" onclick="toggleOptionGroup('${escapeHtml(group.id)}')" aria-expanded="${isOpen}">
+              <span><span class="option-kana">カスタマイズ</span>${escapeHtml(group.name)}${group.required ? " *" : " (optional)"}</span>
+              <span class="option-group-summary">${selected ? escapeHtml(selected.optionName) : "Choose"} <span class="option-chevron">⌄</span></span>
+            </button>
+            <div class="option-group-choices" ${isOpen ? "" : "hidden"}>
               ${options.map((option) => `
                 <button type="button" class="slot ${selected && String(selected.optionId) === String(option.id) ? "active" : ""}" onclick="selectOption('${escapeHtml(group.id)}','${escapeHtml(option.id)}')">
                   <div>
