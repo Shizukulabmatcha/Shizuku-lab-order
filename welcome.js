@@ -91,8 +91,7 @@
     const announcementClose = document.getElementById("welcome-announcement-close");
     const noticeTitle = String(data.announcement_title || "").trim();
     const noticeMessage = String(data.announcement_message || "").trim();
-    const includeNoticeCode = data.include_announcement_promo === true;
-    const noticeCode = includeNoticeCode ? String(data.announcement_promo_code || "").trim().toUpperCase() : "";
+    const noticeCode = String(data.announcement_promo_code || "").trim().toUpperCase();
     const today = new Date().toLocaleDateString("en-CA");
     const noticeFingerprint = `${today}|${noticeTitle}|${noticeMessage}|${noticeCode}`;
     let seenNotice = "";
@@ -111,7 +110,7 @@
       announcementClose.addEventListener("click", dismiss);
       announcementContinue.addEventListener("click", dismiss);
       announcement.addEventListener("click", (event) => { if (event.target === announcement) dismiss(); });
-      if (noticeCode) announcementCopy.addEventListener("click", async () => {
+      announcementCopy.addEventListener("click", async () => {
         try { await navigator.clipboard.writeText(noticeCode); announcementCopy.textContent = "Copied"; }
         catch (_) { announcementCopy.textContent = noticeCode; }
       });

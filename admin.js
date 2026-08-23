@@ -12,10 +12,7 @@ const astate = {
   recoveryPassword: "",
   recoveryPasswordConfirm: "",
   loginMessage: "",
-  tab: (() => {
-    const requested = new URLSearchParams(window.location.search).get("tab");
-    return requested || "dashboard";
-  })(),
+  tab: "dashboard",
   orders: [],
   menu: [],
   productGroups: [],
@@ -47,6 +44,9 @@ const astate = {
   selectedAvailabilityDate: null,
   settingsSection: "welcome",
   availabilityDraft: null,
+  offlineOrderDraft: null,
+  salesFrom: "",
+  salesTo: "",
   calendarMonth: null,
   orderFilter: "all",
   orderSearch: "",
@@ -98,18 +98,19 @@ function localDateText(date) {
 }
 function weeklyAvailability(dateText) {
   const date = new Date(`${dateText}T12:00:00`);
-  if (date.getDay() === 6) return { is_open: true, collection_time: astate.settingsDraft?.saturday_collection_time || "10:00 AM - 12:00 PM" };
-  if (date.getDay() === 0) return { is_open: true, collection_time: astate.settingsDraft?.sunday_collection_time || "10:00 AM - 1:00 PM" };
-  return { is_open: false, collection_time: "" };
+  const schedule = weeklySchedule();
+  const day = schedule.find((item) => Number(item.day) === date.getDay());
+  const windows = Array.isArray(day?.windows) ? day.windows : [];
+  return { is_open: !!day?.is_open, collection_time: windows.map((item) => item.range).filter(Boolean).join(" | "), pickup_windows: windows };
 }
 function availabilityForDate(dateText) {
   const override = astate.openingOverrides.find((item) => item.collection_date === dateText);
-  return override ? { is_open: !!override.is_open, collection_time: override.collection_time || "", override: true } : { ...weeklyAvailability(dateText), override: false };
+  return override ? { is_open: !!override.is_open, collection_time: override.collection_time || "", pickup_windows: Array.isArray(override.pickup_windows) ? override.pickup_windows : availabilityRanges(override.collection_time).filter(Boolean).map((range) => ({ range, capacity: null })), override: true } : { ...weeklyAvailability(dateText), override: false };
 }
 function setAvailabilityDraft(dateText) {
   astate.selectedAvailabilityDate = dateText;
   const value = availabilityForDate(dateText);
-  astate.availabilityDraft = { collection_date: dateText, is_open: value.is_open, collection_time: value.collection_time };
+  astate.availabilityDraft = { collection_date: dateText, is_open: value.is_open, collection_time: value.collection_time, pickup_windows: (value.pickup_windows || []).map((item) => ({ ...item })) };
 }
 function selectAvailabilityDate(dateText) { setAvailabilityDraft(dateText); render(); }
 function changeCalendarMonth(amount) {
@@ -126,20 +127,32 @@ function availabilityRanges(value) {
   if (!text.trim()) return [""];
   return text.split("|").map((item) => item.trim());
 }
-function setAvailabilityRange(index, value) {
-  const ranges = availabilityRanges(astate.availabilityDraft.collection_time);
-  ranges[index] = value;
-  astate.availabilityDraft.collection_time = ranges.join(" | ");
+const WEEKDAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+function weeklySchedule() {
+  const saved = astate.settingsDraft?.weekly_pickup_schedule;
+  if (Array.isArray(saved) && saved.length === 7) return saved;
+  const saturday = astate.settingsDraft?.saturday_collection_time || "10:00 AM - 12:00 PM";
+  const sunday = astate.settingsDraft?.sunday_collection_time || "10:00 AM - 1:00 PM";
+  const schedule = WEEKDAYS.map((label, day) => ({ day, label, is_open: day === 0 || day === 6, windows: day === 0 ? [{ range:sunday, capacity:null }] : day === 6 ? [{ range:saturday, capacity:null }] : [] }));
+  if (astate.settingsDraft) astate.settingsDraft.weekly_pickup_schedule = schedule;
+  return schedule;
 }
+function setWeeklyDayOpen(day, value) { const row=weeklySchedule().find((item)=>Number(item.day)===Number(day)); if (!row) return; row.is_open=!!value; if (row.is_open && !row.windows.length) row.windows=[{range:"10:00 AM - 12:00 PM",capacity:null}]; render(); }
+function setWeeklyWindow(day,index,key,value) { const row=weeklySchedule().find((item)=>Number(item.day)===Number(day)); if (!row?.windows?.[index]) return; row.windows[index][key]=key==="capacity" ? (value===""?null:Math.max(1,Number(value||1))) : value; }
+function addWeeklyWindow(day) { const row=weeklySchedule().find((item)=>Number(item.day)===Number(day)); if (!row) return; row.windows.push({range:"",capacity:null}); render(); }
+function removeWeeklyWindow(day,index) { const row=weeklySchedule().find((item)=>Number(item.day)===Number(day)); if (!row) return; row.windows.splice(index,1); render(); }
+function specialWindows() { const draft=astate.availabilityDraft; if (!draft) return []; if (!Array.isArray(draft.pickup_windows)) draft.pickup_windows=availabilityRanges(draft.collection_time).map((range)=>({range,capacity:null})); return draft.pickup_windows; }
+function setAvailabilityRange(index, value) {
+  const windows=specialWindows(); if (!windows[index]) windows[index]={range:"",capacity:null}; windows[index].range=value;
+  astate.availabilityDraft.collection_time=windows.map((item)=>item.range).join(" | ");
+}
+function setAvailabilityCapacity(index,value) { const windows=specialWindows(); if (!windows[index]) return; windows[index].capacity=value===""?null:Math.max(1,Number(value||1)); }
 function addAvailabilityRange() {
-  const ranges = availabilityRanges(astate.availabilityDraft.collection_time);
-  astate.availabilityDraft.collection_time = [...ranges, ""].join(" | ");
+  const windows=specialWindows(); windows.push({range:"",capacity:null}); astate.availabilityDraft.collection_time=windows.map((item)=>item.range).join(" | ");
   render();
 }
 function removeAvailabilityRange(index) {
-  const ranges = availabilityRanges(astate.availabilityDraft.collection_time);
-  ranges.splice(index, 1);
-  astate.availabilityDraft.collection_time = (ranges.length ? ranges : [""]).join(" | ");
+  const windows=specialWindows(); windows.splice(index,1); if (!windows.length) windows.push({range:"",capacity:null}); astate.availabilityDraft.collection_time=windows.map((item)=>item.range).join(" | ");
   render();
 }
 async function saveAvailabilityOverride() {
@@ -147,8 +160,9 @@ async function saveAvailabilityOverride() {
   if (!entry || !entry.collection_date) return;
   const button = document.getElementById("availability-save-btn");
   if (button) { button.textContent = "Saving…"; button.disabled = true; }
-  const cleanWindows = availabilityRanges(entry.collection_time).filter(Boolean).join(" | ");
-  const payload = { collection_date: entry.collection_date, is_open: !!entry.is_open, collection_time: entry.is_open ? cleanWindows : null };
+  const pickupWindows = specialWindows().filter((item)=>String(item.range||"").trim()).map((item)=>({range:String(item.range).trim(),capacity:item.capacity==null?null:Math.max(1,Number(item.capacity))}));
+  const cleanWindows = pickupWindows.map((item)=>item.range).join(" | ");
+  const payload = { collection_date: entry.collection_date, is_open: !!entry.is_open, collection_time: entry.is_open ? cleanWindows : null, pickup_windows: entry.is_open ? pickupWindows : [] };
   const { data, error } = await db.from("store_opening_overrides").upsert(payload, { onConflict: "collection_date" }).select().single();
   if (button) { button.textContent = "Save day"; button.disabled = false; }
   if (error) { alert("Could not save this day: " + error.message); return; }
@@ -1052,10 +1066,11 @@ function dashboardStats() {
   const paid = paidOrders();
   const now = new Date();
   const monthly = paid.filter((order) => { const d = new Date(order.created_at); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); });
+  const monthlySales = monthly.filter((order) => order.counts_as_sale !== false);
   const customerKeys = new Set(astate.orders.map((order) => String(order.customer_phone || order.instagram || order.customer_name || "").trim()).filter(Boolean));
-  const revenue = monthly.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const revenue = monthlySales.reduce((sum, order) => sum + Number(order.total || 0), 0);
   const missingRecipeProducts = new Map();
-  const foodCost = monthly.reduce((orderSum, order) => orderSum + (order.order_items || []).reduce((itemSum, item) => {
+  const foodCost = monthlySales.reduce((orderSum, order) => orderSum + (order.order_items || []).reduce((itemSum, item) => {
     const recipeRows = astate.recipes.filter((row) => String(row.product_id) === String(item.product_id));
     const product = astate.menu.find((row) => String(row.id) === String(item.product_id))
       || astate.menu.find((row) => String(row.name) === String(item.product_name));
@@ -1180,9 +1195,6 @@ function setTab(tab) {
   const nav = document.querySelector(".admin-nav");
   if (nav) astate.navScrollTop = nav.scrollTop;
   astate.tab = tab;
-  const url = new URL(window.location.href);
-  url.searchParams.set("tab", tab);
-  history.replaceState(null, "", url);
   render();
   requestAnimationFrame(() => { const nextNav = document.querySelector(".admin-nav"); if (nextNav) nextNav.scrollTop = astate.navScrollTop; });
 }
@@ -1387,6 +1399,55 @@ function toggleAdminNav() {
 
 function setOrderFilter(filter) { astate.orderFilter = filter; render(); }
 function setOrderSearch(value) { astate.orderSearch = value; render(); }
+
+function offlineReasonLabel(value) {
+  return ({ influencer_tasting: "Influencer tasting", complimentary: "Complimentary", replacement: "Replacement", manual_sale: "Offline paid sale", other: "Other" })[value] || "Offline order";
+}
+function openOfflineOrder() {
+  const firstProduct = astate.menu.find((item) => item.is_available !== false) || astate.menu[0];
+  astate.offlineOrderDraft = {
+    customer_name: "", customer_phone: "", collection_date: localDateText(new Date()), collection_time: "",
+    collection_point: (astate.settings?.collection_points || [])[0] || "", offline_reason: "influencer_tasting", counts_as_sale: false,
+    notes: "", items: firstProduct ? [{ product_id: firstProduct.id, product_name: firstProduct.name, quantity: 1, unit_price: Number(firstProduct.discount_price || firstProduct.price || 0) }] : []
+  };
+  render();
+}
+function closeOfflineOrder() { astate.offlineOrderDraft = null; render(); }
+function offlineOrderField(key, value) {
+  if (!astate.offlineOrderDraft) return;
+  astate.offlineOrderDraft[key] = key === "counts_as_sale" ? !!value : value;
+  if (key === "offline_reason" && value !== "manual_sale") astate.offlineOrderDraft.counts_as_sale = false;
+  if (key === "offline_reason" && value === "manual_sale") astate.offlineOrderDraft.counts_as_sale = true;
+  render();
+}
+function addOfflineOrderItem() { const p = astate.menu.find((item) => item.is_available !== false) || astate.menu[0]; if (p) { astate.offlineOrderDraft.items.push({ product_id:p.id,product_name:p.name,quantity:1,unit_price:Number(p.discount_price||p.price||0) }); render(); } }
+function chooseOfflineProduct(index, id) { const p=astate.menu.find((item)=>String(item.id)===String(id)); const row=astate.offlineOrderDraft?.items?.[index]; if(p&&row){row.product_id=p.id;row.product_name=p.name;row.unit_price=Number(p.discount_price||p.price||0);render();} }
+function offlineItemField(index,key,value) { const row=astate.offlineOrderDraft?.items?.[index]; if(row){row[key]=Math.max(0,Number(value||0));render();} }
+function removeOfflineItem(index) { astate.offlineOrderDraft?.items?.splice(index,1); render(); }
+function offlineOrderCode() { return `SL-O${Math.random().toString(36).slice(2,7).toUpperCase()}`; }
+async function saveOfflineOrder() {
+  const d=astate.offlineOrderDraft; if(!d||!String(d.customer_name).trim()) return alert("Enter a customer or contact name.");
+  const items=(d.items||[]).filter((row)=>Number(row.quantity)>0); if(!items.length) return alert("Add at least one product.");
+  const total=d.counts_as_sale ? items.reduce((sum,row)=>sum+Number(row.quantity)*Number(row.unit_price),0) : 0;
+  const payload={order_number:offlineOrderCode(),customer_name:String(d.customer_name).trim(),customer_phone:String(d.customer_phone||"").trim(),instagram:"",collection_date:d.collection_date||null,collection_time:String(d.collection_time||"").trim()||null,collection_point:String(d.collection_point||"").trim()||null,total,payment_status:"paid",order_status:"confirmed",notes:String(d.notes||"").trim()||null,payment_method:"Offline",payment_reference:null,is_offline:true,offline_reason:d.offline_reason,counts_as_sale:!!d.counts_as_sale};
+  const button=document.getElementById("save-offline-order"); if(button){button.disabled=true;button.textContent="Saving…";}
+  let order=null;
+  try {
+    const result=await db.from("orders").insert(payload).select("*").single(); if(result.error) throw result.error; order=result.data;
+    const rows=items.map((row)=>({order_id:order.id,product_id:row.product_id,product_name:row.product_name,quantity:Number(row.quantity),unit_price:d.counts_as_sale?Number(row.unit_price):0,subtotal:d.counts_as_sale?Number(row.quantity)*Number(row.unit_price):0}));
+    const inserted=await db.from("order_items").insert(rows); if(inserted.error) throw inserted.error;
+    await db.rpc("reconcile_shizuku_order_inventory",{p_order_id:order.id});
+    astate.offlineOrderDraft=null; await loadAll(); alert("Offline order created. Inventory has been updated.");
+  } catch(error) { if(order?.id) await db.from("orders").delete().eq("id",order.id); alert("Could not create offline order: "+(error?.message||error)); if(button){button.disabled=false;button.textContent="Create offline order";} }
+}
+
+function salesOrders() {
+  return astate.orders.filter((order)=>order.payment_status==="paid"&&order.order_status!=="cancelled"&&order.counts_as_sale!==false&&(!astate.salesFrom||String(order.collection_date||"")>=astate.salesFrom)&&(!astate.salesTo||String(order.collection_date||"")<=astate.salesTo));
+}
+function salesReportRows() { return salesOrders().map((o)=>[o.order_number,o.collection_date,o.collection_time,o.customer_name,o.is_offline?"Offline":"Online",o.is_offline?offlineReasonLabel(o.offline_reason):"Customer order",Number(o.total||0).toFixed(2),ORDER_LABEL[o.order_status]||o.order_status]); }
+function salesFileName(ext){return `shizuku-sales-${astate.salesFrom||"all"}-to-${astate.salesTo||"today"}.${ext}`;}
+function downloadSalesExcel(){const headings=["Order","Date","Time","Customer","Channel","Type","Sales (SGD)","Status"];const table=`<table><tr>${headings.map(x=>`<th>${x}</th>`).join("")}</tr>${salesReportRows().map(row=>`<tr>${row.map(x=>`<td>${escapeHtml(x)}</td>`).join("")}</tr>`).join("")}</table>`;const blob=new Blob([`<html><head><meta charset="utf-8"></head><body>${table}</body></html>`],{type:"application/vnd.ms-excel"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=salesFileName("xls");a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+function printSalesReport(){const win=window.open("","_blank");if(!win)return alert("Please allow the print window in Safari.");const rows=salesReportRows();const total=salesOrders().reduce((sum,o)=>sum+Number(o.total||0),0);win.document.write(`<html><head><title>Shizuku Lab Sales</title><style>body{font:14px Arial;padding:32px;color:#222}table{width:100%;border-collapse:collapse}th,td{padding:9px;border-bottom:1px solid #ddd;text-align:left}h1{font-family:Georgia,serif}.total{text-align:right;font-size:18px;margin-top:20px}</style></head><body><h1>Shizuku Lab Sales</h1><p>${escapeHtml(astate.salesFrom||"All dates")} — ${escapeHtml(astate.salesTo||"Today")}</p><table><tr>${["Order","Date","Time","Customer","Channel","Type","Sales (SGD)","Status"].map(x=>`<th>${x}</th>`).join("")}</tr>${rows.map(row=>`<tr>${row.map(x=>`<td>${escapeHtml(x)}</td>`).join("")}</tr>`).join("")}</table><div class="total"><b>Total: ${money(total)}</b></div><script>window.onload=()=>window.print()<\/script></body></html>`);win.document.close();}
 
 /* ---- order editing ---- */
 function editOrder(id) {
@@ -1716,10 +1777,11 @@ function renderOrders() {
   const controls = `<section class="dashboard-card" style="padding:18px 20px;margin-bottom:18px;overflow:visible;">
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <input aria-label="Search orders" placeholder="Search order, customer, phone or Instagram" value="${escapeHtml(astate.orderSearch)}" oninput="setOrderSearch(this.value)" style="flex:1 1 320px;margin:0;">
+      <button class="btn-primary" onclick="openOfflineOrder()">+ Offline order</button>
       <span class="hint" style="margin:0;white-space:nowrap;">${orders.length} shown</span>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:13px;">${filters.map(([key, label]) => `<button class="${astate.orderFilter === key ? "btn-primary" : "btn-secondary"}" style="padding:8px 11px;font-size:12px;" onclick="setOrderFilter('${key}')">${label}</button>`).join("")}</div>
-  </section>`;
+  </section><section class="dashboard-card" style="padding:16px 20px;margin-bottom:18px;"><div style="display:flex;align-items:end;gap:10px;flex-wrap:wrap;"><div class="field" style="margin:0"><label>Sales from</label><input type="date" value="${escapeHtml(astate.salesFrom)}" onchange="astate.salesFrom=this.value;render()"></div><div class="field" style="margin:0"><label>To</label><input type="date" value="${escapeHtml(astate.salesTo)}" onchange="astate.salesTo=this.value;render()"></div><button class="btn-secondary" onclick="downloadSalesExcel()">Download Excel</button><button class="btn-secondary" onclick="printSalesReport()">Print / Save PDF</button><span class="hint" style="margin:0 0 10px">${salesOrders().length} sales · ${money(salesOrders().reduce((sum,o)=>sum+Number(o.total||0),0))}. Free tastings are excluded.</span></div></section>`;
   const quickStatus = (o) => {
     if (o.payment_status !== "paid") return `<span class="order-status-pill">${escapeHtml(PAY_LABEL[o.payment_status] || ORDER_LABEL[o.order_status] || "Payment review")}</span>`;
     const currentLabel = o.order_status === "confirmed" ? "Paid" : o.order_status === "ready" ? "Ready for collection" : ORDER_LABEL[o.order_status] || "Paid";
@@ -1883,12 +1945,24 @@ async function removePromo(id) {
   astate.promos = astate.promos.filter((promo) => String(promo.id) !== String(id)); render();
 }
 function togglePromoUses(code) { astate.expandedPromoCode = astate.expandedPromoCode === code ? null : code; render(); }
+async function saveStorewideSale() {
+  const enabled=!!astate.settingsDraft?.storewide_sale_enabled;
+  const percent=Math.max(0,Math.min(100,Number(astate.settingsDraft?.storewide_sale_percent||0)));
+  if(enabled&&percent<=0) return alert("Enter a sale percentage first.");
+  const button=document.getElementById("storewide-sale-btn"); if(button){button.disabled=true;button.textContent="Saving…";}
+  const {data,error}=await db.from("store_settings").update({storewide_sale_enabled:enabled,storewide_sale_percent:percent}).eq("id",astate.settings.id).select().single();
+  if(error){if(button){button.disabled=false;button.textContent="Try again";}return alert("Could not save storewide sale: "+error.message);}
+  astate.settings=data;astate.settingsDraft={...data};render();
+}
+function toggleStorewideSale(){if(!astate.settingsDraft)return;astate.settingsDraft.storewide_sale_enabled=!astate.settingsDraft.storewide_sale_enabled;saveStorewideSale();}
 function renderPromosTab() {
   const d = astate.promoDraft;
   const isEditingPromo = !!astate.editingPromoId;
   const selectedProductIds = Array.isArray(d.applicable_product_ids) ? d.applicable_product_ids.map(String) : [];
   const productChoices = astate.menu.map((product) => `<label class="slot" style="cursor:pointer;gap:9px;margin:0 0 7px;padding:10px 12px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A" ${selectedProductIds.includes(String(product.id)) ? "checked" : ""} onchange="togglePromoProduct('${product.id}',this.checked)"><span>${escapeHtml(product.name)}</span></label>`).join("");
-  const form = `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>${isEditingPromo ? "Edit promo code" : "New promo code"}</h2></div><div class="field"><label>Code</label><input value="${escapeHtml(d.code)}" placeholder="WELCOME10" style="text-transform:uppercase" ${isEditingPromo ? "readonly" : ""} oninput="onPromoField('code',this.value);this.value=this.value.toUpperCase()">${isEditingPromo ? `<div class="hint" style="text-align:left;margin-top:5px">The code stays unchanged so its customer redemption history remains connected.</div>` : ""}</div><div class="field"><label>Discount type</label><select onchange="onPromoField('discount_type',this.value)"><option value="fixed" ${d.discount_type === "fixed" ? "selected" : ""}>Dollar off ($)</option><option value="percent" ${d.discount_type === "percent" ? "selected" : ""}>Percent off (%)</option></select></div><div class="field"><label>Discount value</label><input type="number" min="0.01" step="0.01" value="${escapeHtml(d.discount_value)}" placeholder="1.00" oninput="onPromoField('discount_value',this.value)"></div><div class="field"><label>Minimum spend (optional)</label><input type="number" min="0" step="0.01" value="${escapeHtml(d.minimum_spend)}" placeholder="0.00" oninput="onPromoField('minimum_spend',this.value)"></div><div class="field"><label>Products this promo applies to</label><div class="hint" style="text-align:left;margin:0 0 8px">Leave every product unticked to apply the code to the whole cart.</div><div style="max-height:210px;overflow:auto">${productChoices || `<div class="hint">Add products first.</div>`}</div></div><div class="field"><label>Usage limit (optional)</label><input type="number" min="1" value="${escapeHtml(d.usage_limit)}" placeholder="No limit" oninput="onPromoField('usage_limit',this.value)"></div><div class="field"><label>End date (optional)</label><input type="date" value="${escapeHtml(d.valid_until)}" oninput="onPromoField('valid_until',this.value)"></div><div class="btn-row"><button class="btn-secondary" onclick="clearPromoDraft()">${isEditingPromo ? "Cancel" : "Clear"}</button><button class="btn-primary" id="create-promo-btn" onclick="createPromo()">${isEditingPromo ? "Save changes" : "Create promo"}</button></div></section>`;
+  const saleEnabled=!!astate.settingsDraft?.storewide_sale_enabled;
+  const storewide=`<section class="dashboard-card" style="padding:20px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 14px"><h2>Storewide sale</h2><span>${saleEnabled?"LIVE":"Off"}</span></div><div class="hint" style="text-align:left;margin:0 0 14px">One click changes every customer product price. If a product already has a lower special price, the lower price wins; discounts do not stack.</div><div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap"><div class="field" style="margin:0;flex:1"><label>Percentage off</label><input type="number" min="0" max="100" step="1" value="${Number(astate.settingsDraft?.storewide_sale_percent||0)}" oninput="astate.settingsDraft.storewide_sale_percent=this.value"></div><button class="${saleEnabled?"btn-secondary":"btn-primary"}" id="storewide-sale-btn" onclick="toggleStorewideSale()">${saleEnabled?"Stop storewide sale":"Start storewide sale"}</button></div></section>`;
+  const form = `${storewide}<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>${isEditingPromo ? "Edit promo code" : "New promo code"}</h2></div><div class="field"><label>Code</label><input value="${escapeHtml(d.code)}" placeholder="WELCOME10" style="text-transform:uppercase" ${isEditingPromo ? "readonly" : ""} oninput="onPromoField('code',this.value);this.value=this.value.toUpperCase()">${isEditingPromo ? `<div class="hint" style="text-align:left;margin-top:5px">The code stays unchanged so its customer redemption history remains connected.</div>` : ""}</div><div class="field"><label>Discount type</label><select onchange="onPromoField('discount_type',this.value)"><option value="fixed" ${d.discount_type === "fixed" ? "selected" : ""}>Dollar off ($)</option><option value="percent" ${d.discount_type === "percent" ? "selected" : ""}>Percent off (%)</option></select></div><div class="field"><label>Discount value</label><input type="number" min="0.01" step="0.01" value="${escapeHtml(d.discount_value)}" placeholder="1.00" oninput="onPromoField('discount_value',this.value)"></div><div class="field"><label>Minimum spend (optional)</label><input type="number" min="0" step="0.01" value="${escapeHtml(d.minimum_spend)}" placeholder="0.00" oninput="onPromoField('minimum_spend',this.value)"></div><div class="field"><label>Products this promo applies to</label><div class="hint" style="text-align:left;margin:0 0 8px">Leave every product unticked to apply the code to the whole cart.</div><div style="max-height:210px;overflow:auto">${productChoices || `<div class="hint">Add products first.</div>`}</div></div><div class="field"><label>Usage limit (optional)</label><input type="number" min="1" value="${escapeHtml(d.usage_limit)}" placeholder="No limit" oninput="onPromoField('usage_limit',this.value)"></div><div class="field"><label>End date (optional)</label><input type="date" value="${escapeHtml(d.valid_until)}" oninput="onPromoField('valid_until',this.value)"></div><div class="btn-row"><button class="btn-secondary" onclick="clearPromoDraft()">${isEditingPromo ? "Cancel" : "Clear"}</button><button class="btn-primary" id="create-promo-btn" onclick="createPromo()">${isEditingPromo ? "Save changes" : "Create promo"}</button></div></section>`;
   const list = `<section class="dashboard-card"><div class="dashboard-card-head"><h2>Promo codes</h2><span>${astate.promos.length} total</span></div>${astate.promos.length ? astate.promos.map((promo) => {
     const uses = astate.promoRedemptions.filter((row) => String(row.code || "").toUpperCase() === String(promo.code || "").toUpperCase());
     const exhausted = promo.usage_limit != null && uses.length >= Number(promo.usage_limit);
@@ -2033,8 +2107,7 @@ function renderSettingsTab() {
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_announcement ? "checked" : ""} onchange="onSettingsField('show_announcement', this.checked)"><span><b>Show announcement before Welcome page</b><br><span class="hint">The same announcement appears at most once per customer per day.</span></span></label>
     ${field("Announcement title", "announcement_title", "This week at Shizuku Lab")}
     <div class="field"><label>Announcement message</label><textarea rows="4" placeholder="Opening dates, pickup hours or an important update." oninput="onSettingsField('announcement_message', this.value)">${escapeHtml(s.announcement_message || "")}</textarea></div>
-    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.include_announcement_promo === true ? "checked" : ""} onchange="onSettingsField('include_announcement_promo',this.checked);render()"><span><b>Include promo code</b><br><span class="hint">Optional. Leave this off when the announcement is only a notice.</span></span></label>
-    ${s.include_announcement_promo === true ? field("Promo code", "announcement_promo_code", "WELCOME10") : ""}
+    ${field("Promo code to show (optional)", "announcement_promo_code", "WELCOME10")}
     ${field("Continue button text", "announcement_button_text", "Continue")}
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Welcome cover</div>
@@ -2223,6 +2296,27 @@ function applyAdminTheme(name) {
   render();
 }
 
+function editThemeChoice(name, target) {
+  if (target === "admin") applyAdminTheme(name); else applyOrderingTheme(name);
+  astate.tab = "design";
+  render();
+}
+async function deleteThemeChoice(name) {
+  const ordering = astate.settingsDraft?.ordering_theme || "zen";
+  const admin = astate.settingsDraft?.admin_theme || "zen";
+  if (name === ordering || name === admin) return alert("This theme is currently in use. Apply a different theme to Ordering and Admin before deleting it from the list.");
+  if (!confirm(`Remove ${SYSTEM_THEMES[name]?.label || "this theme"} from your theme choices?`)) return;
+  const hidden = [...new Set([...(Array.isArray(astate.settingsDraft?.hidden_system_themes) ? astate.settingsDraft.hidden_system_themes : []), name])];
+  const { data, error } = await db.from("store_settings").update({ hidden_system_themes: hidden }).eq("id", astate.settings.id).select().single();
+  if (error) return alert("Could not remove theme: " + error.message);
+  astate.settings = data; astate.settingsDraft = { ...data }; render();
+}
+async function restoreThemeChoices() {
+  const { data, error } = await db.from("store_settings").update({ hidden_system_themes: [] }).eq("id", astate.settings.id).select().single();
+  if (error) return alert("Could not restore themes: " + error.message);
+  astate.settings = data; astate.settingsDraft = { ...data }; render();
+}
+
 function themeMiniPreview(surface) {
   const heading = surface === "welcome" ? "Welcome" : surface === "order" ? "Ordering" : "Dashboard";
   const content = surface === "welcome" ? `<div class="theme-preview-window"><div style="font-family:Georgia,serif;font-size:13px;font-weight:700;">Welcome to Shizuku Lab</div><div class="theme-preview-row"></div><span class="theme-preview-button">Enter store</span></div>` : surface === "order" ? `<div class="theme-preview-window"><b>Shizuku Lab</b><div class="theme-preview-card">Ichigo Matcha <span style="float:right;">$6.90</span></div><span class="theme-preview-button">Add</span></div>` : `<div class="theme-preview-window" style="display:grid;grid-template-columns:34% 1fr;gap:6px;"><div style="border-right:1px solid currentColor;font-size:8px;">Dashboard<br><br>Orders<br><br>Products</div><div><b>Welcome back</b><div class="theme-preview-card">Today’s orders · 8</div></div></div>`;
@@ -2232,9 +2326,10 @@ function themeMiniPreview(surface) {
 function renderThemeTab() {
   const ordering = astate.settingsDraft?.ordering_theme || astate.settingsDraft?.system_theme || "zen";
   const admin = astate.settingsDraft?.admin_theme || astate.settingsDraft?.system_theme || "zen";
-  return `<div style="display:grid;gap:16px;"><section class="dashboard-card" style="padding:16px 20px;"><b>Ordering theme:</b> ${escapeHtml(SYSTEM_THEMES[ordering]?.label || "Zen")} &nbsp; · &nbsp; <b>Admin theme:</b> ${escapeHtml(SYSTEM_THEMES[admin]?.label || "Zen")}</section>${Object.entries(SYSTEM_THEMES).map(([name,theme]) => {
+  const hidden = Array.isArray(astate.settingsDraft?.hidden_system_themes) ? astate.settingsDraft.hidden_system_themes.map(String) : [];
+  return `<div style="display:grid;gap:16px;"><section class="dashboard-card" style="padding:16px 20px;"><b>Ordering theme:</b> ${escapeHtml(SYSTEM_THEMES[ordering]?.label || "Zen")} &nbsp; · &nbsp; <b>Admin theme:</b> ${escapeHtml(SYSTEM_THEMES[admin]?.label || "Zen")}${hidden.length ? `<button class="link-btn" style="float:right" onclick="restoreThemeChoices()">Restore ${hidden.length} deleted theme${hidden.length===1?"":"s"}</button>` : ""}</section>${Object.entries(SYSTEM_THEMES).filter(([name]) => !hidden.includes(name)).map(([name,theme]) => {
     const previewShadow = name === "retro" ? `5px 5px 0 ${theme.text}` : name === "threed" ? `0 10px 0 color-mix(in srgb,${theme.primary} 18%,transparent)` : "none";
-    return `<section data-theme-preview class="dashboard-card theme-preview-theme-${name}" style="--preview-primary:${theme.primary};--preview-bg:${theme.background};--preview-card:${theme.card};--preview-text:${theme.text};--preview-shadow:${previewShadow};padding:20px;"><div class="dashboard-card-head" style="padding:0 0 14px;"><div><h2>${theme.label}</h2><span style="opacity:.7;">${theme.note}</span></div><div style="text-align:right;font-size:11px;line-height:1.6;">${ordering === name ? `<div>Ordering selected ✓</div>` : ""}${admin === name ? `<div>Admin selected ✓</div>` : ""}</div></div><div class="theme-preview-grid">${themeMiniPreview("welcome")}${themeMiniPreview("order")}${themeMiniPreview("dashboard")}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px;"><button class="btn-primary" onclick="applyOrderingTheme('${name}')">${ordering === name ? "Ordering selected" : "Apply to Ordering"}</button><button class="btn-secondary" onclick="applyAdminTheme('${name}')">${admin === name ? "Admin selected" : "Apply to Admin"}</button></div></section>`;
+    return `<section data-theme-preview class="dashboard-card theme-preview-theme-${name}" style="--preview-primary:${theme.primary};--preview-bg:${theme.background};--preview-card:${theme.card};--preview-text:${theme.text};--preview-shadow:${previewShadow};padding:20px;"><div class="dashboard-card-head" style="padding:0 0 14px;"><div><h2>${theme.label}</h2><span style="opacity:.7;">${theme.note}</span></div><div style="text-align:right;font-size:11px;line-height:1.6;">${ordering === name ? `<div>Ordering selected ✓</div>` : ""}${admin === name ? `<div>Admin selected ✓</div>` : ""}</div></div><div class="theme-preview-grid">${themeMiniPreview("welcome")}${themeMiniPreview("order")}${themeMiniPreview("dashboard")}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px;"><button class="btn-primary" onclick="applyOrderingTheme('${name}')">${ordering === name ? "Ordering selected" : "Apply to Ordering"}</button><button class="btn-secondary" onclick="applyAdminTheme('${name}')">${admin === name ? "Admin selected" : "Apply to Admin"}</button></div><div style="display:flex;gap:10px;justify-content:flex-end;margin-top:10px"><button class="link-btn" onclick="editThemeChoice('${name}','ordering')">Edit colours</button><button class="link-danger" onclick="deleteThemeChoice('${name}')">Delete choice</button></div></section>`;
   }).join("")}${cmsSaveButton()}</div>`;
 }
 
@@ -2290,6 +2385,7 @@ function renderAvailabilityTab() {
     cells.push(`<button class="slot availability-day" style="min-height:70px;padding:8px;text-align:left;display:block;border-color:${isSelected ? "#4B5D3A" : "#E1D9C8"};background:${isSelected ? "#F1F5EA" : "#fff"};" onclick="selectAvailabilityDate('${dateText}')"><b>${day}</b><br><span style="font-size:11px;color:${color};">${label}</span></button>`);
   }
   const existing = astate.openingOverrides.find((item) => item.collection_date === selected.collection_date);
+  const weeklyCards = weeklySchedule().map((day) => `<div class="order-card" style="margin-bottom:10px;padding:14px;"><div class="queue-top"><label style="display:flex;align-items:center;gap:9px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${day.is_open ? "checked" : ""} onchange="setWeeklyDayOpen(${day.day},this.checked)"><b>${escapeHtml(day.label)}</b></label><span class="queue-status">${day.is_open ? "OPEN" : "CLOSED"}</span></div>${day.is_open ? `<div style="margin-top:10px;">${day.windows.map((window,index)=>`<div style="display:grid;grid-template-columns:minmax(190px,1fr) 130px auto;gap:8px;align-items:end;margin:8px 0;"><div class="field" style="margin:0"><label>Pickup window</label><input value="${escapeHtml(window.range||"")}" placeholder="10:00 AM - 12:00 PM" oninput="setWeeklyWindow(${day.day},${index},'range',this.value)"></div><div class="field" style="margin:0"><label>Order limit</label><input type="number" min="1" value="${window.capacity ?? ""}" placeholder="Unlimited" oninput="setWeeklyWindow(${day.day},${index},'capacity',this.value)"></div><button class="link-danger" style="height:44px" onclick="removeWeeklyWindow(${day.day},${index})">Remove</button></div>`).join("")}<button class="link-btn" onclick="addWeeklyWindow(${day.day})">+ Add pickup window</button></div>` : ""}</div>`).join("");
   return `
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Ordering window</div>
     <div class="field"><label>How many days ahead can customers order?</label><input type="number" min="0" max="60" value="${s.order_advance_days ?? 14}" oninput="onSettingsField('order_advance_days', Number(this.value))"><div class="hint">Example: 14 lets customers order up to 2 weeks ahead.</div></div>
@@ -2297,8 +2393,14 @@ function renderAvailabilityTab() {
     <div class="field"><label>Pickup time interval (minutes)</label><select onchange="onSettingsField('pickup_slot_interval_minutes', Number(this.value))"><option value="15" ${Number(s.pickup_slot_interval_minutes) === 15 ? "selected" : ""}>Every 15 minutes</option><option value="30" ${Number(s.pickup_slot_interval_minutes || 30) === 30 ? "selected" : ""}>Every 30 minutes</option><option value="60" ${Number(s.pickup_slot_interval_minutes) === 60 ? "selected" : ""}>Every 60 minutes</option></select><div class="hint">Customers choose a date first, then see times based on this interval.</div></div>
     <button class="btn-primary" id="settings-save-btn" style="width:100%;margin:2px 0 20px;" onclick="saveSettings()">Save ordering window</button>
     <div class="divider"></div>
+    <div class="display" style="font-size:20px;margin:16px 0 6px;">Weekly schedule</div>
+    <div class="hint" style="text-align:left;margin:0 0 12px;">Set your normal Monday–Sunday opening windows. Order limit caps the total number of active orders inside that window; leave it blank for unlimited.</div>
+    <style>@media(max-width:640px){.order-card [style*="grid-template-columns:minmax(190px"]{grid-template-columns:1fr!important}.order-card [style*="grid-template-columns:minmax(190px"] .link-danger{height:auto!important;justify-self:start}}</style>
+    ${weeklyCards}
+    <button class="btn-primary" style="width:100%;margin:4px 0 20px;" onclick="saveSettings()">Save weekly schedule</button>
+    <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:16px 0 8px;">Opening calendar</div>
-    <div class="hint" style="text-align:left;margin:0 0 10px;">Weekend hours stay as your normal schedule. Click a date to close it, open an extra day, or change that day's collection time.</div>
+    <div class="hint" style="text-align:left;margin:0 0 10px;">Your weekly schedule repeats automatically. Click a date to close it, open an extra day, or use different windows and limits for that date.</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 10px;"><button class="link-btn" onclick="changeCalendarMonth(-1)">←</button><b>${month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</b><button class="link-btn" onclick="changeCalendarMonth(1)">→</button></div>
     <style>.availability-week,.availability-calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;width:100%;min-width:0}.availability-week{text-align:center;margin-bottom:6px;color:#777064;font-size:12px}.availability-day{width:100%;min-width:0;overflow:hidden}@media(max-width:640px){.availability-week,.availability-calendar{gap:3px}.availability-week{font-size:9px}.availability-day{min-height:54px!important;padding:5px 3px!important;font-size:11px}.availability-day span{display:block;font-size:8px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}</style>
     <div class="availability-week"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
@@ -2309,13 +2411,14 @@ function renderAvailabilityTab() {
         <input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${selected.is_open ? "checked" : ""} onchange="onAvailabilityField('is_open', this.checked)">
         <span><b>Open for pickup</b><br><span class="hint">Untick to close this date.</span></span>
       </label>
-      <div class="field"><label>Pickup windows for this date</label><div class="hint" style="text-align:left;margin:0 0 8px;">You can open more than one window, e.g. 10:00 AM – 12:00 PM and 4:00 PM – 6:00 PM.</div>${availabilityRanges(selected.collection_time).map((range, index) => `<div style="display:flex;gap:8px;margin:8px 0;"><input value="${escapeHtml(range)}" placeholder="10:00 AM - 12:00 PM" oninput="setAvailabilityRange(${index}, this.value)">${availabilityRanges(selected.collection_time).length > 1 ? `<button class="btn-secondary" style="flex:0 0 auto;padding:0 12px;" onclick="removeAvailabilityRange(${index})">Remove</button>` : ""}</div>`).join("")}<button class="link-btn" style="padding:3px 0;" onclick="addAvailabilityRange()">+ Add another pickup window</button></div>
+      <div class="field"><label>Pickup windows for this date</label><div class="hint" style="text-align:left;margin:0 0 8px;">These replace the weekly schedule for this date only.</div>${specialWindows().map((window, index) => `<div style="display:grid;grid-template-columns:1fr 130px auto;gap:8px;margin:8px 0;align-items:end;"><div><label style="font-size:11px;">Window</label><input value="${escapeHtml(window.range||"")}" placeholder="10:00 AM - 12:00 PM" oninput="setAvailabilityRange(${index}, this.value)"></div><div><label style="font-size:11px;">Order limit</label><input type="number" min="1" value="${window.capacity ?? ""}" placeholder="Unlimited" oninput="setAvailabilityCapacity(${index},this.value)"></div>${specialWindows().length > 1 ? `<button class="btn-secondary" style="height:44px;padding:0 12px;" onclick="removeAvailabilityRange(${index})">Remove</button>` : "<span></span>"}</div>`).join("")}<button class="link-btn" style="padding:3px 0;" onclick="addAvailabilityRange()">+ Add another pickup window</button></div>
       <div class="btn-row"><button class="btn-primary" id="availability-save-btn" onclick="saveAvailabilityOverride()">Save day</button>${existing ? `<button class="btn-secondary" onclick="clearAvailabilityOverride()">Use weekly schedule</button>` : ""}</div>
     </div>
   `;
 }
 
 function renderEditOverlay() {
+  if (astate.offlineOrderDraft) return renderOfflineOrderEditor();
   if (astate.editingOrder) return renderOrderEditor();
   if (!astate.editing) return "";
   const item = astate.editing;
@@ -2344,6 +2447,12 @@ function renderEditOverlay() {
       </div>
     </div>
   </div>`;
+}
+
+function renderOfflineOrderEditor() {
+  const d=astate.offlineOrderDraft; const points=Array.isArray(astate.settings?.collection_points)?astate.settings.collection_points:[];
+  const subtotal=(d.items||[]).reduce((sum,row)=>sum+Number(row.quantity||0)*Number(row.unit_price||0),0);
+  return `<div class="overlay"><div class="overlay-card" style="max-width:720px;max-height:88vh;overflow-y:auto"><div class="display overlay-title" style="font-size:20px">Create offline order</div><div class="hint" style="text-align:left;margin:0 0 14px">Use for influencer tasting, complimentary drinks, replacements or a paid walk-in sale. Inventory is still deducted.</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="field"><label>Name / contact</label><input value="${escapeHtml(d.customer_name)}" oninput="astate.offlineOrderDraft.customer_name=this.value"></div><div class="field"><label>Phone (optional)</label><input value="${escapeHtml(d.customer_phone)}" oninput="astate.offlineOrderDraft.customer_phone=this.value"></div><div class="field"><label>Date</label><input type="date" value="${escapeHtml(d.collection_date)}" oninput="astate.offlineOrderDraft.collection_date=this.value"></div><div class="field"><label>Time</label><input value="${escapeHtml(d.collection_time)}" placeholder="11:30 AM" oninput="astate.offlineOrderDraft.collection_time=this.value"></div><div class="field"><label>Collection point</label><select onchange="astate.offlineOrderDraft.collection_point=this.value"><option value="">Not specified</option>${points.map(point=>`<option ${d.collection_point===point?"selected":""}>${escapeHtml(point)}</option>`).join("")}</select></div><div class="field"><label>Reason</label><select onchange="offlineOrderField('offline_reason',this.value)">${[["influencer_tasting","Influencer tasting"],["complimentary","Complimentary"],["replacement","Replacement"],["manual_sale","Offline paid sale"],["other","Other"]].map(([v,l])=>`<option value="${v}" ${d.offline_reason===v?"selected":""}>${l}</option>`).join("")}</select></div></div><label class="slot" style="margin:4px 0 16px"><input type="checkbox" style="width:auto" ${d.counts_as_sale?"checked":""} onchange="offlineOrderField('counts_as_sale',this.checked)"><span><b>Count as sales revenue</b><br><span class="hint" style="margin:0">Leave off for free tasting, complimentary or replacement orders.</span></span></label><div class="order-top"><b>Products</b><button class="link-btn" onclick="addOfflineOrderItem()">+ Add product</button></div>${(d.items||[]).map((row,index)=>`<div style="display:grid;grid-template-columns:minmax(180px,1fr) 90px 110px auto;gap:8px;align-items:end;margin:9px 0"><div><label>Product</label><select onchange="chooseOfflineProduct(${index},this.value)">${astate.menu.map(p=>`<option value="${p.id}" ${String(p.id)===String(row.product_id)?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}</select></div><div><label>Qty</label><input type="number" min="1" value="${row.quantity}" oninput="offlineItemField(${index},'quantity',this.value)"></div><div><label>Price</label><input type="number" min="0" step=".01" value="${row.unit_price}" oninput="offlineItemField(${index},'unit_price',this.value)"></div><button class="link-danger" onclick="removeOfflineItem(${index})">Remove</button></div>`).join("")}<div class="field"><label>Internal notes</label><textarea rows="2" oninput="astate.offlineOrderDraft.notes=this.value">${escapeHtml(d.notes)}</textarea></div><div class="row bold"><span>${d.counts_as_sale?"Sales total":"Recorded as free / non-revenue"}</span><span>${money(d.counts_as_sale?subtotal:0)}</span></div><div class="btn-row" style="margin-top:15px"><button class="btn-secondary" onclick="closeOfflineOrder()">Cancel</button><button class="btn-primary" id="save-offline-order" onclick="saveOfflineOrder()">Create offline order</button></div></div></div>`;
 }
 
 function renderOrderEditor() {

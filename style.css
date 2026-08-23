@@ -189,20 +189,6 @@ img{display:block;max-width:100%;}
 @media (max-width:600px){.promo-ticker-track{animation-duration:14s;}}
 @media (prefers-reduced-motion:reduce){.promo-ticker-track{animation-duration:30s;}}
 
-/* First-load storefront skeleton. Its dimensions follow the real mobile shop,
-   so the page does not flash blank or jump while public data is fetched. */
-.storefront-skeleton{padding:22px 20px 110px;min-height:100vh;background:var(--cream)}
-.storefront-skeleton>*{animation:storefront-skeleton-pulse 1.25s ease-in-out infinite alternate}
-.skeleton-back{width:82px;height:16px;border-radius:999px;background:#dfd9cd;margin-bottom:24px}
-.skeleton-logo{width:72px;height:72px;border-radius:50%;background:#e5dfd3;margin:0 auto 13px}
-.skeleton-line{height:13px;border-radius:999px;background:#ded8cc;margin-left:auto;margin-right:auto}
-.skeleton-title{width:150px;height:25px}.skeleton-subtitle{width:210px;margin-top:10px}
-.skeleton-hero{height:154px;border:1px solid #ded7c9;border-radius:18px;background:#ebe6dc;margin:25px 0 29px}
-.skeleton-heading{width:180px;height:19px;margin:0 0 16px}
-.skeleton-product{height:112px;border-top:1px solid #ddd6ca;display:grid;grid-template-columns:88px 1fr;gap:15px;padding:14px 0}
-.skeleton-product span{display:block;border-radius:12px;background:#e3ddd2}.skeleton-product i{display:block;height:52px;margin-top:8px;border-radius:10px;background:#e8e2d7}
-@keyframes storefront-skeleton-pulse{from{opacity:.58}to{opacity:1}}
-
 /* welcome announcement */
 .welcome-announcement[hidden]{display:none;}
 .welcome-announcement{position:fixed;inset:0;z-index:1000;background:rgba(31,36,27,.56);display:grid;place-items:center;padding:20px;}
@@ -212,7 +198,6 @@ img{display:block;max-width:100%;}
 .welcome-announcement-title{font-family:var(--display);font-size:27px;line-height:1.15;margin:0 24px 10px;}
 .welcome-announcement-message{color:var(--muted);line-height:1.6;white-space:pre-line;margin:0 0 16px;}
 .welcome-announcement-promo{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--cream);border:1px dashed var(--matcha);border-radius:13px;padding:11px 13px;margin:0 0 16px;}
-.welcome-announcement-promo[hidden]{display:none;}
 .welcome-announcement-code{font-weight:700;letter-spacing:1px;overflow-wrap:anywhere;}
 .welcome-announcement-copy{border:0;background:transparent;color:var(--matcha);font-weight:700;cursor:pointer;white-space:nowrap;}
 .welcome-announcement-continue{width:100%;border:0;border-radius:13px;background:var(--matcha);color:white;padding:13px 16px;font-weight:700;cursor:pointer;}
@@ -265,12 +250,6 @@ img{display:block;max-width:100%;}
 .menu-kana{font-size:10px;font-weight:600;letter-spacing:.12em;color:var(--matcha);margin:0 0 11px;}
 .option-kana{display:block;font-size:9px;line-height:1.2;letter-spacing:.1em;color:var(--matcha-lt);margin-bottom:3px;}
 .product-detail-card{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;margin-bottom:18px;}.product-detail-image{width:100%;height:var(--product-detail-image-height,180px);object-fit:cover;background:var(--matcha-bg);}.contain-product-image .product-detail-image{object-fit:contain}.product-detail-copy{padding:15px 16px 17px;}.product-detail-copy .item-name{font-size:18px;}.product-detail-copy .item-desc{font-size:13px;margin-top:5px;}.product-option-group .slot-day{font-size:var(--product-option-text-size,15px)}.compact-product-options .product-option-group{margin-top:14px!important}.compact-product-options .product-option-group .slot{padding:10px 13px;margin:7px 0;min-height:0}.compact-product-options .product-option-group .slot-time{margin-top:1px}
-.product-options-screen .product-detail-image{height:clamp(320px,52vw,500px)}
-.product-option-group{margin-top:14px!important;border:1px solid var(--line);border-radius:14px;background:var(--card);overflow:hidden}
-.option-group-toggle{width:100%;border:0;background:transparent;color:var(--ink);padding:15px 16px;display:flex;align-items:center;justify-content:space-between;gap:14px;text-align:left;font:600 14px/1.35 'Work Sans',sans-serif;cursor:pointer}
-.option-group-summary{color:var(--matcha);font-size:13px;text-align:right}.option-chevron{display:inline-block;margin-left:5px;transition:transform .18s ease}.product-option-group.is-open .option-chevron{transform:rotate(180deg)}
-.option-group-choices{padding:0 14px 10px}.option-group-choices[hidden]{display:none}.product-option-group.is-complete:not(.is-open){border-color:color-mix(in srgb,var(--matcha) 42%,var(--line))}
-@media(max-width:640px){.product-options-screen .product-detail-image{height:clamp(300px,86vw,420px)}}
 .compact-product-options .bundle-section{margin-top:14px}.compact-product-options .bundle-drinks .slot{padding:10px 13px;margin:7px 0;min-height:0}
 
 /* Welcome page */
@@ -340,6 +319,3 @@ img{display:block;max-width:100%;}
 .welcome-page.theme-nordic_cafe{background:#EEF0EB;color:#343B33}.welcome-page.theme-nordic_cafe .welcome-title{font-family:'Work Sans',sans-serif;letter-spacing:-.03em}.welcome-page.theme-nordic_cafe .welcome-logo-frame,.welcome-page.theme-nordic_cafe .welcome-enter,.welcome-page.theme-nordic_cafe .welcome-tool{border-radius:14px}.welcome-page.theme-nordic_cafe .welcome-enter{background:#71836A}
 
 .theme-preview-theme-matcha_modern .theme-preview-window,.theme-preview-theme-matcha_modern .theme-preview-card{border-radius:12px;box-shadow:0 6px 16px rgba(23,63,50,.10)}.theme-preview-theme-japanese_paper .theme-preview-window,.theme-preview-theme-japanese_paper .theme-preview-card{border-radius:1px;box-shadow:3px 3px 0 currentColor}.theme-preview-theme-strawberry_milk .theme-preview-window,.theme-preview-theme-strawberry_milk .theme-preview-card{border-radius:18px;box-shadow:0 6px 16px rgba(198,77,104,.11)}.theme-preview-theme-midnight_studio .theme-preview-window,.theme-preview-theme-midnight_studio .theme-preview-card{border-radius:10px;box-shadow:0 0 0 1px currentColor}.theme-preview-theme-nordic_cafe .theme-preview-window,.theme-preview-theme-nordic_cafe .theme-preview-card{border-radius:8px}
-body.studio-focus .shop-admin{display:block!important}
-body.studio-focus .shop-admin .admin-side{display:none!important}
-body.studio-focus .shop-admin .admin-main{width:100%!important;min-height:100vh}

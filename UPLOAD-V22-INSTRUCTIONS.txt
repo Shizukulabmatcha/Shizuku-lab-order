@@ -1,0 +1,29 @@
+SHIZUKU LAB — V22 UPDATE
+
+This update adds:
+- Monday–Sunday pickup schedules
+- Multiple pickup windows with an order limit per window
+- One-click storewide percentage sale
+- Admin-created offline orders (including Influencer tasting)
+- Sales Excel download and Print / Save PDF
+
+INSTALL ORDER
+
+1. In Supabase SQL Editor, run this file once:
+   supabase-weekly-capacity-sale-offline-orders.sql
+
+2. After the SQL succeeds, upload the complete contents of this folder to Vercel.
+
+WHERE TO FIND EACH FEATURE
+
+- Admin > Availability: weekly schedule and window limits
+- Admin > Promos: storewide sale switch
+- Admin > Orders: + Offline order
+- Admin > Orders: Sales from/to, Download Excel, Print / Save PDF
+
+REPORTING RULE
+
+Offline paid sales are included in Sales reports.
+Influencer tasting, complimentary and replacement orders are excluded from sales
+unless “Count as sales revenue” is deliberately ticked. They still deduct stock.
+

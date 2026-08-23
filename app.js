@@ -13,8 +13,6 @@ const ICONS = {
 
 const CART_STORAGE_KEY = "shizuku-lab-cart-v1";
 const PENDING_PAYMENT_STORAGE_KEY = "shizuku-lab-pending-payment-v1";
-const STOREFRONT_CACHE_KEY = "shizuku-lab-storefront-v1";
-const STOREFRONT_CACHE_MAX_AGE = 24 * 60 * 60 * 1000;
 function loadSavedCart() {
   try {
     const saved = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || "{}");
@@ -55,7 +53,6 @@ const state = {
   productOptionGroups: [],
   selectedProduct: null,
   selectedOptions: {},
-  openOptionGroupId: null,
   bundle: { drink1: null, drink2: null, drink1Options: {}, drink2Options: {} },
   slots: [],
   openingOverrides: [],
@@ -173,35 +170,6 @@ let orderTrackingTimer = null;
 let customerChatChannel = null;
 let lastRenderedScreen = null;
 
-function restoreStorefrontCache() {
-  try {
-    const cached = JSON.parse(localStorage.getItem(STOREFRONT_CACHE_KEY) || "null");
-    if (!cached || Date.now() - Number(cached.savedAt || 0) > STOREFRONT_CACHE_MAX_AGE || !Array.isArray(cached.menu) || !cached.menu.length) return false;
-    state.store = { ...state.store, ...(cached.store || {}) };
-    state.menu = cached.menu || [];
-    state.productGroups = cached.productGroups || [];
-    state.optionGroups = cached.optionGroups || [];
-    state.options = cached.options || [];
-    state.productOptionGroups = cached.productOptionGroups || [];
-    state.openingOverrides = cached.openingOverrides || [];
-    state.faq = cached.faq || [];
-    state.reviews = cached.reviews || [];
-    state.stockLevels = cached.stockLevels || {};
-    state.menuView = state.store.default_menu_view === "gallery" ? "gallery" : "list";
-    state.slots = computeSlots();
-    return true;
-  } catch (_) { return false; }
-}
-function saveStorefrontCache() {
-  try {
-    localStorage.setItem(STOREFRONT_CACHE_KEY, JSON.stringify({
-      savedAt: Date.now(), store: state.store, menu: state.menu, productGroups: state.productGroups,
-      optionGroups: state.optionGroups, options: state.options, productOptionGroups: state.productOptionGroups,
-      openingOverrides: state.openingOverrides, faq: state.faq, reviews: state.reviews, stockLevels: state.stockLevels
-    }));
-  } catch (_) { /* The live storefront still works if storage is unavailable. */ }
-}
-
 /* ---------- helpers ---------- */
 function money(n) { return `$${Number(n || 0).toFixed(2)}`; }
 function themeFont(value, fallback) {
@@ -225,7 +193,10 @@ function originalPrice(item) { return Number(item?.price || 0); }
 function salePrice(item) {
   const original = originalPrice(item);
   const discount = Number(item?.discount_price);
-  return Number.isFinite(discount) && discount > 0 && discount < original ? discount : original;
+  const productPrice = Number.isFinite(discount) && discount > 0 && discount < original ? discount : original;
+  const percent = state.store.storewide_sale_enabled ? Math.max(0, Math.min(100, Number(state.store.storewide_sale_percent || 0))) : 0;
+  const storewidePrice = percent > 0 ? Math.round(original * (1 - percent / 100) * 100) / 100 : original;
+  return Math.min(productPrice, storewidePrice);
 }
 function hasDiscount(item) { return salePrice(item) < originalPrice(item); }
 function productPriceMarkup(item, className = "item-price") {
@@ -361,10 +332,16 @@ async function ensureCustomerSession() {
 }
 
 /* ---------- pickup slots ---------- */
-function getWeekendConfig() {
+function getWeeklyConfig() {
+  if (Array.isArray(state.store.weekly_pickup_schedule)) {
+    return state.store.weekly_pickup_schedule.map((item) => ({
+      day: Number(item.day), label: String(item.label || "Collection"), is_open: item.is_open !== false,
+      windows: (Array.isArray(item.windows) ? item.windows : []).filter((window) => String(window?.range || "").trim())
+    }));
+  }
   return [
-    { day: 6, label: "Saturday", time: normaliseTime(state.store.saturday_collection_time) },
-    { day: 0, label: "Sunday", time: normaliseTime(state.store.sunday_collection_time) },
+    { day: 6, label: "Saturday", is_open: true, windows: [{ range: normaliseTime(state.store.saturday_collection_time), capacity: null }] },
+    { day: 0, label: "Sunday", is_open: true, windows: [{ range: normaliseTime(state.store.sunday_collection_time), capacity: null }] },
   ];
 }
 
@@ -456,7 +433,7 @@ function timesFromRange(rangeText) {
 
 function computeSlots() {
   const now = new Date();
-  const weekly = new Map(getWeekendConfig().map((item) => [item.day, item]));
+  const weekly = new Map(getWeeklyConfig().map((item) => [item.day, item]));
   const maxDays = Math.max(0, Math.min(60, Number(state.store.order_advance_days || 14)));
   const noticeHours = Math.max(0, Number(state.store.minimum_order_notice_hours || 0));
   const earliest = new Date(now.getTime() + noticeHours * 60 * 60 * 1000);
@@ -469,19 +446,21 @@ function computeSlots() {
     const weeklyConfig = weekly.get(date.getDay());
     const override = state.openingOverrides.find((item) => item.collection_date === dateText);
     if (override && !override.is_open) continue;
-    const time = normaliseTime((override && override.collection_time) || (weeklyConfig && weeklyConfig.time));
-    if (!time) continue;
-    timesFromRange(time).forEach((pickupTime) => {
+    if (!override && (!weeklyConfig || !weeklyConfig.is_open)) continue;
+    const windows = override
+      ? (Array.isArray(override.pickup_windows) && override.pickup_windows.length ? override.pickup_windows : [{ range: normaliseTime(override.collection_time), capacity: null }])
+      : (weeklyConfig?.windows || []);
+    windows.forEach((window) => timesFromRange(window.range).forEach((pickupTime) => {
       const startsAt = pickupStartsAt(dateText, pickupTime);
       if (startsAt && startsAt < earliest) return;
-      slots.push({ id: `pickup-${dateText}-${pickupTime.replace(/\s+/g, "-")}`, label: formatDateLabel(date), date: dateText, time: pickupTime });
-    });
+      slots.push({ id: `pickup-${dateText}-${pickupTime.replace(/\s+/g, "-")}`, label: formatDateLabel(date), date: dateText, time: pickupTime, capacity: window.capacity ?? null });
+    }));
   }
   return slots;
 }
 
 function nextCollectionSchedule(limit = 2) {
-  const weekly = new Map(getWeekendConfig().map((item) => [item.day, item]));
+  const weekly = new Map(getWeeklyConfig().map((item) => [item.day, item]));
   const dates = [];
   for (let offset = 0; offset <= 180 && dates.length < limit; offset++) {
     const date = new Date();
@@ -491,7 +470,11 @@ function nextCollectionSchedule(limit = 2) {
     const override = state.openingOverrides.find((item) => item.collection_date === dateText);
     const weeklyConfig = weekly.get(date.getDay());
     if (override && !override.is_open) continue;
-    const collectionTime = normaliseTime((override && override.collection_time) || (weeklyConfig && weeklyConfig.time));
+    if (!override && (!weeklyConfig || !weeklyConfig.is_open)) continue;
+    const windows = override
+      ? (Array.isArray(override.pickup_windows) && override.pickup_windows.length ? override.pickup_windows : [{ range: override.collection_time }])
+      : (weeklyConfig?.windows || []);
+    const collectionTime = windows.map((item) => normaliseTime(item.range)).filter(Boolean).join(" | ");
     if (!collectionTime) continue;
     dates.push([dateText, collectionTime]);
   }
@@ -582,9 +565,6 @@ async function init() {
     } else if (pendingPayment) clearPendingPayment();
   }
 
-  const restoredFromCache = restoreStorefrontCache();
-  if (restoredFromCache) { state.loading = false; render(); }
-
   if (!IS_CONFIGURED) { state.loading = false; render(); return; }
 
   try {
@@ -594,8 +574,15 @@ async function init() {
     await Promise.all([loadFaq(), loadReviews()]);
     state.slots = computeSlots();
     await Promise.all([loadProducts(), loadOptions(), loadProductGroups(), loadCustomerStockLevels()]);
+    Object.values(state.cart).forEach((line) => {
+      const product = state.menu.find((item) => String(item.id) === String(line?.productId));
+      if (!product || !line) return;
+      const extras = Math.max(0, Number(line.unitPrice || 0) - Number(line.basePrice || originalPrice(product)));
+      line.basePrice = salePrice(product);
+      line.unitPrice = Math.round((line.basePrice + extras) * 100) / 100;
+    });
+    saveCart();
     removeUnavailableCartItems();
-    saveStorefrontCache();
     startStockRefresh();
   } catch (error) {
     console.error(error);
@@ -675,15 +662,6 @@ function selectOption(groupId, optionId) {
   const option = state.options.find((item) => String(item.id) === String(optionId));
   if (!option) return;
   state.selectedOptions[groupId] = { productId: state.selectedProduct.id, optionId: option.id, optionName: option.name, price: Number(option.price || 0) };
-  const groups = optionGroupsForProduct(state.selectedProduct);
-  const currentIndex = groups.findIndex((group) => String(group.id) === String(groupId));
-  const nextGroup = groups.slice(currentIndex + 1).find((group) => !state.selectedOptions[group.id]);
-  state.openOptionGroupId = nextGroup ? nextGroup.id : null;
-  render();
-  if (nextGroup) requestAnimationFrame(() => document.querySelector(`[data-option-group="${CSS.escape(String(nextGroup.id))}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
-}
-function toggleOptionGroup(groupId) {
-  state.openOptionGroupId = String(state.openOptionGroupId) === String(groupId) ? null : groupId;
   render();
 }
 function validateRequiredOptions() {
@@ -709,7 +687,6 @@ function openProductOptions(productId) {
   if (isSoldOut(product)) { alert("Sorry, this item is sold out."); return; }
   state.selectedProduct = product;
   state.selectedOptions = {};
-  state.openOptionGroupId = optionGroupsForProduct(product)[0]?.id || null;
   if (isBundle(product)) {
     state.bundle = { drink1: null, drink2: null, drink1Options: {}, drink2Options: {} };
     state.screen = "bundle";
@@ -737,7 +714,6 @@ function addConfiguredProductToCart() {
   };
   state.selectedProduct = null;
   state.selectedOptions = {};
-  state.openOptionGroupId = null;
   state.screen = "menu";
   saveCart();
   render();
@@ -1013,6 +989,14 @@ async function submitOrder() {
       await loadCustomerStockLevels();
       render();
       alert("Sorry, there is not enough stock left for one of the items in your cart. Please update your cart and try again.");
+      return;
+    }
+    if (/pickup window.*full|fully booked|capacity/i.test(error?.message || "")) {
+      await loadOpeningOverrides();
+      state.slots = computeSlots();
+      state.form.slotId = "";
+      render();
+      alert("Sorry, that pickup window has just filled up. Please choose another time.");
       return;
     }
     alert("Something went wrong submitting your order. Please try again.\n\n" + (error?.message || String(error)));
@@ -1303,14 +1287,10 @@ function renderOptions() {
       ${optionGroupsForProduct(product).length === 0 ? `<div class="hint">No customisation options for this item.</div>` : optionGroupsForProduct(product).map((group) => {
         const options = getOptionsForGroup(group.id);
         const selected = state.selectedOptions[group.id];
-        const isOpen = String(state.openOptionGroupId) === String(group.id);
         return `
-          <div class="field product-option-group ${isOpen ? "is-open" : "is-collapsed"} ${selected ? "is-complete" : ""}" data-option-group="${escapeHtml(group.id)}">
-            <button type="button" class="option-group-toggle" onclick="toggleOptionGroup('${escapeHtml(group.id)}')" aria-expanded="${isOpen}">
-              <span><span class="option-kana">カスタマイズ</span>${escapeHtml(group.name)}${group.required ? " *" : " (optional)"}</span>
-              <span class="option-group-summary">${selected ? escapeHtml(selected.optionName) : "Choose"} <span class="option-chevron">⌄</span></span>
-            </button>
-            <div class="option-group-choices" ${isOpen ? "" : "hidden"}>
+          <div class="field product-option-group" style="margin-top:20px;">
+            <label><span class="option-kana">カスタマイズ</span>${escapeHtml(group.name)}${group.required ? " *" : " (optional)"}</label>
+            <div>
               ${options.map((option) => `
                 <button type="button" class="slot ${selected && String(selected.optionId) === String(option.id) ? "active" : ""}" onclick="selectOption('${escapeHtml(group.id)}','${escapeHtml(option.id)}')">
                   <div>

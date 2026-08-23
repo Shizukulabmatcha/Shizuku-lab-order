@@ -7,10 +7,10 @@
 <link rel="icon" type="image/png" sizes="64x64" href="/shizuku-tab-icon.png">
 <meta name="apple-mobile-web-app-title" content="Shizuku Lab">
 <meta name="theme-color" content="#F3EEE3">
-<link rel="stylesheet" href="style.css?v=21">
+<link rel="stylesheet" href="style.css?v=18">
 </head>
 <body>
-<div class="wrap" id="app"><div class="storefront-skeleton" aria-label="Loading Shizuku Lab"><div class="skeleton-back"></div><div class="skeleton-logo"></div><div class="skeleton-line skeleton-title"></div><div class="skeleton-line skeleton-subtitle"></div><div class="skeleton-hero"></div><div class="skeleton-line skeleton-heading"></div><div class="skeleton-product"><span></span><i></i></div><div class="skeleton-product"><span></span><i></i></div></div></div>
+<div class="wrap" id="app"><div class="loading">Loading Shizuku Lab…</div></div>
 <script>
   function showFatalError(msg) { var app = document.getElementById('app'); if (app) app.innerHTML = '<div style="padding:20px;font-family:monospace;font-size:13px;white-space:pre-wrap;color:#7a1f1f;background:#FBEAEA;border:1px solid #B33;border-radius:12px;margin:20px;">Something went wrong loading the page:\n\n' + msg + '</div>'; }
   window.addEventListener('error', function (e) { showFatalError((e.message || 'Unknown error') + '\n(' + (e.filename || '') + ':' + (e.lineno || '') + ')'); });
@@ -18,7 +18,7 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js?v=22"></script>
+<script src="config.js"></script>
 <script src="app.js?v=22"></script>
 </body>
 </html>
