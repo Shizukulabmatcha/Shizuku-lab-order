@@ -988,7 +988,7 @@ function dashboardStyles() {
     #app.wrap{width:100%;max-width:none!important;margin:0!important;padding:0!important}
     .shop-admin{min-height:100vh;background:#fffaf5;color:#292720;font-family:inherit;display:flex}
     .shop-admin *{box-sizing:border-box}.shop-admin .admin-side{width:248px;flex:0 0 248px;min-height:100vh;padding:28px 16px;border-right:1px solid #eadfd2;background:#fffdf9;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;overflow:hidden}
-    .shop-admin .admin-logo{font-family:Georgia,serif;font-size:27px;font-weight:700;line-height:1.05}.shop-admin .admin-caption{margin:6px 8px 32px;color:#75845d;font-size:13px;letter-spacing:.06em}
+    .shop-admin .admin-logo{font-family:Georgia,serif;font-size:27px;font-weight:700;line-height:1.05}.shop-admin .slow-studio-badge{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;margin:0 0 12px 8px;background:#243225;color:#fff;font:700 13px/1 Georgia,serif;letter-spacing:.04em;box-shadow:0 7px 16px rgba(36,50,37,.16)}.shop-admin .admin-caption{margin:6px 8px 32px;color:#75845d;font-size:13px;letter-spacing:.06em}
     .shop-admin .admin-nav-label{margin:0 8px 10px;color:#877d70;font-size:11px;font-weight:800;letter-spacing:.12em}.shop-admin .admin-nav{display:grid;gap:6px;flex:1;min-height:0;overflow-y:auto;align-content:start;padding:0 4px 8px 0}
     .shop-admin .admin-nav button{appearance:none;width:100%;border:0;border-radius:14px;background:transparent;padding:13px 14px;color:#504a42;font:600 15px/1.2 inherit;text-align:left;cursor:pointer}.shop-admin .admin-nav button:hover{background:#f5ede2}.shop-admin .admin-nav button.active{background:#263125;color:#fff;box-shadow:0 10px 24px rgba(47,63,36,.16)}
     .shop-admin .admin-nav-sortable{display:grid;grid-template-columns:minmax(0,1fr) 24px;align-items:center;border-radius:14px}.shop-admin .admin-nav-sortable>button:first-child{min-width:0}.shop-admin .admin-nav-drag{appearance:none;border:0;background:transparent!important;box-shadow:none!important;color:var(--admin-muted)!important;padding:8px 2px!important;width:24px!important;cursor:grab!important;touch-action:none;font-size:17px!important;text-align:center!important}.shop-admin .admin-nav-drag:active{cursor:grabbing!important}.shop-admin .admin-nav-sortable.admin-drag-source{opacity:.45;background:var(--admin-soft)}
@@ -1722,13 +1722,22 @@ function friendlyCollectionDate(value) {
   const [year, month, day] = text.split("-").map(Number);
   return new Date(year, month - 1, day).toLocaleDateString("en-SG", { day: "numeric", month: "short", year: "numeric" });
 }
-const DEFAULT_WHATSAPP_CONFIRMATION_TEMPLATE = "Hi {customer_name}, Shizuku Lab here! Just to let you know that your order has been confirmed. See you on {date} at {time}, at {collection_point}.";
+const DEFAULT_WHATSAPP_CONFIRMATION_TEMPLATE = "Hi {customer_name}, Shizuku Lab here! Just to let you know that your order has been confirmed. See you on {date} at {time}, at {collection_point}.\n\nYour order:\n{order_items}";
+function whatsappOrderItems(order) {
+  const items = Array.isArray(order?.order_items) ? order.order_items : [];
+  if (!items.length) return "Order details are available in your confirmation.";
+  return items.map((item) => {
+    const options = Array.isArray(item.options) ? item.options.map((option) => option.option_name || option.name).filter(Boolean) : [];
+    return `• ${Number(item.quantity || 1)} × ${String(item.product_name || "Item")}${options.length ? ` — ${options.join(", ")}` : ""}`;
+  }).join("\n");
+}
 function fillWhatsAppConfirmationTemplate(template, values) {
   return String(template || DEFAULT_WHATSAPP_CONFIRMATION_TEMPLATE)
     .replaceAll("{customer_name}", values.customer_name)
     .replaceAll("{date}", values.date)
     .replaceAll("{time}", values.time)
-    .replaceAll("{collection_point}", values.collection_point);
+    .replaceAll("{collection_point}", values.collection_point)
+    .replaceAll("{order_items}", values.order_items || "");
 }
 function orderWhatsAppUrl(order) {
   const phone = whatsappPhoneNumber(order?.customer_phone);
@@ -1738,6 +1747,7 @@ function orderWhatsAppUrl(order) {
     date: friendlyCollectionDate(order.collection_date),
     time: String(order.collection_time || "your selected time").trim(),
     collection_point: String(order.collection_point || "your selected collection point").trim(),
+    order_items: whatsappOrderItems(order),
   });
   return AdminOrderRules.buildWhatsAppUrl(phone, message);
 }
@@ -1753,6 +1763,7 @@ function updateWhatsAppTemplatePreview() {
     date: "16 Aug 2026",
     time: "11:30 AM",
     collection_point: "Blk 130A Lift Lobby",
+    order_items: "• 1 × Ichigo Matcha Latte — Less Ice\n• 1 × Strawberry Milk",
   });
 }
 function sendOrderWhatsApp(orderId) {
@@ -2298,7 +2309,8 @@ function applyAdminTheme(name) {
 
 function editThemeChoice(name, target) {
   if (target === "admin") applyAdminTheme(name); else applyOrderingTheme(name);
-  astate.tab = "design";
+  astate.tab = "theme_design";
+  astate.designTopic = "customise";
   render();
 }
 async function deleteThemeChoice(name) {
@@ -2333,6 +2345,19 @@ function renderThemeTab() {
   }).join("")}${cmsSaveButton()}</div>`;
 }
 
+function setDesignTopic(topic) {
+  astate.designTopic = topic === "customise" ? "customise" : "themes";
+  render();
+}
+
+function renderThemeDesignTab() {
+  const topic = astate.designTopic || "themes";
+  return `<div class="btn-row" style="justify-content:flex-start;margin-bottom:16px;position:sticky;top:0;z-index:5;background:var(--admin-bg);padding:8px 0;">
+    <button class="${topic === "themes" ? "btn-primary" : "btn-secondary"}" onclick="setDesignTopic('themes')">Theme library</button>
+    <button class="${topic === "customise" ? "btn-primary" : "btn-secondary"}" onclick="setDesignTopic('customise')">Colours, fonts & layout</button>
+  </div>${topic === "themes" ? renderThemeTab() : renderDesignTab()}`;
+}
+
 function renderDesignTab() {
   const s = astate.settingsDraft || {};
   const color = (label,key,fallback) => `${key === "theme_primary_color" ? `<div style="grid-column:1/-1;"><div class="display" style="font-size:20px;margin-bottom:10px;">Menu display</div><div class="field"><label>Default customer menu view</label><select onchange="onSettingsField('default_menu_view',this.value)"><option value="list" ${(s.default_menu_view || "list") === "list" ? "selected" : ""}>List</option><option value="gallery" ${s.default_menu_view === "gallery" ? "selected" : ""}>Gallery</option></select></div><label class="slot" style="cursor:pointer;gap:10px;margin-bottom:14px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.show_menu_view_switch !== false ? "checked" : ""} onchange="onSettingsField('show_menu_view_switch',this.checked)"><span><b>Let customers switch between List and Gallery</b><br><span class="hint">Untick this to keep everyone on your selected default view.</span></span></label><div class="divider"></div></div>` : ""}<div class="field"><label>${label}</label><div style="display:grid;grid-template-columns:64px 1fr;gap:9px;"><input data-design-key="${key}" type="color" value="${escapeHtml(s[key] || fallback)}" oninput="onSettingsField('${key}',this.value);this.nextElementSibling.value=this.value;updateDesignPreview()"><input data-design-key="${key}" value="${escapeHtml(s[key] || fallback)}" oninput="onSettingsField('${key}',this.value);if(/^#[0-9a-fA-F]{6}$/.test(this.value)){this.previousElementSibling.value=this.value;updateDesignPreview()}"></div></div>`;
@@ -2344,7 +2369,7 @@ function renderDesignTab() {
 
 function renderWordingTab() {
   const whatsappTemplate = astate.settingsDraft?.whatsapp_confirmation_template || DEFAULT_WHATSAPP_CONFIRMATION_TEMPLATE;
-  const whatsappPreview = fillWhatsAppConfirmationTemplate(whatsappTemplate, { customer_name:"Shermin", date:"16 Aug 2026", time:"11:30 AM", collection_point:"Blk 130A Lift Lobby" });
+  const whatsappPreview = fillWhatsAppConfirmationTemplate(whatsappTemplate, { customer_name:"Shermin", date:"16 Aug 2026", time:"11:30 AM", collection_point:"Blk 130A Lift Lobby", order_items:"• 1 × Ichigo Matcha Latte — Less Ice\n• 1 × Strawberry Milk" });
   return `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Customer wording</h2><span>Main customer-facing titles</span></div>${cmsField("Store name","store_name","Shizuku Lab")}${cmsField("Store tagline","store_tagline","雫ラボ · crafted drop by drop")}${cmsField("Menu heading","menu_heading","メニュー · DRINK MENU")}${cmsField("Reviews heading","reviews_heading","お客様の声 · REVIEWS")}${cmsField("Loyalty programme name","loyalty_heading","Shizuku Club")}${cmsField("Chat heading","chat_heading","Message us")}<div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:6px;">WhatsApp order confirmation</div><div class="hint" style="text-align:left;margin-bottom:12px;">Edit the message opened by the WhatsApp customer button. Keep any variables you want inserted automatically.</div><div class="field"><label>Confirmation message</label><textarea rows="5" oninput="onSettingsField('whatsapp_confirmation_template',this.value);updateWhatsAppTemplatePreview()">${escapeHtml(whatsappTemplate)}</textarea></div><div class="hint" style="text-align:left;margin:-5px 0 12px;">Available variables: <code>{customer_name}</code> <code>{date}</code> <code>{time}</code> <code>{collection_point}</code></div><div class="ref-note"><b>Message preview</b><div id="whatsapp-template-preview" style="margin-top:8px;white-space:pre-wrap;line-height:1.55;">${escapeHtml(whatsappPreview)}</div></div><div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:6px;">Track order wording</div><div class="hint" style="text-align:left;margin-bottom:14px;">Edit every main label and every order-status message shown to customers.</div>${cmsField("Page heading","track_order_heading","Track my order")}${cmsField("Intro sentence","track_intro_text","Enter either your order number or the phone number used at checkout.",2)}<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">${cmsField("Order number label","track_order_number_label","Order number")}${cmsField("Phone number label","track_phone_label","Phone number")}${cmsField("Between fields","track_or_text","OR")}${cmsField("Track button","track_button_text","Track order")}${cmsField("Live updates label","track_live_updates_text","LIVE UPDATES")}${cmsField("Refresh button","track_refresh_text","Refresh now")}${cmsField("Order detail label","track_order_label","Order")}${cmsField("Pickup detail label","track_pickup_label","Pickup")}${cmsField("Stage 1","track_stage_payment","Payment review")}${cmsField("Stage 2","track_stage_confirmed","Confirmed")}${cmsField("Stage 3","track_stage_preparing","Preparing")}${cmsField("Stage 4","track_stage_ready","Ready")}</div><div class="divider"></div>${trackStatusFields("Awaiting payment","track_awaiting","Awaiting payment","Please complete payment and submit your payment screenshot.")}${trackStatusFields("Payment under review","track_review","Payment under review","We’ll confirm your order once your payment proof is verified.")}${trackStatusFields("Order confirmed","track_confirmed","Order confirmed","Payment verified — we’ll prepare your order closer to pickup.")}${trackStatusFields("Preparing","track_preparing","Preparing your order","We’re freshly preparing your drinks now.")}${trackStatusFields("Ready","track_ready","Ready for collection","Your order is ready — see you at your pickup time!")}${trackStatusFields("Collected","track_collected","Collected with care ✨","We hope you enjoyed every sip. Looking forward to making your next Shizuku drink.")}${trackStatusFields("Cancelled","track_cancelled","Order cancelled","This order can no longer accept payment. Please place a new order.")}${trackStatusFields("Payment rejected","track_rejected","Payment proof needs attention","Please upload a new payment screenshot.")}${cmsSaveButton()}</section>`;
 }
 
@@ -2485,19 +2510,18 @@ function render() {
     ["availability", "◷", "Availability"],
     ["faq", "?", "FAQ"],
     ["notifications", "🔔", "Notifications"],
-    ["theme", "◈", "Theme"],
-    ["design", "◐", "Design"],
+    ["theme_design", "◈", "Theme & design"],
     ["wording", "Aa", "Customer wording"],
     ["checkout_comms", "☏", "Checkout & chat"],
     ["settings", "⚙", "Store settings"],
   ];
   const sortedNav = orderedAdminNav(nav);
-  const tabTitle = { preparation: "Today's preparation", orders: "Orders", menu: "Products", inventory: "Inventory & food cost", wholesale:"Wholesale / B2B", inspiration:"Inspiration", promos: "Promos", rewards: "Rewards", customers: "Customers", messages: "Messages", reviews: "Reviews", availability: "Availability", faq: "FAQ", notifications: "Notifications", theme: "Theme", design: "Design", wording: "Customer wording", checkout_comms: "Checkout & communication", settings: "Store settings" };
-  const tabSubtitle = { preparation: "See every paid drink to prepare and print today's list.", orders: "Review payments and edit every customer order.", menu: "Keep your drinks, prices and availability up to date.", inventory: "Track stock and review every product cost in one place.", wholesale:"Manage private B2B products, pricing and suppliers.", inspiration:"Capture, pin and organise private business ideas.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", messages: "Read and reply to order-linked customer messages.", reviews: "Approve the customer reviews shown on your ordering page.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose where you receive new-order alerts.", design: "Change the customer shop and loyalty card colours and fonts.", wording: "Edit the main words customers see across your shop.", checkout_comms: "Control checkout fields, payment wording, chat and reviews.", settings: "Manage your store details, images, contact information and payment details." };
+  const tabTitle = { preparation: "Today's preparation", orders: "Orders", menu: "Products", inventory: "Inventory & food cost", wholesale:"Wholesale / B2B", inspiration:"Inspiration", promos: "Promos", rewards: "Rewards", customers: "Customers", messages: "Messages", reviews: "Reviews", availability: "Availability", faq: "FAQ", notifications: "Notifications", theme_design: "Theme & design", wording: "Customer wording", checkout_comms: "Checkout & communication", settings: "Store settings" };
+  const tabSubtitle = { preparation: "See every paid drink to prepare and print today's list.", orders: "Review payments and edit every customer order.", menu: "Keep your drinks, prices and availability up to date.", inventory: "Track stock and review every product cost in one place.", wholesale:"Manage private B2B products, pricing and suppliers.", inspiration:"Capture, pin and organise private business ideas.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", messages: "Read and reply to order-linked customer messages.", reviews: "Approve the customer reviews shown on your ordering page.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose where you receive new-order alerts.", theme_design: "Choose a theme, then customise colours, fonts and layout in one place.", wording: "Edit the main words customers see across your shop.", checkout_comms: "Control checkout fields, payment wording, chat and reviews.", settings: "Manage your store details, images, contact information and payment details." };
   const page = astate.tab === "dashboard" ? renderDashboardTab() : `
     <div class="admin-top"><div><div class="admin-eyebrow">Shizuku Lab admin</div><h1 class="tab-page-title">${tabTitle[astate.tab] || "Dashboard"}</h1><p class="tab-page-subtitle">${tabSubtitle[astate.tab] || ""}</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
     <div class="admin-content">
-      ${astate.tab === "preparation" ? renderPreparationTab() : astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "inventory" ? renderInventoryTab() : astate.tab === "wholesale" ? renderWholesaleTab() : astate.tab === "inspiration" ? renderInspirationTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "messages" ? renderMessagesTab() : astate.tab === "reviews" ? renderReviewsTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : astate.tab === "theme" ? renderThemeTab() : astate.tab === "design" ? renderDesignTab() : astate.tab === "wording" ? renderWordingTab() : astate.tab === "checkout_comms" ? renderCheckoutCommunicationTab() : renderSettingsTab()}
+      ${astate.tab === "preparation" ? renderPreparationTab() : astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "inventory" ? renderInventoryTab() : astate.tab === "wholesale" ? renderWholesaleTab() : astate.tab === "inspiration" ? renderInspirationTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "messages" ? renderMessagesTab() : astate.tab === "reviews" ? renderReviewsTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : astate.tab === "theme_design" ? renderThemeDesignTab() : astate.tab === "wording" ? renderWordingTab() : astate.tab === "checkout_comms" ? renderCheckoutCommunicationTab() : renderSettingsTab()}
     </div>`;
   app.innerHTML = `
     ${dashboardStyles()}
@@ -2507,7 +2531,27 @@ function render() {
     </div>
     ${renderEditOverlay()}
   `;
-  if (astate.tab === "design") requestAnimationFrame(updateDesignPreview);
+  const adminLogo = document.querySelector(".admin-logo");
+  if (adminLogo && !document.querySelector(".slow-studio-badge")) {
+    const badge = document.createElement("div");
+    badge.className = "slow-studio-badge";
+    badge.title = "Slow Studio workspace";
+    badge.setAttribute("aria-label", "Slow Studio workspace");
+    badge.textContent = "SS";
+    adminLogo.before(badge);
+  }
+  if (astate.tab === "wording") {
+    const whatsappTextarea = document.querySelector('textarea[oninput*="updateWhatsAppTemplatePreview"]');
+    if (whatsappTextarea) whatsappTextarea.rows = 7;
+    const hints = [...document.querySelectorAll(".hint")];
+    const variableHint = hints.find((node) => node.textContent.includes("Available variables:"));
+    if (variableHint && !variableHint.textContent.includes("{order_items}")) {
+      const orderItemsVariable = document.createElement("code");
+      orderItemsVariable.textContent = "{order_items}";
+      variableHint.append(" ", orderItemsVariable);
+    }
+  }
+  if (astate.tab === "theme_design" && astate.designTopic === "customise") requestAnimationFrame(updateDesignPreview);
 }
 
 if (db) {
