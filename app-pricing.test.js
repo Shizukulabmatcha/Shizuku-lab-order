@@ -45,3 +45,30 @@ test("Mix & Matcha follows option prices and updates selected total", () => {
   assert.equal(context.selectedBundlePrice(bundle, drinks[0], drinks[1]), 13.4);
   assert.equal(context.selectedBundlePrice(bundle, drinks[1], drinks[1]), 15);
 });
+
+test("Malaysia Mix & Match uses MYR prices without changing SGD prices", () => {
+  const drinks = [
+    { id: 1, name: "Matcha", price: 5.9, myr_price: 16, is_available: true, is_bundle: false },
+    { id: 2, name: "Houjicha", price: 6.9, myr_price: 18, is_available: true, is_bundle: false },
+  ];
+  const bundle = {
+    id: 28,
+    name: "Mix & Matcha",
+    price: 0,
+    myr_price: 0,
+    is_bundle: true,
+    bundle_pricing_mode: "sum_selected",
+    bundle_product_ids: ["1", "2"],
+    bundle_option_prices: { "2": 7.5 },
+    bundle_myr_option_prices: { "2": 19 },
+    bundle_display_from_price: 10,
+    bundle_myr_display_from_price: 30,
+  };
+  const context = pricingContext({ storewide_sale_enabled: false }, drinks);
+  context.state.market = "MY";
+  assert.equal(context.bundleDisplayFromPrice(bundle), 30);
+  assert.equal(context.selectedBundlePrice(bundle, drinks[0], drinks[1]), 35);
+  context.state.market = "SG";
+  assert.equal(context.bundleDisplayFromPrice(bundle), 10);
+  assert.equal(context.selectedBundlePrice(bundle, drinks[0], drinks[1]), 13.4);
+});

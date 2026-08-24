@@ -1,0 +1,18 @@
+SHIZUKU LAB V29 — MALAYSIA, EMAIL, REVIEWS & MIX AND MATCH
+
+1. Upload the complete ZIP to Vercel.
+2. Do not run supabase-malaysia-email-reviews.sql again for this release.
+   The database migration has already been applied to the Shizuku Lab Supabase project.
+3. After Vercel finishes, open the customer shop in a private tab once so the new v29 files are loaded.
+
+WHAT IS INCLUDED
+- Mix & Match shows the editable From price but hides individual choice prices when its switch is off.
+- Individual product prices remain stored and continue to calculate the final bundle total.
+- Optional Malaysia / MYR storefront switch and Touch 'n Go payment settings.
+- Manual Email customer button beside WhatsApp, available only after payment is confirmed.
+- Editable customer confirmation email content in Notifications.
+- Verified customer review portal with per-order review selection and Admin approve/reject.
+
+IMPORTANT TOUCH 'N GO NOTE
+An uploaded personal Touch 'n Go QR is a static QR, so the banking app may still allow the payer to type an amount.
+Shizuku Lab keeps the order total locked and clearly shows the exact MYR amount to pay. Confirm the received amount before approving payment.

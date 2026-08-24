@@ -41,6 +41,8 @@ function clearPendingPayment() { try { localStorage.removeItem(PENDING_PAYMENT_S
 
 const state = {
   menu: [],
+  allMenu: [],
+  market: (() => { try { return localStorage.getItem("shizuku-market") === "MY" ? "MY" : "SG"; } catch (_) { return "SG"; } })(),
   stockLevels: {},
   cart: loadSavedCart(),
   cartNotice: "",
@@ -153,6 +155,11 @@ const state = {
     business_country: "Singapore",
     store_currency: "SGD",
     store_language: "English",
+    malaysia_enabled: false,
+    touchngo_name: "",
+    touchngo_number: "",
+    touchngo_qr_url: "",
+    malaysia_collection_points: [],
   },
   form: { name: "", phone: "", email: "", instagram: "", pickupDate: "", slotId: "", collectionPoint: "", notes: "", promoCode: "" },
   promo: null,
@@ -161,6 +168,7 @@ const state = {
   customerId: null,
   tracking: { orderNumber: "", phone: "", order: null, message: "", loading: false, live: false, lastCheckedAt: null },
   reviewDraft: { name: "", rating: 5, text: "", submitting: false, message: "", submitted: false },
+  reviewPortal: { lookup: "", orders: [], selected: null, name: "", rating: 5, text: "", loading: false, message: "", submitted: false },
   orderChat: { messages: [], text: "", loading: false, sending: false, message: "" },
   loyalty: { phone: "", account: null, message: "", loading: false },
   lastOrder: null,
@@ -176,7 +184,7 @@ let lastRenderedScreen = null;
 
 /* ---------- helpers ---------- */
 function money(n) {
-  const currency = String(state.store?.store_currency || "SGD").toUpperCase();
+  const currency = state.market === "MY" ? "MYR" : "SGD";
   const locale = currency === "MYR" ? "en-MY" : currency === "CNY" ? "zh-CN" : "en-SG";
   try { return new Intl.NumberFormat(locale, { style: "currency", currency }).format(Number(n || 0)); }
   catch (_) { return `${currency} ${Number(n || 0).toFixed(2)}`; }
@@ -198,7 +206,7 @@ function applyStorefrontThemeVariables() {
   document.body.style.backgroundColor = s.theme_background_color || "#F3EEE3";
   document.body.style.color = s.theme_text_color || "#2A2A22";
 }
-function originalPrice(item) { return Number(item?.price || 0); }
+function originalPrice(item) { return Number(state.market === "MY" && item?.myr_price != null ? item.myr_price : item?.price || 0); }
 function storewideSaleApplies(item) {
   if (!state.store.storewide_sale_enabled) return false;
   const scope = String(state.store.storewide_sale_scope || "all");
@@ -305,7 +313,8 @@ function isDynamicBundle(bundle) {
   return isBundle(bundle) && String(bundle?.bundle_pricing_mode || "fixed") === "sum_selected";
 }
 function bundleOptionPrice(bundle, drink) {
-  const prices = bundle?.bundle_option_prices && typeof bundle.bundle_option_prices === "object" ? bundle.bundle_option_prices : {};
+  const source = state.market === "MY" ? bundle?.bundle_myr_option_prices : bundle?.bundle_option_prices;
+  const prices = source && typeof source === "object" ? source : {};
   const override = Number(prices[String(drink?.id)]);
   return Number.isFinite(override) && override >= 0 ? override : salePrice(drink);
 }
@@ -319,7 +328,7 @@ function bundleStartingPrice(bundle) {
   return Math.round((salePrice(bundle) + minimum * 2) * 100) / 100;
 }
 function bundleDisplayFromPrice(bundle) {
-  const saved = Number(bundle?.bundle_display_from_price);
+  const saved = Number(state.market === "MY" ? bundle?.bundle_myr_display_from_price : bundle?.bundle_display_from_price);
   return Number.isFinite(saved) && saved >= 0 ? saved : bundleStartingPrice(bundle);
 }
 function selectedBundlePrice(bundle, drink1, drink2, drink1Options = {}, drink2Options = {}) {
@@ -414,7 +423,7 @@ async function loadFaq() {
 }
 async function loadReviews() {
   if (!IS_CONFIGURED) return;
-  const { data, error } = await db.from("customer_reviews").select("id,customer_name,rating,review_text,created_at").eq("status", "published").order("published_at", { ascending: false }).limit(12);
+  const { data, error } = await db.from("customer_reviews").select("id,customer_name,rating,review_text,product_summary,created_at").eq("status", "published").order("published_at", { ascending: false }).limit(12);
   if (error) { console.warn("Could not load reviews:", error.message); return; }
   state.reviews = data || [];
 }
@@ -541,7 +550,7 @@ async function loadProducts() {
   }
   const { data, error } = productResult;
   if (error) throw error;
-  state.menu = (data || []).map((item) => ({
+  state.allMenu = (data || []).map((item) => ({
     ...item,
     category: item.category || "Other",
     name: item.name || "Untitled",
@@ -550,6 +559,23 @@ async function loadProducts() {
     discount_price: item.discount_price == null ? null : Number(item.discount_price),
     stock: item.stock == null ? null : Number(item.stock),
   }));
+  applyMarketMenu();
+}
+function applyMarketMenu() {
+  if (state.market === "MY" && state.store.malaysia_enabled !== true) state.market = "SG";
+  state.menu = state.allMenu.filter((item) => state.market !== "MY" || item.malaysia_available === true);
+}
+function setMarket(market) {
+  const next = market === "MY" && state.store.malaysia_enabled === true ? "MY" : "SG";
+  if (next === state.market) return;
+  state.market = next;
+  try { localStorage.setItem("shizuku-market", next); } catch (_) {}
+  state.cart = {};
+  clearSavedCart();
+  state.promo = null;
+  state.form.collectionPoint = "";
+  applyMarketMenu();
+  render();
 }
 async function loadCustomerStockLevels() {
   const { data, error } = await db.rpc("get_shizuku_product_stock");
@@ -600,7 +626,7 @@ async function init() {
   state.slots = computeSlots();
 
   const requestedScreen = new URLSearchParams(window.location.search).get("screen");
-  if (requestedScreen === "track" || requestedScreen === "loyalty") state.screen = requestedScreen;
+  if (["track", "loyalty", "reviews"].includes(requestedScreen)) state.screen = requestedScreen;
   else {
     const pendingPayment = loadPendingPayment();
     if (pendingPayment && Number(pendingPayment.expiresAt || 0) > Date.now()) {
@@ -617,6 +643,7 @@ async function init() {
   try {
     await ensureCustomerSession();
     await loadStoreSettings();
+    if (state.market === "MY" && state.store.malaysia_enabled !== true) state.market = "SG";
     await loadOpeningOverrides();
     await Promise.all([loadFaq(), loadReviews()]);
     state.slots = computeSlots();
@@ -1032,8 +1059,10 @@ async function submitOrder() {
     payment_status: "awaiting_payment",
     order_status: "pending",
     notes: f.notes.trim() || null,
-    payment_method: "PayNow",
+    payment_method: state.market === "MY" ? "Touch 'n Go" : "PayNow",
     payment_reference: orderNumber,
+    market_code: state.market,
+    currency_code: state.market === "MY" ? "MYR" : "SGD",
   };
   if (state.customerId) orderPayload.customer_id = state.customerId;
 
@@ -1256,12 +1285,15 @@ function storeInfoPanel() {
   const tickerText = escapeHtml(state.store.ticker_text || "PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB");
   const storeDescription = escapeHtml(state.store.store_description || "Little cups, big comfort. Freshly whisked matcha made with care — one cup at a time.");
   const nextCollections = nextCollectionSchedule(2);
+  const marketSwitch = state.store.malaysia_enabled === true ? `<div class="market-switch" aria-label="Choose ordering country"><span aria-hidden="true">🌍</span><button type="button" class="${state.market === "SG" ? "active" : ""}" onclick="setMarket('SG')">Singapore · SGD</button><button type="button" class="${state.market === "MY" ? "active" : ""}" onclick="setMarket('MY')">Malaysia · MYR</button></div>` : "";
   return `
     ${state.store.show_ticker === false ? "" : `<div class="promo-ticker"><div class="promo-ticker-track"><span>${tickerText}</span><span>${tickerText}</span><span>${tickerText}</span></div></div>`}
     <div class="store-panel">
       <div class="store-banner" style="--banner-height:${bannerHeight}px;background-position:${bannerX}% ${bannerY}%;background-image:linear-gradient(90deg,rgba(52,69,39,.14),rgba(52,69,39,.05)),url('${escapeHtml(bannerImage)}');"><span class="store-logo-overlap" style="--logo-circle-size:${logoCircleSize}px;"><img src="${escapeHtml(logoUrl)}" style="transform:translate(${logoImageX}%,${logoImageY}%) scale(${logoImageScale});" alt="${escapeHtml(state.store.store_name)} logo"></span></div>
       <div class="store-panel-body" style="padding-top:${Math.round(logoCircleSize / 2 + 12)}px;">
         <a class="store-insta" href="https://instagram.com/${encodeURIComponent(igHandle)}" target="_blank" rel="noopener">@${escapeHtml(igHandle)}</a>${whatsappLink}
+        ${state.store.reviews_enabled === false ? "" : `<button type="button" class="write-review-link" onclick="setScreen('reviews')">Write a review</button>`}
+        ${marketSwitch}
         <div class="store-dropoff">${escapeHtml(state.store.collection_address || "")}</div>
         <p class="store-desc">${storeDescription}</p>
         <div class="hours-card-dark">
@@ -1379,7 +1411,35 @@ function reviewStars(rating) { return "★".repeat(Math.max(0, Math.min(5, Numbe
 function renderReviews() {
   if (state.store.reviews_enabled === false || !state.reviews.length) return "";
   const average = state.reviews.reduce((sum, item) => sum + Number(item.rating || 0), 0) / state.reviews.length;
-  return `<section class="faq-section review-section"><div class="faq-title"><span>お客様の声</span> · REVIEWS</div><div style="display:flex;align-items:center;gap:9px;margin:0 0 14px;"><b style="font:700 25px/1 Georgia,serif;">${average.toFixed(1)}</b><span style="color:#a36d1e;letter-spacing:2px;">${reviewStars(Math.round(average))}</span><span class="hint" style="margin:0;">${state.reviews.length} review${state.reviews.length === 1 ? "" : "s"}</span></div>${state.reviews.map((item) => `<article class="summary-card" style="margin:10px 0;padding:16px;"><div style="display:flex;justify-content:space-between;gap:12px;"><b>${escapeHtml(item.customer_name)}</b><span style="color:#a36d1e;letter-spacing:1px;">${reviewStars(item.rating)}</span></div><p style="margin:10px 0 0;line-height:1.55;">${escapeHtml(item.review_text)}</p></article>`).join("")}</section>`;
+  return `<section class="faq-section review-section"><div class="faq-title"><span>お客様の声</span> · REVIEWS</div><div style="display:flex;align-items:center;gap:9px;margin:0 0 14px;"><b style="font:700 25px/1 Georgia,serif;">${average.toFixed(1)}</b><span style="color:#a36d1e;letter-spacing:2px;">${reviewStars(Math.round(average))}</span><span class="hint" style="margin:0;">${state.reviews.length} review${state.reviews.length === 1 ? "" : "s"}</span></div>${state.reviews.map((item) => `<article class="summary-card" style="margin:10px 0;padding:16px;"><div style="display:flex;justify-content:space-between;gap:12px;"><b>${escapeHtml(item.customer_name)}</b><span style="color:#a36d1e;letter-spacing:1px;">${reviewStars(item.rating)}</span></div>${item.product_summary ? `<div class="review-product-summary">${escapeHtml(item.product_summary)}</div>` : ""}<p style="margin:10px 0 0;line-height:1.55;">${escapeHtml(item.review_text)}</p></article>`).join("")}</section>`;
+}
+
+async function findReviewableOrders() {
+  const portal = state.reviewPortal;
+  const lookup = String(portal.lookup || "").trim();
+  if (!lookup) { portal.message = "Enter your order number or phone number."; render(); return; }
+  portal.loading = true; portal.message = ""; portal.orders = []; portal.selected = null; render();
+  const { data, error } = await db.rpc("find_reviewable_shizuku_orders", { p_lookup: lookup });
+  portal.loading = false;
+  if (error) portal.message = "We could not check your orders right now. Please try again.";
+  else if (!(data || []).length) portal.message = "No paid and collected orders were found with those details.";
+  else portal.orders = data || [];
+  render();
+}
+function chooseReviewOrder(orderId) { state.reviewPortal.selected = state.reviewPortal.orders.find((item) => String(item.order_id) === String(orderId)) || null; state.reviewPortal.submitted = false; state.reviewPortal.message = ""; render(); }
+async function submitReviewPortal() {
+  const p = state.reviewPortal;
+  if (!p.selected || !p.text.trim()) { p.message = "Please choose an order and write your review."; render(); return; }
+  p.loading = true; p.message = ""; render();
+  const { error } = await db.rpc("submit_shizuku_order_review", { p_lookup: p.lookup, p_order_id: String(p.selected.order_id), p_customer_name: p.name.trim(), p_rating: Number(p.rating || 5), p_review_text: p.text.trim() });
+  p.loading = false;
+  if (error) p.message = error.message || "Could not submit this review.";
+  else { p.submitted = true; p.message = "Thank you — your review was sent to Shizuku Lab for approval."; p.text = ""; p.orders = p.orders.map((item) => String(item.order_id) === String(p.selected.order_id) ? { ...item, already_reviewed: true } : item); }
+  render();
+}
+function renderReviewPortal() {
+  const p = state.reviewPortal;
+  return `${header({ showHome: true })}<div class="screen review-portal"><button class="back-link" onclick="setScreen('menu')">${ICONS.back} Back to menu</button><div class="display" style="font-size:27px;">Write down your experience with Shizuku Lab</div><p class="hint" style="text-align:left;line-height:1.55;">Enter either your order number or phone number. We will show the drinks you collected — your order number will never be shown publicly.</p><div class="field"><label>Order number or phone number</label><input value="${escapeHtml(p.lookup)}" oninput="state.reviewPortal.lookup=this.value" placeholder="SL-XXXXXX or 91234567"></div><button class="primary-btn" ${p.loading ? "disabled" : ""} onclick="findReviewableOrders()">${p.loading ? "Checking…" : "Find my orders"}</button>${p.orders.length ? `<div class="review-order-list"><div class="bundle-heading">Choose the drinks to review</div>${p.orders.map((item) => `<button class="slot ${p.selected && String(p.selected.order_id) === String(item.order_id) ? "active" : ""}" ${item.already_reviewed ? "disabled" : ""} onclick="chooseReviewOrder('${escapeHtml(item.order_id)}')"><span><b>${escapeHtml(item.product_summary || "Shizuku drinks")}</b><br><span class="hint">Collected ${escapeHtml(item.collection_date || "")}${item.already_reviewed ? " · Review already submitted" : ""}</span></span></button>`).join("")}</div>` : ""}${p.selected && !p.selected.already_reviewed ? `<div class="summary-card review-write-card"><div class="field"><label>Name shown with review</label><input value="${escapeHtml(p.name)}" placeholder="Your name" oninput="state.reviewPortal.name=this.value"></div><div class="field"><label>Rating</label><select onchange="state.reviewPortal.rating=Number(this.value)">${[5,4,3,2,1].map((rating) => `<option value="${rating}" ${p.rating===rating?"selected":""}>${rating} star${rating===1?"":"s"}</option>`).join("")}</select></div><div class="field"><label>Your experience</label><textarea rows="5" oninput="state.reviewPortal.text=this.value">${escapeHtml(p.text)}</textarea></div><button class="primary-btn" ${p.loading ? "disabled" : ""} onclick="submitReviewPortal()">Submit review</button></div>` : ""}${p.message ? `<div class="ref-note" role="status">${escapeHtml(p.message)}</div>` : ""}</div>`;
 }
 
 /* ---------- FAQ ---------- */
@@ -1532,7 +1592,8 @@ function renderCart() {
 function renderCheckout() {
   const f = state.form;
   const canSubmit = f.name.trim() && isValidPhone(f.phone) && f.slotId && f.collectionPoint;
-  const collectionPoints = Array.isArray(state.store.collection_points) && state.store.collection_points.length ? state.store.collection_points : ["Blk 130A", "Near Creamier"];
+  const configuredPoints = state.market === "MY" ? state.store.malaysia_collection_points : state.store.collection_points;
+  const collectionPoints = Array.isArray(configuredPoints) && configuredPoints.length ? configuredPoints : (state.market === "MY" ? ["Malaysia collection point"] : ["Blk 130A", "Near Creamier"]);
   const pickupDates = Array.from(new Map(state.slots.map((slot) => [slot.date, slot.label])).entries());
   const availableTimes = state.slots.filter((slot) => slot.date === f.pickupDate);
   return `
@@ -1655,9 +1716,12 @@ function renderPayment() {
   }
   if (!state.payment.expiresAt) state.payment.expiresAt = Date.now() + 15 * 60 * 1000;
   const paymentExpired = paymentSecondsLeft() === 0;
-  const paynowName = state.store.paynow_name || state.store.store_name || "Shizuku Lab";
-  const paynowNumber = state.store.paynow_number || "";
-  const uploadedQrMode = state.store.payment_qr_mode === "uploaded";
+  const malaysiaOrder = (order.market_code || state.market) === "MY";
+  const paynowName = malaysiaOrder ? (state.store.touchngo_name || state.store.store_name || "Shizuku Lab") : (state.store.paynow_name || state.store.store_name || "Shizuku Lab");
+  const paynowNumber = malaysiaOrder ? (state.store.touchngo_number || "") : (state.store.paynow_number || "");
+  const uploadedQrMode = malaysiaOrder || state.store.payment_qr_mode === "uploaded";
+  const paymentName = malaysiaOrder ? "Touch 'n Go" : "PayNow";
+  const staticQrUrl = malaysiaOrder ? state.store.touchngo_qr_url : state.store.paynow_url;
   const instagramHandle = String(state.store.instagram || "shizukulab.matcha").replace(/^@/, "");
   const inAppBrowser = isInstagramOrFacebookBrowser();
   let qrHtml;
@@ -1665,8 +1729,8 @@ function renderPayment() {
     qrHtml = !uploadedQrMode && paynowNumber ? `<div class="qr-box ${paymentExpired ? "qr-expired" : ""}">${payNowQrSvg(order.total, order.order_number, state.payment.expiresAt)}</div>` : null;
   } catch (e) { qrHtml = null; }
   if (!qrHtml) {
-    qrHtml = state.store.paynow_url
-      ? `<div class="qr-box"><img src="${escapeHtml(state.store.paynow_url)}" alt="PayNow QR" style="max-width:220px;width:100%;height:auto;"></div>`
+    qrHtml = staticQrUrl
+      ? `<div class="qr-box"><img src="${escapeHtml(staticQrUrl)}" alt="${escapeHtml(paymentName)} QR" style="max-width:220px;width:100%;height:auto;"></div>`
       : `<div class="qr-box"><div class="qr-placeholder"></div></div>`;
   }
   const paymentQrSize = Math.max(150, Math.min(300, Number(state.store.payment_qr_size || 220)));
@@ -1678,8 +1742,8 @@ function renderPayment() {
       <button class="back-link" onclick="leavePaymentPage()">${ICONS.back} ${state.tracking.order?.order_number === order.order_number ? "Back to Track Order" : "Back to menu"}</button>
       <div class="summary-card">
         ${qrHtml}
-        <div class="hint">${escapeHtml(state.store.payment_instructions || "Scan with your banking app, or PayNow to the account below.")}${state.store.show_paynow_name === false ? "" : `<br><b>${escapeHtml(paynowName)}</b>`}${state.store.show_paynow_number === false || !paynowNumber ? "" : `<br>${escapeHtml(paynowNumber)}`}</div>
-        ${uploadedQrMode ? `<div class="ref-note" style="color:#A36D1E;"><b>Pay exactly ${money(order.total)}.</b><br>This is an uploaded static QR, so please check the amount before confirming in your banking app.</div>` : `<div class="payment-timer" id="paynow-countdown" aria-live="polite">Please complete payment within ${paymentCountdownText()}.</div><button class="btn-secondary refresh-qr-btn" id="refresh-paynow-qr" ${paymentExpired ? "" : "hidden"} onclick="refreshPayNowQr()">Refresh QR · 15 minutes</button>`}
+        <div class="hint">${escapeHtml(malaysiaOrder ? "Scan with Touch 'n Go and enter the exact order amount shown below." : (state.store.payment_instructions || "Scan with your banking app, or PayNow to the account below."))}${state.store.show_paynow_name === false ? "" : `<br><b>${escapeHtml(paynowName)}</b>`}${state.store.show_paynow_number === false || !paynowNumber ? "" : `<br>${escapeHtml(paynowNumber)}`}</div>
+        ${uploadedQrMode ? `<div class="ref-note" style="color:#A36D1E;"><b>Pay exactly ${money(order.total)}.</b><br>The order amount is locked in Shizuku Lab. Please enter this exact amount in ${escapeHtml(paymentName)} before confirming.</div>` : `<div class="payment-timer" id="paynow-countdown" aria-live="polite">Please complete payment within ${paymentCountdownText()}.</div><button class="btn-secondary refresh-qr-btn" id="refresh-paynow-qr" ${paymentExpired ? "" : "hidden"} onclick="refreshPayNowQr()">Refresh QR · 15 minutes</button>`}
         <div class="divider"></div>
         ${state.store.show_payment_order_details === false ? "" : `<div class="row"><span class="label">Order</span><span class="mono">${escapeHtml(order.order_number || order.id || "")}</span></div><div class="row bold"><span class="label">Amount</span><span>${money(order.total)}</span></div>`}
         ${!uploadedQrMode && paynowNumber ? `<div class="ref-note" style="color:var(--matcha);"><b>Payment amount is pre-filled in the QR and cannot be edited.</b></div>` : ""}
@@ -1690,13 +1754,13 @@ function renderPayment() {
       <div class="summary-card" style="margin-top:16px;">
         ${inAppBrowser ? `<div style="padding:14px 16px;margin-bottom:16px;border:1px solid #d8c58e;border-radius:14px;background:#fff8df;color:#5b4b22;font-size:13px;line-height:1.5;"><b>Using Instagram or Facebook?</b><br>Photo access may be blocked by the in-app browser. Please choose <b>Allow all photos/media</b>. If it still fails, do not refresh—send the screenshot through Instagram below. Your order <b>${escapeHtml(order.order_number || order.id || "")}</b> will be restored if this page reloads.</div>` : ""}
         ${state.store.show_payment_transaction_reference === false ? "" : `<div class="field">
-          <label>PayNow transaction reference <span class="hint">(optional)</span></label>
+          <label>${escapeHtml(paymentName)} transaction reference <span class="hint">(optional)</span></label>
           <input value="${escapeHtml(state.payment.transactionReference)}" placeholder="e.g. 123456789" oninput="onPaymentReference(this.value)">
         </div>`}
         <div class="field" style="margin-bottom:0;">
           <label>Payment screenshot <span style="color:#B33;">*</span></label>
           <input type="file" accept="image/jpeg,image/png,image/heic,image/heif" required aria-required="true" onchange="onPaymentProof(this)">
-          <div class="hint" style="margin-top:8px;">${state.payment.proofFile ? `Selected: <b>${escapeHtml(state.payment.proofFile.name)}</b>` : "Required — upload a clear screenshot of your successful PayNow payment. If you opened this page inside Facebook or Instagram, please allow photo access when prompted."}</div>
+          <div class="hint" style="margin-top:8px;">${state.payment.proofFile ? `Selected: <b>${escapeHtml(state.payment.proofFile.name)}</b>` : `Required — upload a clear screenshot of your successful ${escapeHtml(paymentName)} payment. If you opened this page inside Facebook or Instagram, please allow photo access when prompted.`}</div>
         </div>
         ${state.store.show_instagram_payment_help === false ? "" : `<button type="button" class="btn-secondary" style="width:100%;margin-top:14px;" onclick="openInstagramPaymentHelp()">Need a hand? Chat with us on Instagram @${escapeHtml(instagramHandle)} ↗</button>`}
       </div>
@@ -2019,6 +2083,7 @@ function render() {
   else if (state.screen === "confirmation") html = renderConfirmation();
   else if (state.screen === "track") html = renderTrackOrder();
   else if (state.screen === "loyalty") html = renderLoyalty();
+  else if (state.screen === "reviews") html = renderReviewPortal();
   else html = renderMenu();
   app.innerHTML = `${storefrontThemeStyle()}${html}${poweredByFooter()}`;
   applyCmsWording();
