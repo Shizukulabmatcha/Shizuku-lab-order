@@ -1,4 +1,5 @@
 (async function () {
+  const revealWelcome = () => document.body.classList.remove("welcome-loading");
   const fontStacks = {
     fraunces: "'Fraunces','Noto Serif JP',Georgia,serif",
     noto_serif_jp: "'Noto Serif JP','Fraunces',Georgia,serif",
@@ -25,7 +26,7 @@
     });
     browserNotice.hidden = false;
   };
-  if (typeof IS_CONFIGURED === "undefined" || !IS_CONFIGURED || typeof db === "undefined") { showBrowserNotice(); return; }
+  if (typeof IS_CONFIGURED === "undefined" || !IS_CONFIGURED || typeof db === "undefined") { showBrowserNotice(); revealWelcome(); return; }
   try {
     const { data, error } = await db.from("store_settings").select("*").limit(1).maybeSingle();
     if (error || !data) return;
@@ -102,6 +103,10 @@
       announcementMessage.hidden = !noticeMessage;
       announcementCode.textContent = noticeCode;
       announcementPromo.hidden = !noticeCode;
+      // Keep the promo area completely out of the layout when no code is set.
+      // The inline display state also protects mobile browsers using older cached CSS.
+      announcementPromo.style.display = noticeCode ? "flex" : "none";
+      announcementCopy.disabled = !noticeCode;
       announcementContinue.textContent = String(data.announcement_button_text || "Continue").trim() || "Continue";
       const dismiss = () => {
         announcement.hidden = true;
@@ -117,4 +122,5 @@
       announcement.hidden = false;
     }
   } catch (_) { /* The order button remains available even when settings are unavailable. */ }
+  finally { revealWelcome(); }
 })();

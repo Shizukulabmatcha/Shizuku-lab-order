@@ -1,0 +1,47 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+
+const source = fs.readFileSync(require("node:path").join(__dirname, "app.js"), "utf8");
+const pricingBlock = source.slice(source.indexOf("function originalPrice"), source.indexOf("function escapeHtml"));
+const bundleBlock = source.slice(source.indexOf("function isBundle"), source.indexOf("function productStock"));
+
+function pricingContext(store, menu = []) {
+  const context = { state: { store, menu, productGroups: [] }, console };
+  vm.createContext(context);
+  vm.runInContext(`${pricingBlock}\n${bundleBlock}`, context);
+  return context;
+}
+
+test("selected-product sale only affects selected products", () => {
+  const context = pricingContext({
+    storewide_sale_enabled: true,
+    storewide_sale_percent: 10,
+    storewide_sale_scope: "selected",
+    storewide_sale_product_ids: ["1"],
+  });
+  assert.equal(context.salePrice({ id: 1, price: 10 }), 9);
+  assert.equal(context.salePrice({ id: 2, price: 10 }), 10);
+});
+
+test("Mix & Matcha follows option prices and updates selected total", () => {
+  const drinks = [
+    { id: 1, name: "Matcha", price: 5.9, is_available: true, is_bundle: false },
+    { id: 2, name: "Houjicha", price: 6.9, is_available: true, is_bundle: false },
+  ];
+  const bundle = {
+    id: 28,
+    name: "Mix & Matcha",
+    category: "Bundle of Two",
+    price: 0,
+    is_bundle: true,
+    bundle_pricing_mode: "sum_selected",
+    bundle_product_ids: ["1", "2"],
+    bundle_option_prices: { "2": 7.5 },
+  };
+  const context = pricingContext({ storewide_sale_enabled: false }, drinks);
+  assert.equal(context.bundleStartingPrice(bundle), 11.8);
+  assert.equal(context.selectedBundlePrice(bundle, drinks[0], drinks[1]), 13.4);
+  assert.equal(context.selectedBundlePrice(bundle, drinks[1], drinks[1]), 15);
+});

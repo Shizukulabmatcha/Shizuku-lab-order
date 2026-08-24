@@ -491,7 +491,7 @@ async function cancelOrder(id) {
 /* ---- menu (products) CRUD — unchanged from before ---- */
 function newMenuItem() {
   const firstGroup = astate.productGroups[0];
-  astate.editing = { id: null, enabled_option_group_ids: [], group_id: firstGroup?.id || null, category: firstGroup?.name || "Signature", name: "", description: "", price: 0, discount_price: null, image_url: "", is_available: true, is_bundle: false, bundle_product_ids: [], stock: 0, sort_order: astate.menu.length + 1 };
+  astate.editing = { id: null, enabled_option_group_ids: [], group_id: firstGroup?.id || null, category: firstGroup?.name || "Signature", name: "", description: "", price: 0, discount_price: null, image_url: "", is_available: true, is_bundle: false, bundle_product_ids: [], bundle_pricing_mode: "fixed", bundle_selection_count: 2, bundle_option_prices: {}, stock: 0, sort_order: astate.menu.length + 1 };
   render();
 }
 function editMenuItem(id) {
@@ -514,6 +514,14 @@ function onEditGroup(value) {
 function toggleBundleProduct(productId, checked) {
   const ids = Array.isArray(astate.editing.bundle_product_ids) ? astate.editing.bundle_product_ids.map(String) : [];
   astate.editing.bundle_product_ids = checked ? [...new Set([...ids, String(productId)])] : ids.filter((id) => id !== String(productId));
+  if (!checked && astate.editing.bundle_option_prices) delete astate.editing.bundle_option_prices[String(productId)];
+}
+function setBundleOptionPrice(productId, value) {
+  const prices = astate.editing.bundle_option_prices && typeof astate.editing.bundle_option_prices === "object"
+    ? { ...astate.editing.bundle_option_prices } : {};
+  if (value === "") delete prices[String(productId)];
+  else prices[String(productId)] = Math.max(0, Number(value || 0));
+  astate.editing.bundle_option_prices = prices;
 }
 
 function toggleProductOptionGroup(groupId, checked) {
@@ -851,6 +859,18 @@ async function saveSettings() {
 }
 
 function onNotificationField(key, value) { astate.notificationDraft[key] = value; }
+function fillCustomerEmailTemplate(template, values) {
+  return String(template || "").replace(/\{(customer_name|order_number|date|time|collection_point|total)\}/g, (_, key) => String(values[key] ?? ""));
+}
+function updateCustomerConfirmationPreviews() {
+  const values = { customer_name:"Shermin", order_number:"SL-SAMPLE", date:"30 Aug 2026", time:"11:30 AM", collection_point:"Near Creamier", total:"$13.80", order_items:"• 1 × Ichigo Matcha Latte\n• 1 × Strawberry Milk" };
+  const emailPreview = document.getElementById("customer-email-template-preview");
+  const emailSubject = document.getElementById("customer-email-subject-preview");
+  const whatsappPreview = document.getElementById("notification-whatsapp-template-preview");
+  if (emailPreview) emailPreview.textContent = `${fillCustomerEmailTemplate(astate.notificationDraft?.customer_email_heading_template,values)}\n\n${fillCustomerEmailTemplate(astate.notificationDraft?.customer_email_message_template,values)}\n\nOrder items\n${values.order_items}\n\nCollection: ${values.date} · ${values.time} · ${values.collection_point}`;
+  if (emailSubject) emailSubject.textContent = fillCustomerEmailTemplate(astate.notificationDraft?.customer_email_subject_template,values);
+  if (whatsappPreview) whatsappPreview.textContent = fillWhatsAppConfirmationTemplate(astate.settingsDraft?.whatsapp_confirmation_template,values);
+}
 async function saveNotificationSettings() {
   if (!astate.notificationDraft) return;
   const draft = astate.notificationDraft;
@@ -869,15 +889,28 @@ async function saveNotificationSettings() {
     alert_new_order: !!draft.alert_new_order,
     alert_payment_proof: !!draft.alert_payment_proof,
     alert_live_chat: draft.alert_live_chat !== false,
+    customer_email_enabled: draft.customer_email_enabled !== false,
+    customer_email_subject_template: String(draft.customer_email_subject_template || "Order received · {order_number}").trim(),
+    customer_email_heading_template: String(draft.customer_email_heading_template || "We’ve received your order").trim(),
+    customer_email_message_template: String(draft.customer_email_message_template || "Thank you for ordering with Shizuku Lab. Here is a copy of your order.").trim(),
   };
   // Update the existing row so the private webhook secret (configured only in
   // Supabase) is never overwritten by values coming from the browser.
   const { data, error } = await db.from("notification_settings").update(fields).eq("id", 1).select().single();
-  if (button) { button.textContent = "Save notification settings"; button.disabled = false; }
-  if (error) { alert("Could not save notification settings: " + error.message); return; }
+  if (error) { if (button) { button.textContent = "Save confirmation settings"; button.disabled = false; } alert("Could not save notification settings: " + error.message); return; }
+  const confirmationFields = {
+    whatsapp_confirmation_enabled: astate.settingsDraft?.whatsapp_confirmation_enabled !== false,
+    whatsapp_confirmation_template: String(astate.settingsDraft?.whatsapp_confirmation_template || DEFAULT_WHATSAPP_CONFIRMATION_TEMPLATE).trim(),
+  };
+  const { data: storeData, error: storeError } = await db.from("store_settings").update(confirmationFields).eq("id", astate.settings.id).select().single();
+  if (button) { button.textContent = "Save confirmation settings"; button.disabled = false; }
+  if (storeError) { alert("Email settings were saved, but WhatsApp settings could not be saved: " + storeError.message); return; }
   astate.notificationSettings = data;
   astate.notificationDraft = { ...data };
-  alert("Notification settings saved.");
+  astate.settings = storeData;
+  astate.settingsDraft = { ...storeData };
+  alert("Email and WhatsApp confirmation settings saved.");
+  render();
 }
 
 function adminEmailIsAllowed() {
@@ -1755,17 +1788,6 @@ function showWhatsAppNumberError(orderId) {
   astate.whatsappError = { orderId: String(orderId), message: "This customer’s phone number is missing or is not a valid Singapore number. Edit the order and save a valid number before trying again." };
   render();
 }
-function updateWhatsAppTemplatePreview() {
-  const preview = document.getElementById("whatsapp-template-preview");
-  if (!preview) return;
-  preview.textContent = fillWhatsAppConfirmationTemplate(astate.settingsDraft?.whatsapp_confirmation_template, {
-    customer_name: "Shermin",
-    date: "16 Aug 2026",
-    time: "11:30 AM",
-    collection_point: "Blk 130A Lift Lobby",
-    order_items: "• 1 × Ichigo Matcha Latte — Less Ice\n• 1 × Strawberry Milk",
-  });
-}
 function sendOrderWhatsApp(orderId) {
   const order = astate.orders.find((row) => String(row.id) === String(orderId));
   if (!order) { astate.whatsappError = { orderId: String(orderId), message: "Could not find this order." }; render(); return; }
@@ -1805,7 +1827,8 @@ function renderOrders() {
     const subtotal = (o.order_items || []).reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
     const discount = redemption ? Math.max(0, subtotal - Number(o.total || 0)) : 0;
     const whatsappUrl = orderWhatsAppUrl(o);
-    const canConfirmByWhatsApp = o.payment_status === "paid" && o.order_status !== "cancelled";
+    const whatsappConfirmationEnabled = astate.settings?.whatsapp_confirmation_enabled !== false;
+    const canConfirmByWhatsApp = whatsappConfirmationEnabled && o.payment_status === "paid" && o.order_status !== "cancelled";
     return `<div class="order-expanded-detail">
       <div class="order-meta">Phone: ${escapeHtml(o.customer_phone || "—")}${o.instagram ? " · @" + escapeHtml(o.instagram) : ""}</div>
       <div class="order-meta">Collection point: <b>${escapeHtml(o.collection_point || "—")}</b></div>
@@ -1826,7 +1849,7 @@ function renderOrders() {
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center;">
         <button class="btn-secondary" onclick="editOrder('${o.id}')">Edit order</button>
         <button class="btn-secondary" onclick="setTab('messages')">Message customer</button>
-        ${canConfirmByWhatsApp ? (whatsappUrl ? `<a class="btn-secondary" style="border-color:#2f8f55!important;color:#267647!important;text-decoration:none;" href="${escapeHtml(whatsappUrl)}" rel="noopener">WhatsApp customer</a>` : `<button class="btn-secondary" style="border-color:#B33333!important;color:#B33333!important;" onclick="showWhatsAppNumberError('${o.id}')">WhatsApp customer</button>`) : `<button class="btn-secondary" disabled title="${o.order_status === "cancelled" ? "Cancelled orders cannot send confirmations" : "Confirm payment before sending"}">WhatsApp customer</button>`}
+        ${canConfirmByWhatsApp ? (whatsappUrl ? `<a class="btn-secondary" style="border-color:#2f8f55!important;color:#267647!important;text-decoration:none;" href="${escapeHtml(whatsappUrl)}" rel="noopener">WhatsApp customer</a>` : `<button class="btn-secondary" style="border-color:#B33333!important;color:#B33333!important;" onclick="showWhatsAppNumberError('${o.id}')">WhatsApp customer</button>`) : `<button class="btn-secondary" disabled title="${!whatsappConfirmationEnabled ? "Turn this on in Notifications" : o.order_status === "cancelled" ? "Cancelled orders cannot send confirmations" : "Confirm payment before sending"}">WhatsApp customer</button>`}
         ${o.order_status !== "cancelled" && (o.payment_status === "submitted" || o.payment_status === "awaiting_payment") ? `<button class="small-btn" onclick="confirmPayment('${o.id}')">✓ Confirm payment</button>` : ""}
         ${o.order_status !== "cancelled" && o.payment_status === "submitted" ? `<button class="link-danger" onclick="rejectPayment('${o.id}')">Reject proof</button>` : ""}
         ${o.payment_status === "awaiting_payment" ? `<span class="hint" style="margin:0;">Check the Instagram DM payment screenshot before confirming.</span>` : ""}
@@ -1959,20 +1982,28 @@ function togglePromoUses(code) { astate.expandedPromoCode = astate.expandedPromo
 async function saveStorewideSale() {
   const enabled=!!astate.settingsDraft?.storewide_sale_enabled;
   const percent=Math.max(0,Math.min(100,Number(astate.settingsDraft?.storewide_sale_percent||0)));
+  const scope=astate.settingsDraft?.storewide_sale_scope === "selected" ? "selected" : "all";
+  const productIds=Array.isArray(astate.settingsDraft?.storewide_sale_product_ids) ? astate.settingsDraft.storewide_sale_product_ids.map(String) : [];
   if(enabled&&percent<=0) return alert("Enter a sale percentage first.");
+  if(enabled&&scope==="selected"&&!productIds.length) return alert("Choose at least one affected product first.");
   const button=document.getElementById("storewide-sale-btn"); if(button){button.disabled=true;button.textContent="Saving…";}
-  const {data,error}=await db.from("store_settings").update({storewide_sale_enabled:enabled,storewide_sale_percent:percent}).eq("id",astate.settings.id).select().single();
+  const {data,error}=await db.from("store_settings").update({storewide_sale_enabled:enabled,storewide_sale_percent:percent,storewide_sale_scope:scope,storewide_sale_product_ids:productIds}).eq("id",astate.settings.id).select().single();
   if(error){if(button){button.disabled=false;button.textContent="Try again";}return alert("Could not save storewide sale: "+error.message);}
   astate.settings=data;astate.settingsDraft={...data};render();
 }
 function toggleStorewideSale(){if(!astate.settingsDraft)return;astate.settingsDraft.storewide_sale_enabled=!astate.settingsDraft.storewide_sale_enabled;saveStorewideSale();}
+function setStorewideSaleScope(value){if(!astate.settingsDraft)return;astate.settingsDraft.storewide_sale_scope=value==="selected"?"selected":"all";render();}
+function toggleStorewideSaleProduct(productId,checked){if(!astate.settingsDraft)return;const ids=Array.isArray(astate.settingsDraft.storewide_sale_product_ids)?astate.settingsDraft.storewide_sale_product_ids.map(String):[];astate.settingsDraft.storewide_sale_product_ids=checked?[...new Set([...ids,String(productId)])]:ids.filter(id=>id!==String(productId));}
 function renderPromosTab() {
   const d = astate.promoDraft;
   const isEditingPromo = !!astate.editingPromoId;
   const selectedProductIds = Array.isArray(d.applicable_product_ids) ? d.applicable_product_ids.map(String) : [];
   const productChoices = astate.menu.map((product) => `<label class="slot" style="cursor:pointer;gap:9px;margin:0 0 7px;padding:10px 12px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A" ${selectedProductIds.includes(String(product.id)) ? "checked" : ""} onchange="togglePromoProduct('${product.id}',this.checked)"><span>${escapeHtml(product.name)}</span></label>`).join("");
   const saleEnabled=!!astate.settingsDraft?.storewide_sale_enabled;
-  const storewide=`<section class="dashboard-card" style="padding:20px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 14px"><h2>Storewide sale</h2><span>${saleEnabled?"LIVE":"Off"}</span></div><div class="hint" style="text-align:left;margin:0 0 14px">One click changes every customer product price. If a product already has a lower special price, the lower price wins; discounts do not stack.</div><div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap"><div class="field" style="margin:0;flex:1"><label>Percentage off</label><input type="number" min="0" max="100" step="1" value="${Number(astate.settingsDraft?.storewide_sale_percent||0)}" oninput="astate.settingsDraft.storewide_sale_percent=this.value"></div><button class="${saleEnabled?"btn-secondary":"btn-primary"}" id="storewide-sale-btn" onclick="toggleStorewideSale()">${saleEnabled?"Stop storewide sale":"Start storewide sale"}</button></div></section>`;
+  const saleScope=astate.settingsDraft?.storewide_sale_scope === "selected" ? "selected" : "all";
+  const saleProductIds=Array.isArray(astate.settingsDraft?.storewide_sale_product_ids)?astate.settingsDraft.storewide_sale_product_ids.map(String):[];
+  const saleChoices=astate.menu.filter(product=>product.is_available!==false).map(product=>`<label class="slot" style="cursor:pointer;gap:9px;margin:0 0 7px;padding:10px 12px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A" ${saleProductIds.includes(String(product.id))?"checked":""} onchange="toggleStorewideSaleProduct('${product.id}',this.checked)"><span>${escapeHtml(product.name)}</span></label>`).join("");
+  const storewide=`<section class="dashboard-card" style="padding:20px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 14px"><h2>Quick sale</h2><span>${saleEnabled?"LIVE":"Off"}</span></div><div class="hint" style="text-align:left;margin:0 0 14px">Run one sale for the whole store or only the products you choose. If a product already has a lower special price, the lower price wins; discounts do not stack.</div><div class="field"><label>Sale affects</label><select onchange="setStorewideSaleScope(this.value)"><option value="all" ${saleScope==="all"?"selected":""}>All products</option><option value="selected" ${saleScope==="selected"?"selected":""}>Selected products only</option></select></div>${saleScope==="selected"?`<div class="field"><label>Affected products</label><div style="max-height:220px;overflow:auto">${saleChoices||`<div class="hint">Add products first.</div>`}</div></div>`:""}<div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap"><div class="field" style="margin:0;flex:1"><label>Percentage off</label><input type="number" min="0" max="100" step="1" value="${Number(astate.settingsDraft?.storewide_sale_percent||0)}" oninput="astate.settingsDraft.storewide_sale_percent=this.value"></div><button class="${saleEnabled?"btn-secondary":"btn-primary"}" id="storewide-sale-btn" onclick="toggleStorewideSale()">${saleEnabled?"Stop sale":"Start sale"}</button></div></section>`;
   const form = `${storewide}<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>${isEditingPromo ? "Edit promo code" : "New promo code"}</h2></div><div class="field"><label>Code</label><input value="${escapeHtml(d.code)}" placeholder="WELCOME10" style="text-transform:uppercase" ${isEditingPromo ? "readonly" : ""} oninput="onPromoField('code',this.value);this.value=this.value.toUpperCase()">${isEditingPromo ? `<div class="hint" style="text-align:left;margin-top:5px">The code stays unchanged so its customer redemption history remains connected.</div>` : ""}</div><div class="field"><label>Discount type</label><select onchange="onPromoField('discount_type',this.value)"><option value="fixed" ${d.discount_type === "fixed" ? "selected" : ""}>Dollar off ($)</option><option value="percent" ${d.discount_type === "percent" ? "selected" : ""}>Percent off (%)</option></select></div><div class="field"><label>Discount value</label><input type="number" min="0.01" step="0.01" value="${escapeHtml(d.discount_value)}" placeholder="1.00" oninput="onPromoField('discount_value',this.value)"></div><div class="field"><label>Minimum spend (optional)</label><input type="number" min="0" step="0.01" value="${escapeHtml(d.minimum_spend)}" placeholder="0.00" oninput="onPromoField('minimum_spend',this.value)"></div><div class="field"><label>Products this promo applies to</label><div class="hint" style="text-align:left;margin:0 0 8px">Leave every product unticked to apply the code to the whole cart.</div><div style="max-height:210px;overflow:auto">${productChoices || `<div class="hint">Add products first.</div>`}</div></div><div class="field"><label>Usage limit (optional)</label><input type="number" min="1" value="${escapeHtml(d.usage_limit)}" placeholder="No limit" oninput="onPromoField('usage_limit',this.value)"></div><div class="field"><label>End date (optional)</label><input type="date" value="${escapeHtml(d.valid_until)}" oninput="onPromoField('valid_until',this.value)"></div><div class="btn-row"><button class="btn-secondary" onclick="clearPromoDraft()">${isEditingPromo ? "Cancel" : "Clear"}</button><button class="btn-primary" id="create-promo-btn" onclick="createPromo()">${isEditingPromo ? "Save changes" : "Create promo"}</button></div></section>`;
   const list = `<section class="dashboard-card"><div class="dashboard-card-head"><h2>Promo codes</h2><span>${astate.promos.length} total</span></div>${astate.promos.length ? astate.promos.map((promo) => {
     const uses = astate.promoRedemptions.filter((row) => String(row.code || "").toUpperCase() === String(promo.code || "").toUpperCase());
@@ -2197,18 +2228,27 @@ function renderSettingsTab() {
 }
 
 function renderNotificationsTab() {
-  const n = astate.notificationDraft || { recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true, alert_live_chat: true };
-  return `<section class="dashboard-card" style="padding:22px;max-width:860px;">
-    <div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Email notifications</h2><span>${n.enabled ? "On" : "Off"}</span></div>
-    <p class="hint" style="text-align:left;margin:0 0 16px;">Choose which Shizuku Lab activity should send an email.</p>
+  const n = astate.notificationDraft || { recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true, alert_live_chat: true, customer_email_enabled:true };
+  const s = astate.settingsDraft || {};
+  const values = { customer_name:"Shermin", order_number:"SL-SAMPLE", date:"30 Aug 2026", time:"11:30 AM", collection_point:"Near Creamier", total:"$13.80", order_items:"• 1 × Ichigo Matcha Latte\n• 1 × Strawberry Milk" };
+  const emailSubject = fillCustomerEmailTemplate(n.customer_email_subject_template || "Order received · {order_number}",values);
+  const emailPreview = `${fillCustomerEmailTemplate(n.customer_email_heading_template || "We’ve received your order",values)}\n\n${fillCustomerEmailTemplate(n.customer_email_message_template || "Thank you for ordering with Shizuku Lab. Here is a copy of your order.",values)}\n\nOrder items\n${values.order_items}\n\nCollection: ${values.date} · ${values.time} · ${values.collection_point}`;
+  const whatsappTemplate = s.whatsapp_confirmation_template || DEFAULT_WHATSAPP_CONFIRMATION_TEMPLATE;
+  const whatsappPreview = fillWhatsAppConfirmationTemplate(whatsappTemplate,values);
+  return `<div style="display:grid;gap:18px;max-width:900px;"><section class="dashboard-card" style="padding:22px;">
+    <div class="dashboard-card-head" style="padding:0 0 16px;"><h2>My email alerts</h2><span>${n.enabled ? "On" : "Off"}</span></div>
+    <p class="hint" style="text-align:left;margin:0 0 16px;">Choose which Shizuku Lab activity should email you as the seller.</p>
     <div class="field"><label>Receive alerts at</label><input type="email" value="${escapeHtml(n.recipient_email || "")}" placeholder="tinghuioh29@gmail.com" oninput="onNotificationField('recipient_email', this.value)"></div>
     <div class="field"><label>Google Apps Script web app URL</label><input value="${escapeHtml(n.webhook_url || "")}" placeholder="Paste the web app URL after you deploy it" oninput="onNotificationField('webhook_url', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">This private link sends the alert to your Gmail. Leave alerts off until your Google setup is complete.</div></div>
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.enabled ? "checked" : ""} onchange="onNotificationField('enabled', this.checked)"><span><b>Turn on email notifications</b></span></label>
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:10px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.alert_new_order !== false ? "checked" : ""} onchange="onNotificationField('alert_new_order', this.checked)"><span>Notify me when a new order is placed</span></label>
     <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.alert_payment_proof !== false ? "checked" : ""} onchange="onNotificationField('alert_payment_proof', this.checked)"><span>Notify me when payment proof is uploaded</span></label>
-    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.alert_live_chat !== false ? "checked" : ""} onchange="onNotificationField('alert_live_chat', this.checked)"><span>Notify me when a customer sends a live chat message</span></label>
-    <button class="btn-primary" id="notification-save-btn" style="width:100%;margin-top:0;" onclick="saveNotificationSettings()">Save notification settings</button>
-  </section>`;
+    <label class="slot" style="cursor:pointer;gap:10px;margin-bottom:0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.alert_live_chat !== false ? "checked" : ""} onchange="onNotificationField('alert_live_chat', this.checked)"><span>Notify me when a customer sends a live chat message</span></label>
+  </section><section class="dashboard-card" style="padding:22px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Customer order confirmations</h2><span>Email + WhatsApp</span></div><p class="hint" style="text-align:left;margin:0 0 16px;">Manage both customer confirmation channels in one place. Each channel has its own on/off switch.</p>
+    <div class="order-card" style="margin-bottom:16px;"><div class="order-top"><b>Email confirmation</b><span>${n.customer_email_enabled !== false ? "On" : "Off"}</span></div><label class="slot" style="cursor:pointer;gap:10px;margin:12px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.customer_email_enabled !== false ? "checked" : ""} onchange="onNotificationField('customer_email_enabled',this.checked)"><span><b>Send email when a customer provides an email address</b><br><span class="hint">The order list and collection details are always included automatically.</span></span></label><div class="field"><label>Email subject</label><input value="${escapeHtml(n.customer_email_subject_template || "Order received · {order_number}")}" oninput="onNotificationField('customer_email_subject_template',this.value);updateCustomerConfirmationPreviews()"></div><div class="field"><label>Email heading</label><input value="${escapeHtml(n.customer_email_heading_template || "We’ve received your order")}" oninput="onNotificationField('customer_email_heading_template',this.value);updateCustomerConfirmationPreviews()"></div><div class="field"><label>Email message</label><textarea rows="3" oninput="onNotificationField('customer_email_message_template',this.value);updateCustomerConfirmationPreviews()">${escapeHtml(n.customer_email_message_template || "Thank you for ordering with Shizuku Lab. Here is a copy of your order.")}</textarea></div><div class="hint" style="text-align:left;margin:-4px 0 10px;">Variables: <code>{customer_name}</code> <code>{order_number}</code> <code>{date}</code> <code>{time}</code> <code>{collection_point}</code> <code>{total}</code></div><div class="ref-note"><b>Subject</b><div id="customer-email-subject-preview" style="margin-top:5px;">${escapeHtml(emailSubject)}</div><div style="border-top:1px solid #dfd8ca;margin:12px 0;"></div><b>Email preview</b><div id="customer-email-template-preview" style="white-space:pre-wrap;line-height:1.55;margin-top:7px;">${escapeHtml(emailPreview)}</div></div></div>
+    <div class="order-card"><div class="order-top"><b>WhatsApp confirmation</b><span>${s.whatsapp_confirmation_enabled !== false ? "On" : "Off"}</span></div><label class="slot" style="cursor:pointer;gap:10px;margin:12px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.whatsapp_confirmation_enabled !== false ? "checked" : ""} onchange="onSettingsField('whatsapp_confirmation_enabled',this.checked)"><span><b>Show WhatsApp customer button on confirmed orders</b></span></label><div class="field"><label>WhatsApp message</label><textarea rows="6" oninput="onSettingsField('whatsapp_confirmation_template',this.value);updateCustomerConfirmationPreviews()">${escapeHtml(whatsappTemplate)}</textarea></div><div class="hint" style="text-align:left;margin:-4px 0 10px;">Variables: <code>{customer_name}</code> <code>{date}</code> <code>{time}</code> <code>{collection_point}</code> <code>{order_items}</code></div><div class="ref-note"><b>WhatsApp preview</b><div id="notification-whatsapp-template-preview" style="white-space:pre-wrap;line-height:1.55;margin-top:7px;">${escapeHtml(whatsappPreview)}</div></div></div>
+    <button class="btn-primary" id="notification-save-btn" style="width:100%;margin-top:16px;" onclick="saveNotificationSettings()">Save confirmation settings</button>
+  </section></div>`;
 }
 
 function cmsField(label, key, placeholder = "", rows = 0) {
@@ -2368,9 +2408,7 @@ function renderDesignTab() {
 }
 
 function renderWordingTab() {
-  const whatsappTemplate = astate.settingsDraft?.whatsapp_confirmation_template || DEFAULT_WHATSAPP_CONFIRMATION_TEMPLATE;
-  const whatsappPreview = fillWhatsAppConfirmationTemplate(whatsappTemplate, { customer_name:"Shermin", date:"16 Aug 2026", time:"11:30 AM", collection_point:"Blk 130A Lift Lobby", order_items:"• 1 × Ichigo Matcha Latte — Less Ice\n• 1 × Strawberry Milk" });
-  return `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Customer wording</h2><span>Main customer-facing titles</span></div>${cmsField("Store name","store_name","Shizuku Lab")}${cmsField("Store tagline","store_tagline","雫ラボ · crafted drop by drop")}${cmsField("Menu heading","menu_heading","メニュー · DRINK MENU")}${cmsField("Reviews heading","reviews_heading","お客様の声 · REVIEWS")}${cmsField("Loyalty programme name","loyalty_heading","Shizuku Club")}${cmsField("Chat heading","chat_heading","Message us")}<div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:6px;">WhatsApp order confirmation</div><div class="hint" style="text-align:left;margin-bottom:12px;">Edit the message opened by the WhatsApp customer button. Keep any variables you want inserted automatically.</div><div class="field"><label>Confirmation message</label><textarea rows="5" oninput="onSettingsField('whatsapp_confirmation_template',this.value);updateWhatsAppTemplatePreview()">${escapeHtml(whatsappTemplate)}</textarea></div><div class="hint" style="text-align:left;margin:-5px 0 12px;">Available variables: <code>{customer_name}</code> <code>{date}</code> <code>{time}</code> <code>{collection_point}</code></div><div class="ref-note"><b>Message preview</b><div id="whatsapp-template-preview" style="margin-top:8px;white-space:pre-wrap;line-height:1.55;">${escapeHtml(whatsappPreview)}</div></div><div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:6px;">Track order wording</div><div class="hint" style="text-align:left;margin-bottom:14px;">Edit every main label and every order-status message shown to customers.</div>${cmsField("Page heading","track_order_heading","Track my order")}${cmsField("Intro sentence","track_intro_text","Enter either your order number or the phone number used at checkout.",2)}<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">${cmsField("Order number label","track_order_number_label","Order number")}${cmsField("Phone number label","track_phone_label","Phone number")}${cmsField("Between fields","track_or_text","OR")}${cmsField("Track button","track_button_text","Track order")}${cmsField("Live updates label","track_live_updates_text","LIVE UPDATES")}${cmsField("Refresh button","track_refresh_text","Refresh now")}${cmsField("Order detail label","track_order_label","Order")}${cmsField("Pickup detail label","track_pickup_label","Pickup")}${cmsField("Stage 1","track_stage_payment","Payment review")}${cmsField("Stage 2","track_stage_confirmed","Confirmed")}${cmsField("Stage 3","track_stage_preparing","Preparing")}${cmsField("Stage 4","track_stage_ready","Ready")}</div><div class="divider"></div>${trackStatusFields("Awaiting payment","track_awaiting","Awaiting payment","Please complete payment and submit your payment screenshot.")}${trackStatusFields("Payment under review","track_review","Payment under review","We’ll confirm your order once your payment proof is verified.")}${trackStatusFields("Order confirmed","track_confirmed","Order confirmed","Payment verified — we’ll prepare your order closer to pickup.")}${trackStatusFields("Preparing","track_preparing","Preparing your order","We’re freshly preparing your drinks now.")}${trackStatusFields("Ready","track_ready","Ready for collection","Your order is ready — see you at your pickup time!")}${trackStatusFields("Collected","track_collected","Collected with care ✨","We hope you enjoyed every sip. Looking forward to making your next Shizuku drink.")}${trackStatusFields("Cancelled","track_cancelled","Order cancelled","This order can no longer accept payment. Please place a new order.")}${trackStatusFields("Payment rejected","track_rejected","Payment proof needs attention","Please upload a new payment screenshot.")}${cmsSaveButton()}</section>`;
+  return `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Customer wording</h2><span>Main customer-facing titles</span></div>${cmsField("Store name","store_name","Shizuku Lab")}${cmsField("Store tagline","store_tagline","雫ラボ · crafted drop by drop")}${cmsField("Menu heading","menu_heading","メニュー · DRINK MENU")}${cmsField("Reviews heading","reviews_heading","お客様の声 · REVIEWS")}${cmsField("Loyalty programme name","loyalty_heading","Shizuku Club")}${cmsField("Chat heading","chat_heading","Message us")}<div class="divider"></div><div class="display" style="font-size:20px;margin-bottom:6px;">Track order wording</div><div class="hint" style="text-align:left;margin-bottom:14px;">Edit every main label and every order-status message shown to customers. Email and WhatsApp confirmations are together under Notifications.</div>${cmsField("Page heading","track_order_heading","Track my order")}${cmsField("Intro sentence","track_intro_text","Enter either your order number or the phone number used at checkout.",2)}<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">${cmsField("Order number label","track_order_number_label","Order number")}${cmsField("Phone number label","track_phone_label","Phone number")}${cmsField("Between fields","track_or_text","OR")}${cmsField("Track button","track_button_text","Track order")}${cmsField("Live updates label","track_live_updates_text","LIVE UPDATES")}${cmsField("Refresh button","track_refresh_text","Refresh now")}${cmsField("Order detail label","track_order_label","Order")}${cmsField("Pickup detail label","track_pickup_label","Pickup")}${cmsField("Stage 1","track_stage_payment","Payment review")}${cmsField("Stage 2","track_stage_confirmed","Confirmed")}${cmsField("Stage 3","track_stage_preparing","Preparing")}${cmsField("Stage 4","track_stage_ready","Ready")}</div><div class="divider"></div>${trackStatusFields("Awaiting payment","track_awaiting","Awaiting payment","Please complete payment and submit your payment screenshot.")}${trackStatusFields("Payment under review","track_review","Payment under review","We’ll confirm your order once your payment proof is verified.")}${trackStatusFields("Order confirmed","track_confirmed","Order confirmed","Payment verified — we’ll prepare your order closer to pickup.")}${trackStatusFields("Preparing","track_preparing","Preparing your order","We’re freshly preparing your drinks now.")}${trackStatusFields("Ready","track_ready","Ready for collection","Your order is ready — see you at your pickup time!")}${trackStatusFields("Collected","track_collected","Collected with care ✨","We hope you enjoyed every sip. Looking forward to making your next Shizuku drink.")}${trackStatusFields("Cancelled","track_cancelled","Order cancelled","This order can no longer accept payment. Please place a new order.")}${trackStatusFields("Payment rejected","track_rejected","Payment proof needs attention","Please upload a new payment screenshot.")}${cmsSaveButton()}</section>`;
 }
 
 function trackStatusFields(label, prefix, title, note) {
@@ -2454,13 +2492,14 @@ function renderEditOverlay() {
       <div class="field"><label>Name</label><input value="${item.name}" oninput="onEditField('name', this.value)"></div>
       <div class="field"><label>Product group</label><select onchange="onEditGroup(this.value)"><option value="">Other</option>${astate.productGroups.map((group) => `<option value="${group.id}" ${String(item.group_id) === String(group.id) ? "selected" : ""}>${escapeHtml(group.name)}</option>`).join("")}</select><div class="hint" style="text-align:left;margin-top:5px;">Shown as a large group heading on the ordering page.</div></div>
       <div class="field"><label>Description</label><textarea rows="2" oninput="onEditField('description', this.value)">${item.description || ""}</textarea></div>
-      <div class="field"><label>Original price (SGD)</label><input type="number" min="0" step="0.01" value="${item.price}" oninput="onEditField('price', this.value)"></div>
+      <div class="field"><label>${item.is_bundle && item.bundle_pricing_mode === "sum_selected" ? "Base price / service fee (SGD, optional)" : "Original price (SGD)"}</label><input type="number" min="0" step="0.01" value="${item.price}" oninput="onEditField('price', this.value)">${item.is_bundle && item.bundle_pricing_mode === "sum_selected" ? `<div class="hint" style="text-align:left;margin-top:5px;">The selected drink prices are added automatically. Keep this at $0 unless you want an extra base fee.</div>` : ""}</div>
       <div class="field"><label>Discount price (SGD, optional)</label><input type="number" min="0" step="0.01" value="${item.discount_price ?? ""}" placeholder="Leave blank if there is no sale" oninput="onEditField('discount_price', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">Customers will see the original price crossed out and the discount price in green.</div></div>
       <div class="field"><label>Product image</label><input value="${item.image_url || ""}" placeholder="Upload below or paste image URL" oninput="onEditField('image_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'products')">${item.image_url ? `<img src="${escapeHtml(item.image_url)}" alt="Product preview" style="display:block;width:100%;height:150px;object-fit:cover;border:1px solid #E1D9C8;border-radius:12px;margin-top:8px;">` : ""}</div>
       <div class="field"><label>Weekly starting stock</label><input type="number" min="0" value="${item.stock || 0}" oninput="onEditField('stock', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">Available stock refreshes automatically every Monday. Orders from previous weeks will not reduce this week's stock.</div></div>
-      <div class="field" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="bundle-check" ${item.is_bundle ? "checked" : ""} onchange="onEditField('is_bundle', this.checked);render()" style="width:auto;"><label style="margin:0;" for="bundle-check">This is a Bundle of Two</label></div>
+      <div class="field" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="bundle-check" ${item.is_bundle ? "checked" : ""} onchange="onEditField('is_bundle', this.checked);render()" style="width:auto;"><label style="margin:0;" for="bundle-check">This is a Bundle / Mix & Matcha</label></div>
+      ${item.is_bundle ? `<div class="field"><label>Bundle price style</label><select onchange="onEditField('bundle_pricing_mode',this.value);render()"><option value="fixed" ${item.bundle_pricing_mode !== "sum_selected" ? "selected" : ""}>Fixed bundle price</option><option value="sum_selected" ${item.bundle_pricing_mode === "sum_selected" ? "selected" : ""}>Add selected product prices automatically</option></select><div class="hint" style="text-align:left;margin-top:5px;">Fixed keeps Shizuku Duo at one price. Automatic pricing changes the total as customers choose each drink.</div></div>` : ""}
       <div class="field"><label>Customisation shown for this drink</label><div class="hint" style="text-align:left;margin:0 0 7px;">Tick only the options that apply. Unticked groups will not appear to customers.</div>${astate.optionGroups.filter((group) => group.is_visible !== false).map((group) => `<label class="slot" style="cursor:pointer;gap:10px;margin:7px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${(item.enabled_option_group_ids || []).map(String).includes(String(group.id)) ? "checked" : ""} onchange="toggleProductOptionGroup('${group.id}',this.checked)"><span>${escapeHtml(group.name)}</span></label>`).join("")}</div>
-      ${item.is_bundle ? `<div class="field"><label>Drinks customers can choose in this bundle</label><div class="hint" style="text-align:left;margin:0 0 7px;">Tick the drinks you want to allow. Leave all unticked to use the normal latte choices.</div>${astate.menu.filter((product) => String(product.id) !== String(item.id) && !product.is_bundle).map((product) => `<label class="slot" style="cursor:pointer;gap:10px;margin:7px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${Array.isArray(item.bundle_product_ids) && item.bundle_product_ids.map(String).includes(String(product.id)) ? "checked" : ""} onchange="toggleBundleProduct('${product.id}',this.checked)"><span>${escapeHtml(product.name)}</span></label>`).join("")}</div>` : ""}
+      ${item.is_bundle ? `<div class="field"><label>Products customers can choose</label><div class="hint" style="text-align:left;margin:0 0 7px;">Tick each eligible drink. For automatic pricing, edit the price beside the selected product or leave it blank to follow that product’s current price.</div>${astate.menu.filter((product) => String(product.id) !== String(item.id) && !product.is_bundle).map((product) => { const selected = Array.isArray(item.bundle_product_ids) && item.bundle_product_ids.map(String).includes(String(product.id)); const override = item.bundle_option_prices && Object.prototype.hasOwnProperty.call(item.bundle_option_prices,String(product.id)) ? item.bundle_option_prices[String(product.id)] : ""; return `<div class="slot" style="display:grid;grid-template-columns:auto minmax(0,1fr) 120px;gap:10px;margin:7px 0;align-items:center;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${selected ? "checked" : ""} onchange="toggleBundleProduct('${product.id}',this.checked);render()"><span>${escapeHtml(product.name)}<br><span class="hint" style="margin:0;">Menu price ${money(product.discount_price || product.price)}</span></span>${item.bundle_pricing_mode === "sum_selected" && selected ? `<input type="number" min="0" step="0.01" value="${escapeHtml(override)}" placeholder="${Number(product.discount_price || product.price).toFixed(2)}" aria-label="Mix and Match price for ${escapeHtml(product.name)}" oninput="setBundleOptionPrice('${product.id}',this.value)">` : `<span></span>`}</div>`; }).join("")}</div>` : ""}
       <div class="field" style="display:flex;align-items:center;gap:8px;">
         <input type="checkbox" id="avail-check" ${item.is_available ? "checked" : ""} onchange="onEditField('is_available', this.checked)" style="width:auto;">
         <label style="margin:0;" for="avail-check">Available on menu</label>
@@ -2539,17 +2578,6 @@ function render() {
     badge.setAttribute("aria-label", "Slow Studio workspace");
     badge.textContent = "SS";
     adminLogo.before(badge);
-  }
-  if (astate.tab === "wording") {
-    const whatsappTextarea = document.querySelector('textarea[oninput*="updateWhatsAppTemplatePreview"]');
-    if (whatsappTextarea) whatsappTextarea.rows = 7;
-    const hints = [...document.querySelectorAll(".hint")];
-    const variableHint = hints.find((node) => node.textContent.includes("Available variables:"));
-    if (variableHint && !variableHint.textContent.includes("{order_items}")) {
-      const orderItemsVariable = document.createElement("code");
-      orderItemsVariable.textContent = "{order_items}";
-      variableHint.append(" ", orderItemsVariable);
-    }
   }
   if (astate.tab === "theme_design" && astate.designTopic === "customise") requestAnimationFrame(updateDesignPreview);
 }
