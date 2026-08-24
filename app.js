@@ -1428,6 +1428,8 @@ function renderBundle() {
   const currentBundlePrice = drink1 && drink2
     ? selectedBundlePrice(bundle, drink1, drink2, state.bundle.drink1Options, state.bundle.drink2Options)
     : bundleStartingPrice(bundle);
+  const showChoicePrices = bundle.bundle_show_choice_prices === true;
+  const bundleComplete = Boolean(drink1 && drink2);
   return `
     ${header()}
     <div class="screen">
@@ -1447,7 +1449,7 @@ function renderBundle() {
         <div class="bundle-drinks">
           ${drinks.map((drink) => `
             <button type="button" ${isSoldOut(drink) ? "disabled" : ""} class="slot ${drink1 && String(drink1.id) === String(drink.id) ? "active" : ""}" onclick="selectBundleDrink(1,'${escapeHtml(drink.id)}')">
-              <div><div class="slot-day">${escapeHtml(drink.name)}</div><div class="slot-time">${isDynamicBundle(bundle) ? money(bundleOptionPrice(bundle, drink)) : (hasDiscount(drink) ? `${money(salePrice(drink))} <span class="original-price">${money(originalPrice(drink))}</span>` : money(salePrice(drink)))} ${stockMarkup(drink)}</div></div>
+              <div><div class="slot-day">${escapeHtml(drink.name)}</div><div class="slot-time">${showChoicePrices ? (isDynamicBundle(bundle) ? money(bundleOptionPrice(bundle, drink)) : (hasDiscount(drink) ? `${money(salePrice(drink))} <span class="original-price">${money(originalPrice(drink))}</span>` : money(salePrice(drink)))) : ""} ${stockMarkup(drink)}</div></div>
             </button>
           `).join("")}
         </div>
@@ -1459,7 +1461,7 @@ function renderBundle() {
         <div class="bundle-drinks">
           ${drinks.map((drink) => `
             <button type="button" ${isSoldOut(drink) ? "disabled" : ""} class="slot ${drink2 && String(drink2.id) === String(drink.id) ? "active" : ""}" onclick="selectBundleDrink(2,'${escapeHtml(drink.id)}')">
-              <div><div class="slot-day">${escapeHtml(drink.name)}</div><div class="slot-time">${isDynamicBundle(bundle) ? money(bundleOptionPrice(bundle, drink)) : (hasDiscount(drink) ? `${money(salePrice(drink))} <span class="original-price">${money(originalPrice(drink))}</span>` : money(salePrice(drink)))} ${stockMarkup(drink)}</div></div>
+              <div><div class="slot-day">${escapeHtml(drink.name)}</div><div class="slot-time">${showChoicePrices ? (isDynamicBundle(bundle) ? money(bundleOptionPrice(bundle, drink)) : (hasDiscount(drink) ? `${money(salePrice(drink))} <span class="original-price">${money(originalPrice(drink))}</span>` : money(salePrice(drink)))) : ""} ${stockMarkup(drink)}</div></div>
             </button>
           `).join("")}
         </div>
@@ -1467,7 +1469,7 @@ function renderBundle() {
       </div>
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
-      <button class="primary-btn" ${isSoldOut(bundle) ? "disabled" : ""} onclick="addBundleToCart()">${isSoldOut(bundle) ? "Sold out" : `${isDynamicBundle(bundle) ? "Add Mix & Matcha" : "Add bundle to cart"} · ${money(currentBundlePrice)}`}</button>
+      <button class="primary-btn" ${isSoldOut(bundle) || !bundleComplete ? "disabled" : ""} onclick="addBundleToCart()">${isSoldOut(bundle) ? "Sold out" : !bundleComplete ? "Choose both drinks" : `${isDynamicBundle(bundle) ? "Add Mix & Matcha" : "Add bundle to cart"} · ${money(currentBundlePrice)}`}</button>
     </div></div>
   `;
 }
