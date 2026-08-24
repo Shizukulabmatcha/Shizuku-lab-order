@@ -67,6 +67,14 @@ const astate = {
   suppliers: [],
   wholesaleItems: [],
   inspirationIdeas: [],
+  teamMembers: [],
+  activityLog: [],
+  currentUser: null,
+  currentTeamMember: null,
+  studioSettings: { country: "Singapore", currency: "SGD", language: "English" },
+  teamDraft: null,
+  editingTeamId: null,
+  teamSection: "team",
   supplierDraft: null,
   wholesaleDraft: null,
   ideaDraft: null,
@@ -82,7 +90,12 @@ const astate = {
   editing: null,
 };
 
-function money(n) { return `$${Number(n).toFixed(2)}`; }
+function money(n) {
+  const currency = String(astate.settings?.store_currency || astate.studioSettings?.currency || "SGD").toUpperCase();
+  const locale = currency === "MYR" ? "en-MY" : currency === "CNY" ? "zh-CN" : "en-SG";
+  try { return new Intl.NumberFormat(locale, { style: "currency", currency }).format(Number(n || 0)); }
+  catch (_) { return `${currency} ${Number(n || 0).toFixed(2)}`; }
+}
 function escapeHtml(value) {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
@@ -281,13 +294,16 @@ async function loadAll(options = {}) {
       astate.loyaltyTransactions = loyaltyTransactions || [];
       astate.notificationSettings = notificationSettings || { id: 1, recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true, alert_live_chat: true };
       astate.notificationDraft = { ...astate.notificationSettings };
-      const [inventoryResult, recipeResult, supplierResult, wholesaleResult, inspirationResult, marginGuideResult] = await Promise.all([
+      const [inventoryResult, recipeResult, supplierResult, wholesaleResult, inspirationResult, marginGuideResult, teamResult, activityResult, studioSettingsResult] = await Promise.all([
         db.from("inventory_items").select("*").order("name"),
         db.from("product_recipes").select("*").order("product_id"),
         db.from("suppliers").select("*").order("name"),
         db.from("wholesale_products").select("*").order("created_at", { ascending: false }),
         db.from("inspiration_ideas").select("*").order("is_pinned", { ascending: false }).order("created_at", { ascending: false }),
         db.from("margin_guide_settings").select("*").eq("id", 1).maybeSingle(),
+        db.from("studio_users").select("*").order("created_at"),
+        db.from("activity_log").select("*").order("created_at", { ascending: false }).limit(250),
+        db.from("studio_settings").select("*").eq("id", "main").maybeSingle(),
       ]);
       astate.inventoryReady = !inventoryResult.error && !recipeResult.error;
       astate.inventory = inventoryResult.data || [];
@@ -296,6 +312,19 @@ async function loadAll(options = {}) {
       astate.wholesaleItems = wholesaleResult.data || [];
       astate.inspirationIdeas = inspirationResult.data || [];
       if (marginGuideResult.data) astate.marginGuide = marginGuideResult.data;
+      if (teamResult.error) console.warn("Could not load workspace team:", teamResult.error.message);
+      if (activityResult.error) console.warn("Could not load activity history:", activityResult.error.message);
+      if (studioSettingsResult.error) console.warn("Could not load workspace settings:", studioSettingsResult.error.message);
+      astate.teamMembers = teamResult.data || [];
+      astate.activityLog = activityResult.data || [];
+      astate.studioSettings = {
+        country: "Singapore",
+        currency: "SGD",
+        language: "English",
+        ...(studioSettingsResult.data?.data || {}),
+      };
+      const currentEmail = String(astate.currentUser?.email || "").toLowerCase();
+      astate.currentTeamMember = astate.teamMembers.find((member) => String(member.email || "").toLowerCase() === currentEmail) || astate.currentTeamMember;
       if (!astate.selectedAvailabilityDate) astate.selectedAvailabilityDate = localDateText(new Date());
       if (!astate.calendarMonth) astate.calendarMonth = astate.selectedAvailabilityDate.slice(0, 7) + "-01";
       setAvailabilityDraft(astate.selectedAvailabilityDate);
@@ -491,7 +520,7 @@ async function cancelOrder(id) {
 /* ---- menu (products) CRUD — unchanged from before ---- */
 function newMenuItem() {
   const firstGroup = astate.productGroups[0];
-  astate.editing = { id: null, enabled_option_group_ids: [], group_id: firstGroup?.id || null, category: firstGroup?.name || "Signature", name: "", description: "", price: 0, discount_price: null, image_url: "", is_available: true, is_bundle: false, bundle_product_ids: [], bundle_pricing_mode: "fixed", bundle_selection_count: 2, bundle_option_prices: {}, stock: 0, sort_order: astate.menu.length + 1 };
+  astate.editing = { id: null, enabled_option_group_ids: [], group_id: firstGroup?.id || null, category: firstGroup?.name || "Signature", name: "", description: "", price: 0, discount_price: null, image_url: "", is_available: true, show_price_on_menu: true, is_bundle: false, bundle_product_ids: [], bundle_pricing_mode: "fixed", bundle_selection_count: 2, bundle_option_prices: {}, stock: 0, sort_order: astate.menu.length + 1 };
   render();
 }
 function editMenuItem(id) {
@@ -915,8 +944,8 @@ async function saveNotificationSettings() {
 
 function adminEmailIsAllowed() {
   const email = String(astate.loginEmail || "").trim().toLowerCase();
-  if (email !== String(ADMIN_EMAIL || "").toLowerCase()) {
-    astate.loginMessage = "Please use the Gmail address linked to your Supabase account.";
+  if (!email || !email.includes("@")) {
+    astate.loginMessage = "Please enter the email address linked to your team account.";
     render();
     return false;
   }
@@ -987,7 +1016,16 @@ async function checkAdminSession() {
   const { data, error } = await db.auth.getUser();
   if (error || !data?.user) return;
   const email = String(data.user.email || "").toLowerCase();
-  if (email === String(ADMIN_EMAIL || "").toLowerCase()) {
+  const { data: member, error: memberError } = await db
+    .from("studio_users")
+    .select("*")
+    .ilike("email", email)
+    .eq("is_active", true)
+    .maybeSingle();
+  const ownerFallback = email === String(ADMIN_EMAIL || "").toLowerCase();
+  if ((member && !memberError) || ownerFallback) {
+    astate.currentUser = data.user;
+    astate.currentTeamMember = member || { auth_user_id: data.user.id, email, display_name: "Ting", role: "Owner", is_active: true };
     astate.unlocked = true;
     await loadAll();
   } else {
@@ -1000,6 +1038,8 @@ async function checkAdminSession() {
 async function logoutAdmin() {
   if (db) await db.auth.signOut();
   astate.unlocked = false;
+  astate.currentUser = null;
+  astate.currentTeamMember = null;
   astate.loginMessage = "You have signed out.";
   render();
 }
@@ -1021,7 +1061,7 @@ function dashboardStyles() {
     #app.wrap{width:100%;max-width:none!important;margin:0!important;padding:0!important}
     .shop-admin{min-height:100vh;background:#fffaf5;color:#292720;font-family:inherit;display:flex}
     .shop-admin *{box-sizing:border-box}.shop-admin .admin-side{width:248px;flex:0 0 248px;min-height:100vh;padding:28px 16px;border-right:1px solid #eadfd2;background:#fffdf9;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;overflow:hidden}
-    .shop-admin .admin-logo{font-family:Georgia,serif;font-size:27px;font-weight:700;line-height:1.05}.shop-admin .slow-studio-badge{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;margin:0 0 12px 8px;background:#243225;color:#fff;font:700 13px/1 Georgia,serif;letter-spacing:.04em;box-shadow:0 7px 16px rgba(36,50,37,.16)}.shop-admin .admin-caption{margin:6px 8px 32px;color:#75845d;font-size:13px;letter-spacing:.06em}
+    .shop-admin .admin-logo{font-family:Georgia,serif;font-size:27px;font-weight:700;line-height:1.05}.shop-admin .slow-studio-badge{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;margin:0 0 12px 8px;background:#fffdf9;border:1px solid var(--admin-line);overflow:hidden;box-shadow:0 7px 16px rgba(36,50,37,.12)}.shop-admin .slow-studio-badge img{width:100%;height:100%;object-fit:cover;transform:scale(3.15);transform-origin:50% 43%}.shop-admin .admin-caption{margin:6px 8px 32px;color:#75845d;font-size:13px;letter-spacing:.06em}
     .shop-admin .admin-nav-label{margin:0 8px 10px;color:#877d70;font-size:11px;font-weight:800;letter-spacing:.12em}.shop-admin .admin-nav{display:grid;gap:6px;flex:1;min-height:0;overflow-y:auto;align-content:start;padding:0 4px 8px 0}
     .shop-admin .admin-nav button{appearance:none;width:100%;border:0;border-radius:14px;background:transparent;padding:13px 14px;color:#504a42;font:600 15px/1.2 inherit;text-align:left;cursor:pointer}.shop-admin .admin-nav button:hover{background:#f5ede2}.shop-admin .admin-nav button.active{background:#263125;color:#fff;box-shadow:0 10px 24px rgba(47,63,36,.16)}
     .shop-admin .admin-nav-sortable{display:grid;grid-template-columns:minmax(0,1fr) 24px;align-items:center;border-radius:14px}.shop-admin .admin-nav-sortable>button:first-child{min-width:0}.shop-admin .admin-nav-drag{appearance:none;border:0;background:transparent!important;box-shadow:none!important;color:var(--admin-muted)!important;padding:8px 2px!important;width:24px!important;cursor:grab!important;touch-action:none;font-size:17px!important;text-align:center!important}.shop-admin .admin-nav-drag:active{cursor:grabbing!important}.shop-admin .admin-nav-sortable.admin-drag-source{opacity:.45;background:var(--admin-soft)}
@@ -1038,6 +1078,7 @@ function dashboardStyles() {
     .shop-admin{background:var(--admin-bg)!important;color:var(--admin-text)!important}.shop-admin .admin-main{background:var(--admin-bg)!important}.shop-admin .admin-side{background:var(--admin-card)!important;border-color:var(--admin-line)!important}.shop-admin .admin-logo,.shop-admin .admin-title,.shop-admin .tab-page-title,.shop-admin .dashboard-card-head h2{color:var(--admin-text)!important}.shop-admin .admin-caption,.shop-admin .admin-eyebrow,.shop-admin .nav-icon,.shop-admin .link-btn{color:var(--admin-primary)!important}.shop-admin .admin-nav button{color:var(--admin-text)!important}.shop-admin .admin-nav button:hover,.shop-admin .queue-row:hover{background:var(--admin-soft)!important}.shop-admin .admin-nav button.active{background:var(--admin-primary)!important;color:var(--admin-on-primary)!important;box-shadow:var(--admin-shadow)!important}.shop-admin .admin-nav button.active .nav-icon{color:var(--admin-on-primary)!important}.shop-admin .dashboard-card,.shop-admin .stat,.shop-admin .order-card,.shop-admin .summary-card,.shop-admin .slot,.shop-admin .overlay-card,.shop-admin .edit-card,.shop-admin .modal-card{background:var(--admin-card)!important;border-color:var(--admin-line)!important;border-radius:var(--admin-radius)!important;box-shadow:var(--admin-card-shadow)!important}.shop-admin input,.shop-admin textarea,.shop-admin select{background:var(--admin-card)!important;color:var(--admin-text)!important;border-color:var(--admin-line)!important;border-radius:calc(var(--admin-radius) * .65)!important}.shop-admin .btn-primary,.shop-admin .small-btn{background:var(--admin-primary)!important;color:var(--admin-on-primary)!important;border-radius:calc(var(--admin-radius) * .65)!important}.shop-admin .btn-secondary,.shop-admin .open-shop{background:var(--admin-card)!important;color:var(--admin-primary)!important;border-color:var(--admin-primary)!important;border-radius:calc(var(--admin-radius) * .65)!important}.shop-admin .admin-top,.shop-admin .dashboard-card-head,.shop-admin .queue-row,.shop-admin .action,.shop-admin .divider,.shop-admin .row{border-color:var(--admin-line)!important}.shop-admin .stat:nth-child(n){background:var(--admin-card)!important;border-color:var(--admin-line)!important}.shop-admin .admin-subtitle,.shop-admin .tab-page-subtitle,.shop-admin .dashboard-card-head span,.shop-admin .queue-name,.shop-admin .action p,.shop-admin .hint,.shop-admin .label{color:var(--admin-muted)!important}.shop-admin.theme-zen{font-family:'Noto Sans JP','Work Sans',sans-serif}.shop-admin.theme-zen .admin-logo,.shop-admin.theme-zen .admin-title,.shop-admin.theme-zen .tab-page-title,.shop-admin.theme-zen h1,.shop-admin.theme-zen h2{font-family:'Noto Serif JP',Georgia,serif!important}.shop-admin.theme-korean{font-family:'Work Sans',sans-serif}.shop-admin.theme-korean .admin-logo,.shop-admin.theme-korean .admin-title,.shop-admin.theme-korean .tab-page-title,.shop-admin.theme-korean h1,.shop-admin.theme-korean h2{font-family:'Work Sans',sans-serif!important}.shop-admin.theme-editorial{font-family:'Work Sans',sans-serif}.shop-admin.theme-editorial .admin-logo,.shop-admin.theme-editorial .admin-title,.shop-admin.theme-editorial .tab-page-title,.shop-admin.theme-editorial h1,.shop-admin.theme-editorial h2{font-family:Georgia,serif!important;text-transform:uppercase}.shop-admin.theme-retro{font-family:'Work Sans',sans-serif}.shop-admin.theme-retro .admin-logo,.shop-admin.theme-retro .admin-title,.shop-admin.theme-retro .tab-page-title,.shop-admin.theme-retro h1,.shop-admin.theme-retro h2{font-family:Georgia,serif!important}.shop-admin.theme-threed{font-family:'Work Sans',sans-serif}.shop-admin.theme-threed .admin-logo,.shop-admin.theme-threed .admin-title,.shop-admin.theme-threed .tab-page-title,.shop-admin.theme-threed h1,.shop-admin.theme-threed h2{font-family:'Work Sans',sans-serif!important}
     .shop-admin [data-theme-preview]{background:var(--preview-bg)!important;color:var(--preview-text)!important;border-color:var(--preview-primary)!important;box-shadow:var(--preview-shadow)!important}.shop-admin [data-theme-preview] .dashboard-card-head{border-color:color-mix(in srgb,var(--preview-text) 18%,transparent)!important}.shop-admin [data-theme-preview] .dashboard-card-head h2,.shop-admin [data-theme-preview] .dashboard-card-head span{color:var(--preview-text)!important}.shop-admin [data-theme-preview] .theme-preview-screen{background:var(--preview-card)!important;color:var(--preview-text)!important;border-color:color-mix(in srgb,var(--preview-text) 22%,transparent)!important}.shop-admin [data-theme-preview] .theme-preview-button,.shop-admin [data-theme-preview] .btn-primary{background:var(--preview-primary)!important;color:var(--preview-bg)!important}.shop-admin [data-theme-preview] .btn-secondary{background:var(--preview-card)!important;color:var(--preview-primary)!important;border-color:var(--preview-primary)!important}
     .costing-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}.costing-table{width:100%;border-collapse:collapse;min-width:860px}.costing-table th,.costing-table td{padding:13px 14px;text-align:left;border-bottom:1px solid var(--admin-line);font-size:13px}.costing-table th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--admin-muted)}.costing-table tbody tr:hover{background:var(--admin-soft)}.idea-board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.idea-card{min-height:190px}.idea-card.idea-archived{opacity:.6}
+    .workspace-role-pill{display:inline-flex;align-items:center;margin-top:12px;padding:7px 11px;border-radius:999px;background:var(--admin-soft);color:var(--admin-primary);font-size:12px;font-weight:800}.team-profile,.team-member-main,.team-member-actions{display:flex;align-items:center;gap:12px}.team-profile{padding:4px 0}.team-profile>div:nth-child(2){flex:1;min-width:0}.team-avatar{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:var(--admin-primary);color:var(--admin-on-primary);font:800 20px/1 Georgia,serif;flex:0 0 auto}.team-avatar.small{width:38px;height:38px;border-radius:12px;font-size:16px}.team-member-actions{justify-content:flex-end;flex-wrap:wrap}.workspace-preference-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.activity-list .queue-row{cursor:default}
     .orders-mobile-list{display:none}.orders-bulk-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px}.orders-bulk-tools button{padding:9px 12px}.orders-table-card{overflow:hidden}.orders-table-wrap{overflow-x:auto}.orders-table{width:100%;border-collapse:collapse;min-width:940px}.orders-table th,.orders-table td{padding:12px 11px;border-bottom:1px solid var(--admin-line);text-align:left;font-size:13px;vertical-align:middle}.orders-table th{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--admin-muted)}.orders-table td small{display:block;margin-top:4px;color:var(--admin-muted)}.orders-table tbody tr:not(.orders-detail-row):hover{background:var(--admin-soft)}.orders-table .btn-secondary{padding:7px 10px}.orders-detail-row td{padding:0 18px 18px;background:var(--admin-soft)}.order-expanded-detail{padding:15px 0}.order-status-step{appearance:none;display:inline-flex;align-items:center;justify-content:center;min-width:92px;padding:8px 13px;border:1px solid var(--admin-line);border-radius:999px;background:var(--admin-soft);color:var(--admin-text);font:750 12px/1 inherit;text-align:center;white-space:nowrap;cursor:pointer;transition:transform .12s ease,filter .12s ease}.order-status-step:hover{filter:brightness(.97);transform:translateY(-1px)}.order-status-step:active{transform:translateY(0)}.order-status-step:disabled{cursor:default;opacity:.8;transform:none}.order-status-pill{display:inline-block;border:1px solid var(--admin-line);border-radius:999px;padding:8px 12px;font-size:11px;color:var(--admin-muted);white-space:nowrap}.status-confirmed,.status-pending,.status-awaiting_confirmation{background:color-mix(in srgb,var(--admin-primary) 12%,var(--admin-card))!important;color:var(--admin-primary)!important}.status-preparing{background:#fff3d8!important;color:#9b6616!important}.status-ready{background:#e3f1ff!important;color:#27628f!important}.status-collected{background:#e4f3e5!important;color:#356b45!important}.status-cancelled{background:#f8e5e2!important;color:#b33333!important}
     @media(max-width:1100px){.shop-admin .dashboard-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
     @media(max-width:800px){
@@ -1080,7 +1121,7 @@ function dashboardStyles() {
       .shop-admin.mobile-nav-left.nav-collapsed .admin-side-bottom{display:block;margin:7px 0 0;padding-top:8px}
       .shop-admin.mobile-nav-left.nav-collapsed .admin-side-bottom .signout-label{display:none}
       .shop-admin.mobile-nav-left.nav-collapsed .admin-side-bottom .link-btn{font-size:18px;padding:7px 3px}
-      .idea-board{grid-template-columns:1fr}.costing-table{min-width:760px}.costing-table th,.costing-table td{padding:10px;font-size:12px}
+      .idea-board{grid-template-columns:1fr}.costing-table{min-width:760px}.costing-table th,.costing-table td{padding:10px;font-size:12px}.workspace-preference-grid{grid-template-columns:1fr}.team-profile,.team-member-main{align-items:flex-start}.team-member-actions{justify-content:flex-start}
       .orders-table-card{display:none}.orders-mobile-list{display:grid;gap:10px}.orders-bulk-tools{position:sticky;top:8px;z-index:20;background:var(--admin-bg);padding:8px 0}.order-compact-card{background:var(--admin-card);border:1px solid var(--admin-line);border-radius:var(--admin-radius);box-shadow:var(--admin-card-shadow);padding:14px}.order-compact-summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start;cursor:pointer}.order-compact-summary.has-select{grid-template-columns:auto minmax(0,1fr) auto}.order-compact-summary>input{width:auto!important;margin-top:3px}.order-compact-summary .mono{font-size:14px}.order-compact-summary>div>div{font-size:13px;margin-top:5px}.order-compact-muted{color:var(--admin-muted)}.order-compact-right{text-align:right;display:grid;gap:7px;justify-items:end;font-size:12px}.order-compact-right>b{font-size:14px}.order-compact-status{margin-top:12px}.order-compact-card .order-expanded-detail{border-top:1px solid var(--admin-line);margin-top:13px;padding-top:13px}.order-status-step{width:100%;min-width:0}
     }
   </style>`;
@@ -1314,6 +1355,8 @@ async function deleteReview(id) { if (!confirm("Delete this review permanently?"
 function renderReviewsTab() { return astate.reviews.length ? astate.reviews.map((item) => `<section class="dashboard-card" style="padding:20px;margin-bottom:14px;"><div class="queue-top"><div><b>${escapeHtml(item.customer_name)}</b><div class="queue-name">${escapeHtml(item.order_number)} · ${"★".repeat(Number(item.rating) || 0)}${"☆".repeat(5-(Number(item.rating)||0))}</div></div><div class="queue-status">${escapeHtml(String(item.status).toUpperCase())}</div></div><p style="line-height:1.6;white-space:pre-wrap;">${escapeHtml(item.review_text)}</p><div style="display:flex;gap:9px;flex-wrap:wrap;"><button class="btn-primary" onclick="setReviewStatus('${item.id}','published')">Publish</button><button class="btn-secondary" onclick="setReviewStatus('${item.id}','hidden')">Hide</button><button class="link-danger" onclick="deleteReview('${item.id}')">Delete</button></div></section>`).join("") : `<div class="dashboard-card"><div class="dashboard-empty">No reviews submitted yet.</div></div>`; }
 function renderDashboardTab() {
   const stats = dashboardStats();
+  const workspaceName = astate.currentTeamMember?.display_name || "Ting";
+  const workspaceRole = astate.currentTeamMember?.role || "Owner";
   const liveOrders = astate.orders.filter((order) => order.order_status !== "cancelled" && order.order_status !== "collected").slice(0, 6);
   const performance = salesPerformance();
   const production = nextPickupProduction();
@@ -1324,7 +1367,7 @@ function renderDashboardTab() {
     : "Not refreshed yet";
   const foodCostWarnings = stats.missingRecipeProducts.map((product) => `<button class="dashboard-warning-link" onclick="focusDashboardIssue('food_cost','${escapeHtml(product.id)}')">${escapeHtml(product.name)} is missing Food Cost →</button>`).join("");
   return `
-    <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${(astate.settings && escapeHtml(astate.settings.store_name)) || "Shizuku Lab"}</h1><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><div class="dashboard-top-actions">${astate.settings?.show_dashboard_refresh !== false ? `<button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing ? "disabled" : ""}>${astate.dashboardRefreshing ? "Refreshing…" : "↻ Refresh"}</button><span class="dashboard-refresh-meta">Last updated: ${escapeHtml(updatedTime)}</span>` : ""}<a class="open-shop" href="order.html">Open customer shop ↗</a></div></div>
+    <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${escapeHtml(workspaceName)}</h1><div class="workspace-role-pill">${escapeHtml(workspaceRole)}</div><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><div class="dashboard-top-actions">${astate.settings?.show_dashboard_refresh !== false ? `<button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing ? "disabled" : ""}>${astate.dashboardRefreshing ? "Refreshing…" : "↻ Refresh"}</button><span class="dashboard-refresh-meta">Last updated: ${escapeHtml(updatedTime)}</span>` : ""}<a class="open-shop" href="order.html">Open customer shop ↗</a></div></div>
     <div class="stat-grid dashboard-summary-grid">
       <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Revenue this month</div><div class="stat-value">${money(stats.revenue)}</div><div class="stat-help">Paid orders only</div></div>
       <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Non-cancelled paid orders this month</div><div class="stat-value">${stats.orders}</div><div class="stat-help">${stats.paymentReview ? `<button class="dashboard-warning-link" onclick="focusDashboardIssue('payment_review')">${stats.paymentReview} need payment review →</button>` : "Everything is up to date"}</div></div>
@@ -1739,6 +1782,126 @@ async function saveIdea(){const d=astate.ideaDraft;if(!d?.title?.trim())return a
 async function updateIdea(id,fields){const{error}=await db.from("inspiration_ideas").update(fields).eq("id",id);if(error)return alert(error.message);await loadAll();}
 async function deleteIdea(id){if(!confirm("Delete this idea?"))return;const{error}=await db.from("inspiration_ideas").delete().eq("id",id);if(error)return alert(error.message);await loadAll();}
 function renderInspirationTab(){const ideas=[...astate.inspirationIdeas].sort((a,b)=>Number(b.is_pinned)-Number(a.is_pinned)||new Date(b.created_at)-new Date(a.created_at));return `<section class="dashboard-card" style="padding:18px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 14px"><div><h2>Quick capture</h2><span>Save an idea in a few seconds</span></div></div><div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9px"><input placeholder="What are you thinking about?" value="${escapeHtml(astate.quickIdea)}" oninput="astate.quickIdea=this.value" onkeydown="if(event.key==='Enter')quickAddIdea()"><button class="btn-primary" onclick="quickAddIdea()">+ New idea</button></div></section><div class="idea-board">${ideas.map(i=>`<article class="dashboard-card idea-card ${i.status==='archived'?'idea-archived':''}" style="padding:17px"><div style="display:flex;justify-content:space-between;gap:10px"><span class="queue-status">${escapeHtml(i.category||"Other")}</span><button class="link-btn" title="${i.is_pinned?"Unpin":"Pin"}" onclick="updateIdea('${i.id}',{is_pinned:${!i.is_pinned}})">${i.is_pinned?"★":"☆"}</button></div><h3 style="margin:14px 0 8px">${escapeHtml(i.title)}</h3>${i.notes?`<div style="white-space:pre-wrap;line-height:1.5;color:var(--admin-muted)">${escapeHtml(i.notes)}</div>`:""}<div class="hint" style="text-align:left;margin:14px 0 10px">${new Date(i.created_at).toLocaleDateString()} · ${i.status==='archived'?"Archived":"Active"}</div><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="link-btn" onclick="editIdea('${i.id}')">Edit</button><button class="link-btn" onclick="updateIdea('${i.id}',{status:'${i.status==='archived'?"active":"archived"}'})">${i.status==='archived'?"Restore":"Done / archive"}</button><button class="link-danger" onclick="deleteIdea('${i.id}')">Delete</button></div></article>`).join("")||`<div class="dashboard-card dashboard-empty">Your newest ideas will appear here. Pinned ideas stay at the top.</div>`}</div>${astate.ideaDraft?renderIdeaEditor():""}`;}
+
+const TEAM_ROLES = ["Owner", "Store Manager", "Operations", "Kitchen & Prep", "Marketing", "Admin", "Crew"];
+function isTeamOwner() {
+  return String(astate.currentTeamMember?.role || "").toLowerCase() === "owner"
+    || String(astate.currentUser?.email || "").toLowerCase() === String(ADMIN_EMAIL || "").toLowerCase();
+}
+function setTeamSection(section) { astate.teamSection = section; render(); }
+function newTeamMember() {
+  if (!isTeamOwner()) return;
+  astate.editingTeamId = null;
+  astate.teamDraft = { display_name: "", email: "", role: "Operations", is_active: true };
+  render();
+}
+function editTeamMember(id) {
+  if (!isTeamOwner()) return;
+  const member = astate.teamMembers.find((item) => String(item.id) === String(id));
+  if (!member) return;
+  astate.editingTeamId = member.id;
+  astate.teamDraft = { ...member };
+  render();
+}
+function teamDraftField(key, value) { if (astate.teamDraft) astate.teamDraft[key] = value; }
+function closeTeamEditor() { astate.teamDraft = null; astate.editingTeamId = null; render(); }
+async function refreshTeamData() {
+  const [teamResult, activityResult] = await Promise.all([
+    db.from("studio_users").select("*").order("created_at"),
+    db.from("activity_log").select("*").order("created_at", { ascending: false }).limit(250),
+  ]);
+  if (!teamResult.error) astate.teamMembers = teamResult.data || [];
+  if (!activityResult.error) astate.activityLog = activityResult.data || [];
+  const currentEmail = String(astate.currentUser?.email || "").toLowerCase();
+  astate.currentTeamMember = astate.teamMembers.find((member) => String(member.email || "").toLowerCase() === currentEmail) || astate.currentTeamMember;
+}
+async function sendTeamInvite(email) {
+  const redirectTo = `${window.location.origin}${window.location.pathname}`;
+  const { data, error } = await db.functions.invoke("invite-team-member", { body: { email, redirect_to: redirectTo } });
+  if (error) return { ok: false, message: error.message || "Invite email could not be sent." };
+  return { ok: !!data?.ok, message: data?.already_registered ? "Access saved. This email already has a login." : "Access saved and invitation email sent." };
+}
+async function saveTeamMember() {
+  if (!isTeamOwner() || !astate.teamDraft) return;
+  const draft = astate.teamDraft;
+  const email = String(draft.email || "").trim().toLowerCase();
+  const displayName = String(draft.display_name || "").trim();
+  if (!displayName || !email.includes("@")) { alert("Add the team member's name and a valid email."); return; }
+  const payload = { display_name: displayName, email, role: TEAM_ROLES.includes(draft.role) ? draft.role : "Operations", is_active: draft.is_active !== false, updated_at: new Date().toISOString() };
+  const button = document.getElementById("save-team-member");
+  if (button) { button.disabled = true; button.textContent = astate.editingTeamId ? "Saving…" : "Sending invite…"; }
+  const result = astate.editingTeamId
+    ? await db.from("studio_users").update(payload).eq("id", astate.editingTeamId).select().single()
+    : await db.from("studio_users").insert(payload).select().single();
+  if (result.error) { if (button) { button.disabled = false; button.textContent = "Save member"; } alert("Could not save this team member: " + result.error.message); return; }
+  let message = "Team member saved.";
+  if (!astate.editingTeamId) {
+    const invite = await sendTeamInvite(email);
+    message = invite.ok ? invite.message : `Access was saved, but the invitation email was not sent: ${invite.message}`;
+  }
+  astate.teamDraft = null;
+  astate.editingTeamId = null;
+  await refreshTeamData();
+  alert(message);
+  render();
+}
+async function deleteTeamMember(id) {
+  if (!isTeamOwner()) return;
+  const member = astate.teamMembers.find((item) => String(item.id) === String(id));
+  if (!member) return;
+  if (String(member.email || "").toLowerCase() === String(astate.currentUser?.email || "").toLowerCase()) { alert("You cannot remove your own owner access."); return; }
+  if (!confirm(`Remove ${member.display_name} from this workspace?`)) return;
+  const { error } = await db.from("studio_users").delete().eq("id", id);
+  if (error) { alert("Could not remove this team member: " + error.message); return; }
+  await refreshTeamData();
+  render();
+}
+function workspacePreferenceField(key, value) {
+  if (key === "business_country") astate.settingsDraft.business_country = value;
+  if (key === "store_currency") astate.settingsDraft.store_currency = value;
+  if (key === "store_language") astate.settingsDraft.store_language = value;
+  render();
+}
+async function saveWorkspacePreferences() {
+  if (!isTeamOwner() || !astate.settings?.id) return;
+  const fields = {
+    business_country: astate.settingsDraft.business_country || "Singapore",
+    store_currency: astate.settingsDraft.store_currency || "SGD",
+    store_language: astate.settingsDraft.store_language || "English",
+  };
+  const studioData = { ...(astate.studioSettings || {}), country: fields.business_country, currency: fields.store_currency, language: fields.store_language };
+  const [storeResult, studioResult] = await Promise.all([
+    db.from("store_settings").update(fields).eq("id", astate.settings.id).select().single(),
+    db.from("studio_settings").update({ data: studioData, updated_by: astate.currentUser?.id || null, updated_at: new Date().toISOString() }).eq("id", "main").select().single(),
+  ]);
+  if (storeResult.error || studioResult.error) { alert("Could not save workspace preferences: " + (storeResult.error?.message || studioResult.error?.message)); return; }
+  astate.settings = storeResult.data;
+  astate.settingsDraft = { ...storeResult.data };
+  astate.studioSettings = studioResult.data?.data || studioData;
+  await refreshTeamData();
+  alert("Workspace preferences saved.");
+  render();
+}
+function activityDate(value) {
+  try { return new Date(value).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); }
+  catch (_) { return String(value || ""); }
+}
+function renderTeamEditor() {
+  const draft = astate.teamDraft;
+  if (!draft) return "";
+  const editingSelf = String(draft.email || "").toLowerCase() === String(astate.currentUser?.email || "").toLowerCase();
+  return `<div class="overlay"><div class="overlay-card" style="max-width:560px"><div class="display overlay-title">${astate.editingTeamId ? "Edit team member" : "Invite team member"}</div><div class="overlay-sub">Choose their workspace name and F&amp;B role. New members receive a secure login invitation by email.</div><div class="field"><label>Name shown in workspace</label><input value="${escapeHtml(draft.display_name || "")}" oninput="teamDraftField('display_name',this.value)"></div><div class="field"><label>Email</label><input type="email" value="${escapeHtml(draft.email || "")}" ${editingSelf ? "readonly" : ""} oninput="teamDraftField('email',this.value)"></div><div class="field"><label>Role / rank</label><select onchange="teamDraftField('role',this.value)">${TEAM_ROLES.map((role) => `<option value="${escapeHtml(role)}" ${draft.role === role ? "selected" : ""}>${escapeHtml(role)}</option>`).join("")}</select></div><label class="slot" style="margin:12px 0 18px"><input type="checkbox" style="width:auto" ${draft.is_active !== false ? "checked" : ""} onchange="teamDraftField('is_active',this.checked)"><span><b>Can access this workspace</b><br><span class="hint" style="margin:0">Turn this off to suspend access without deleting their history.</span></span></label><div class="btn-row"><button class="btn-secondary" onclick="closeTeamEditor()">Cancel</button><button class="btn-primary" id="save-team-member" onclick="saveTeamMember()">${astate.editingTeamId ? "Save member" : "Save & send invite"}</button></div></div></div>`;
+}
+function renderTeamTab() {
+  const owner = isTeamOwner();
+  const section = astate.teamSection || "team";
+  const currentName = astate.currentTeamMember?.display_name || "Ting";
+  const currentRole = astate.currentTeamMember?.role || "Owner";
+  const settings = astate.settingsDraft || {};
+  return `<div class="tabs"><button class="${section === "team" ? "active" : ""}" onclick="setTeamSection('team')">Team</button><button class="${section === "activity" ? "active" : ""}" onclick="setTeamSection('activity')">Activity log</button><button class="${section === "workspace" ? "active" : ""}" onclick="setTeamSection('workspace')">Country, currency & language</button></div>
+  ${section === "activity" ? `<section class="dashboard-card"><div class="dashboard-card-head"><div><h2>Activity log</h2><span>Latest workspace changes, newest first</span></div><button class="btn-secondary" onclick="refreshTeamData().then(render)">↻ Refresh</button></div><div class="activity-list">${astate.activityLog.map((entry) => `<div class="queue-row"><div class="queue-top"><div><b>${escapeHtml(entry.summary || entry.action || "Workspace update")}</b><div class="queue-name">${escapeHtml(entry.actor_name || entry.actor_email || "Team member")} · ${escapeHtml(entry.module || "Admin")}</div></div><time class="queue-name">${escapeHtml(activityDate(entry.created_at))}</time></div></div>`).join("") || `<div class="dashboard-empty">New team activity will appear here.</div>`}</div></section>` : section === "workspace" ? `<section class="dashboard-card" style="padding:20px"><div class="dashboard-card-head" style="padding:0 0 17px"><div><h2>Workspace region</h2><span>Used for money formatting and future localisation</span></div></div><div class="workspace-preference-grid"><div class="field"><label>Country</label><select ${owner ? "" : "disabled"} onchange="workspacePreferenceField('business_country',this.value)">${["Singapore","Malaysia","Other"].map((value) => `<option value="${value}" ${settings.business_country === value ? "selected" : ""}>${value}</option>`).join("")}</select></div><div class="field"><label>Currency</label><select ${owner ? "" : "disabled"} onchange="workspacePreferenceField('store_currency',this.value)">${[["SGD","Singapore Dollar (SGD)"],["MYR","Malaysian Ringgit (MYR)"],["USD","US Dollar (USD)"],["CNY","Chinese Yuan (CNY)"]].map(([value,label]) => `<option value="${value}" ${settings.store_currency === value ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="field"><label>Language preference</label><select ${owner ? "" : "disabled"} onchange="workspacePreferenceField('store_language',this.value)">${[["English","English"],["Malay","Bahasa Melayu"],["Mandarin","中文 / Mandarin"]].map(([value,label]) => `<option value="${value}" ${settings.store_language === value ? "selected" : ""}>${label}</option>`).join("")}</select></div></div><div class="hint" style="text-align:left;margin:5px 0 16px">Currency changes money display across Admin and the customer ordering page. Language is saved as the workspace preference; your editable customer wording remains unchanged.</div>${owner ? `<button class="btn-primary" onclick="saveWorkspacePreferences()">Save workspace preferences</button>` : `<div class="hint" style="text-align:left">Only the Owner can change workspace preferences.</div>`}</section>` : `<section class="dashboard-card" style="padding:20px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 17px"><div><h2>Your workspace profile</h2><span>This name appears in your dashboard greeting</span></div></div><div class="team-profile"><div class="team-avatar">${escapeHtml(currentName.slice(0,1).toUpperCase())}</div><div><b>${escapeHtml(currentName)}</b><div class="queue-name">${escapeHtml(currentRole)} · ${escapeHtml(astate.currentTeamMember?.email || astate.currentUser?.email || "")}</div></div>${owner && astate.currentTeamMember?.id ? `<button class="btn-secondary" onclick="editTeamMember('${astate.currentTeamMember.id}')">Edit my name</button>` : ""}</div></section><section class="dashboard-card"><div class="dashboard-card-head"><div><h2>Team</h2><span>${astate.teamMembers.filter((member) => member.is_active).length} active member(s)</span></div>${owner ? `<button class="btn-primary" onclick="newTeamMember()">+ Invite member</button>` : ""}</div><div class="team-list">${astate.teamMembers.map((member) => `<div class="queue-row"><div class="queue-top"><div class="team-member-main"><div class="team-avatar small">${escapeHtml(String(member.display_name || member.email || "T").slice(0,1).toUpperCase())}</div><div><b>${escapeHtml(member.display_name || "Team member")}</b><div class="queue-name">${escapeHtml(member.email)} · ${member.auth_user_id ? "Joined" : "Invitation pending"}</div></div></div><div class="team-member-actions"><span class="queue-status">${escapeHtml(member.role || "Crew")}</span><span class="queue-status ${member.is_active ? "" : "status-cancelled"}">${member.is_active ? "Active" : "Suspended"}</span>${owner ? `<button class="link-btn" onclick="editTeamMember('${member.id}')">Edit</button>${String(member.email || "").toLowerCase() !== String(astate.currentUser?.email || "").toLowerCase() ? `<button class="link-danger" onclick="deleteTeamMember('${member.id}')">Remove</button>` : ""}` : ""}</div></div></div>`).join("") || `<div class="dashboard-empty">Add your first team member when you are ready.</div>`}</div></section>`}
+  ${renderTeamEditor()}`;
+}
 function renderIdeaEditor(){const d=astate.ideaDraft;return `<div class="overlay"><div class="overlay-card"><div class="display overlay-title">${d.id?"Edit":"New"} idea</div><div class="field"><label>Title</label><input value="${escapeHtml(d.title||"")}" oninput="ideaField('title',this.value)"></div><div class="field"><label>Notes</label><textarea rows="6" oninput="ideaField('notes',this.value)">${escapeHtml(d.notes||"")}</textarea></div><div class="field"><label>Category</label><select onchange="ideaField('category',this.value)">${IDEA_CATEGORIES.map(x=>`<option ${d.category===x?"selected":""}>${x}</option>`).join("")}</select></div><div class="field"><label>Status</label><select onchange="ideaField('status',this.value)"><option value="active" ${d.status!=="archived"?"selected":""}>Active</option><option value="archived" ${d.status==="archived"?"selected":""}>Done / archived</option></select></div><label class="slot"><input type="checkbox" style="width:auto" ${d.is_pinned?"checked":""} onchange="ideaField('is_pinned',this.checked)"> Pin this idea</label><div class="btn-row"><button class="btn-secondary" onclick="astate.ideaDraft=null;render()">Cancel</button><button class="btn-primary" onclick="saveIdea()">Save idea</button></div></div></div>`;}
 function orderMatchesFilter(order, filter) { return AdminOrderRules.orderMatchesFilter(order, filter); }
 function renderPreparationTab() {
@@ -2492,12 +2655,13 @@ function renderEditOverlay() {
       <div class="field"><label>Name</label><input value="${item.name}" oninput="onEditField('name', this.value)"></div>
       <div class="field"><label>Product group</label><select onchange="onEditGroup(this.value)"><option value="">Other</option>${astate.productGroups.map((group) => `<option value="${group.id}" ${String(item.group_id) === String(group.id) ? "selected" : ""}>${escapeHtml(group.name)}</option>`).join("")}</select><div class="hint" style="text-align:left;margin-top:5px;">Shown as a large group heading on the ordering page.</div></div>
       <div class="field"><label>Description</label><textarea rows="2" oninput="onEditField('description', this.value)">${item.description || ""}</textarea></div>
-      <div class="field"><label>${item.is_bundle && item.bundle_pricing_mode === "sum_selected" ? "Base price / service fee (SGD, optional)" : "Original price (SGD)"}</label><input type="number" min="0" step="0.01" value="${item.price}" oninput="onEditField('price', this.value)">${item.is_bundle && item.bundle_pricing_mode === "sum_selected" ? `<div class="hint" style="text-align:left;margin-top:5px;">The selected drink prices are added automatically. Keep this at $0 unless you want an extra base fee.</div>` : ""}</div>
-      <div class="field"><label>Discount price (SGD, optional)</label><input type="number" min="0" step="0.01" value="${item.discount_price ?? ""}" placeholder="Leave blank if there is no sale" oninput="onEditField('discount_price', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">Customers will see the original price crossed out and the discount price in green.</div></div>
+      <div class="field"><label>${item.is_bundle && item.bundle_pricing_mode === "sum_selected" ? `Base price / service fee (${escapeHtml(astate.settingsDraft?.store_currency || "SGD")}, optional)` : `Original price (${escapeHtml(astate.settingsDraft?.store_currency || "SGD")})`}</label><input type="number" min="0" step="0.01" value="${item.price}" oninput="onEditField('price', this.value)">${item.is_bundle && item.bundle_pricing_mode === "sum_selected" ? `<div class="hint" style="text-align:left;margin-top:5px;">The selected drink prices are added automatically. Keep this at 0 unless you want an extra base fee.</div>` : ""}</div>
+      <div class="field"><label>Discount price (${escapeHtml(astate.settingsDraft?.store_currency || "SGD")}, optional)</label><input type="number" min="0" step="0.01" value="${item.discount_price ?? ""}" placeholder="Leave blank if there is no sale" oninput="onEditField('discount_price', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">Customers will see the original price crossed out and the discount price in green.</div></div>
       <div class="field"><label>Product image</label><input value="${item.image_url || ""}" placeholder="Upload below or paste image URL" oninput="onEditField('image_url', this.value)"><input type="file" accept="image/*" style="margin-top:8px;" onchange="uploadStorefrontImage(this,'products')">${item.image_url ? `<img src="${escapeHtml(item.image_url)}" alt="Product preview" style="display:block;width:100%;height:150px;object-fit:cover;border:1px solid #E1D9C8;border-radius:12px;margin-top:8px;">` : ""}</div>
       <div class="field"><label>Weekly starting stock</label><input type="number" min="0" value="${item.stock || 0}" oninput="onEditField('stock', this.value)"><div class="hint" style="text-align:left;margin-top:5px;">Available stock refreshes automatically every Monday. Orders from previous weeks will not reduce this week's stock.</div></div>
       <div class="field" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="bundle-check" ${item.is_bundle ? "checked" : ""} onchange="onEditField('is_bundle', this.checked);render()" style="width:auto;"><label style="margin:0;" for="bundle-check">This is a Bundle / Mix & Matcha</label></div>
       ${item.is_bundle ? `<div class="field"><label>Bundle price style</label><select onchange="onEditField('bundle_pricing_mode',this.value);render()"><option value="fixed" ${item.bundle_pricing_mode !== "sum_selected" ? "selected" : ""}>Fixed bundle price</option><option value="sum_selected" ${item.bundle_pricing_mode === "sum_selected" ? "selected" : ""}>Add selected product prices automatically</option></select><div class="hint" style="text-align:left;margin-top:5px;">Fixed keeps Shizuku Duo at one price. Automatic pricing changes the total as customers choose each drink.</div></div>` : ""}
+      <label class="slot" style="cursor:pointer;gap:10px;margin:7px 0 16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${item.show_price_on_menu !== false ? "checked" : ""} onchange="onEditField('show_price_on_menu',this.checked)"><span><b>Show price on menu card</b><br><span class="hint" style="margin:0;">Untick this for Mix &amp; Matcha so customers see the live total only after opening the product.</span></span></label>
       <div class="field"><label>Customisation shown for this drink</label><div class="hint" style="text-align:left;margin:0 0 7px;">Tick only the options that apply. Unticked groups will not appear to customers.</div>${astate.optionGroups.filter((group) => group.is_visible !== false).map((group) => `<label class="slot" style="cursor:pointer;gap:10px;margin:7px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${(item.enabled_option_group_ids || []).map(String).includes(String(group.id)) ? "checked" : ""} onchange="toggleProductOptionGroup('${group.id}',this.checked)"><span>${escapeHtml(group.name)}</span></label>`).join("")}</div>
       ${item.is_bundle ? `<div class="field"><label>Products customers can choose</label><div class="hint" style="text-align:left;margin:0 0 7px;">Tick each eligible drink. For automatic pricing, edit the price beside the selected product or leave it blank to follow that product’s current price.</div>${astate.menu.filter((product) => String(product.id) !== String(item.id) && !product.is_bundle).map((product) => { const selected = Array.isArray(item.bundle_product_ids) && item.bundle_product_ids.map(String).includes(String(product.id)); const override = item.bundle_option_prices && Object.prototype.hasOwnProperty.call(item.bundle_option_prices,String(product.id)) ? item.bundle_option_prices[String(product.id)] : ""; return `<div class="slot" style="display:grid;grid-template-columns:auto minmax(0,1fr) 120px;gap:10px;margin:7px 0;align-items:center;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${selected ? "checked" : ""} onchange="toggleBundleProduct('${product.id}',this.checked);render()"><span>${escapeHtml(product.name)}<br><span class="hint" style="margin:0;">Menu price ${money(product.discount_price || product.price)}</span></span>${item.bundle_pricing_mode === "sum_selected" && selected ? `<input type="number" min="0" step="0.01" value="${escapeHtml(override)}" placeholder="${Number(product.discount_price || product.price).toFixed(2)}" aria-label="Mix and Match price for ${escapeHtml(product.name)}" oninput="setBundleOptionPrice('${product.id}',this.value)">` : `<span></span>`}</div>`; }).join("")}</div>` : ""}
       <div class="field" style="display:flex;align-items:center;gap:8px;">
@@ -2541,6 +2705,7 @@ function render() {
     ["inventory", "▤", "Inventory & cost"],
     ["wholesale", "◇", "Wholesale / B2B"],
     ["inspiration", "✎", "Inspiration"],
+    ["team", "♙", "Team & activity"],
     ["promos", "✦", "Promos"],
     ["rewards", "♧", "Rewards"],
     ["customers", "◉", "Customers"],
@@ -2555,12 +2720,12 @@ function render() {
     ["settings", "⚙", "Store settings"],
   ];
   const sortedNav = orderedAdminNav(nav);
-  const tabTitle = { preparation: "Today's preparation", orders: "Orders", menu: "Products", inventory: "Inventory & food cost", wholesale:"Wholesale / B2B", inspiration:"Inspiration", promos: "Promos", rewards: "Rewards", customers: "Customers", messages: "Messages", reviews: "Reviews", availability: "Availability", faq: "FAQ", notifications: "Notifications", theme_design: "Theme & design", wording: "Customer wording", checkout_comms: "Checkout & communication", settings: "Store settings" };
-  const tabSubtitle = { preparation: "See every paid drink to prepare and print today's list.", orders: "Review payments and edit every customer order.", menu: "Keep your drinks, prices and availability up to date.", inventory: "Track stock and review every product cost in one place.", wholesale:"Manage private B2B products, pricing and suppliers.", inspiration:"Capture, pin and organise private business ideas.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", messages: "Read and reply to order-linked customer messages.", reviews: "Approve the customer reviews shown on your ordering page.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose where you receive new-order alerts.", theme_design: "Choose a theme, then customise colours, fonts and layout in one place.", wording: "Edit the main words customers see across your shop.", checkout_comms: "Control checkout fields, payment wording, chat and reviews.", settings: "Manage your store details, images, contact information and payment details." };
+  const tabTitle = { preparation: "Today's preparation", orders: "Orders", menu: "Products", inventory: "Inventory & food cost", wholesale:"Wholesale / B2B", inspiration:"Inspiration", team:"Team & activity", promos: "Promos", rewards: "Rewards", customers: "Customers", messages: "Messages", reviews: "Reviews", availability: "Availability", faq: "FAQ", notifications: "Notifications", theme_design: "Theme & design", wording: "Customer wording", checkout_comms: "Checkout & communication", settings: "Store settings" };
+  const tabSubtitle = { preparation: "See every paid drink to prepare and print today's list.", orders: "Review payments and edit every customer order.", menu: "Keep your drinks, prices and availability up to date.", inventory: "Track stock and review every product cost in one place.", wholesale:"Manage private B2B products, pricing and suppliers.", inspiration:"Capture, pin and organise private business ideas.", team:"Manage workspace access, F&B roles, activity and regional preferences.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", messages: "Read and reply to order-linked customer messages.", reviews: "Approve the customer reviews shown on your ordering page.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose where you receive new-order alerts.", theme_design: "Choose a theme, then customise colours, fonts and layout in one place.", wording: "Edit the main words customers see across your shop.", checkout_comms: "Control checkout fields, payment wording, chat and reviews.", settings: "Manage your store details, images, contact information and payment details." };
   const page = astate.tab === "dashboard" ? renderDashboardTab() : `
     <div class="admin-top"><div><div class="admin-eyebrow">Shizuku Lab admin</div><h1 class="tab-page-title">${tabTitle[astate.tab] || "Dashboard"}</h1><p class="tab-page-subtitle">${tabSubtitle[astate.tab] || ""}</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
     <div class="admin-content">
-      ${astate.tab === "preparation" ? renderPreparationTab() : astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "inventory" ? renderInventoryTab() : astate.tab === "wholesale" ? renderWholesaleTab() : astate.tab === "inspiration" ? renderInspirationTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "messages" ? renderMessagesTab() : astate.tab === "reviews" ? renderReviewsTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : astate.tab === "theme_design" ? renderThemeDesignTab() : astate.tab === "wording" ? renderWordingTab() : astate.tab === "checkout_comms" ? renderCheckoutCommunicationTab() : renderSettingsTab()}
+      ${astate.tab === "preparation" ? renderPreparationTab() : astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "inventory" ? renderInventoryTab() : astate.tab === "wholesale" ? renderWholesaleTab() : astate.tab === "inspiration" ? renderInspirationTab() : astate.tab === "team" ? renderTeamTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "messages" ? renderMessagesTab() : astate.tab === "reviews" ? renderReviewsTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : astate.tab === "theme_design" ? renderThemeDesignTab() : astate.tab === "wording" ? renderWordingTab() : astate.tab === "checkout_comms" ? renderCheckoutCommunicationTab() : renderSettingsTab()}
     </div>`;
   app.innerHTML = `
     ${dashboardStyles()}
@@ -2576,7 +2741,7 @@ function render() {
     badge.className = "slow-studio-badge";
     badge.title = "Slow Studio workspace";
     badge.setAttribute("aria-label", "Slow Studio workspace");
-    badge.textContent = "SS";
+    badge.innerHTML = `<img src="lumi-slow-studio.png" alt="">`;
     adminLogo.before(badge);
   }
   if (astate.tab === "theme_design" && astate.designTopic === "customise") requestAnimationFrame(updateDesignPreview);

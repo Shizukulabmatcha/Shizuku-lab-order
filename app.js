@@ -53,6 +53,7 @@ const state = {
   productOptionGroups: [],
   selectedProduct: null,
   selectedOptions: {},
+  expandedOptionSteps: { product: null, bundle1: null, bundle2: null },
   bundle: { drink1: null, drink2: null, drink1Options: {}, drink2Options: {} },
   slots: [],
   openingOverrides: [],
@@ -149,6 +150,9 @@ const state = {
     chat_auto_reply: "Thanks for your message. We will reply as soon as possible.",
     chat_business_hours: "",
     reviews_enabled: true,
+    business_country: "Singapore",
+    store_currency: "SGD",
+    store_language: "English",
   },
   form: { name: "", phone: "", email: "", instagram: "", pickupDate: "", slotId: "", collectionPoint: "", notes: "", promoCode: "" },
   promo: null,
@@ -171,7 +175,12 @@ let customerChatChannel = null;
 let lastRenderedScreen = null;
 
 /* ---------- helpers ---------- */
-function money(n) { return `$${Number(n || 0).toFixed(2)}`; }
+function money(n) {
+  const currency = String(state.store?.store_currency || "SGD").toUpperCase();
+  const locale = currency === "MYR" ? "en-MY" : currency === "CNY" ? "zh-CN" : "en-SG";
+  try { return new Intl.NumberFormat(locale, { style: "currency", currency }).format(Number(n || 0)); }
+  catch (_) { return `${currency} ${Number(n || 0).toFixed(2)}`; }
+}
 function themeFont(value, fallback) {
   return ({ fraunces: "'Fraunces',serif", noto_serif_jp: "'Noto Serif JP',serif", work_sans: "'Work Sans',sans-serif", noto_sans_jp: "'Noto Sans JP',sans-serif", georgia: "Georgia,serif" })[value] || fallback;
 }
@@ -208,6 +217,7 @@ function salePrice(item) {
 }
 function hasDiscount(item) { return salePrice(item) < originalPrice(item); }
 function productPriceMarkup(item, className = "item-price") {
+  if (item?.show_price_on_menu === false) return `<div class="${className} menu-price-hidden" aria-hidden="true"></div>`;
   if (isDynamicBundle(item)) return `<div class="${className}"><span class="discount-price">From ${money(bundleStartingPrice(item))}</span></div>`;
   return `<div class="${className}">${hasDiscount(item) ? `<span class="original-price">${money(originalPrice(item))}</span> ` : ""}<span class="discount-price">${money(salePrice(item))}</span></div>`;
 }
@@ -695,7 +705,77 @@ function selectOption(groupId, optionId) {
   const option = state.options.find((item) => String(item.id) === String(optionId));
   if (!option) return;
   state.selectedOptions[groupId] = { productId: state.selectedProduct.id, optionId: option.id, optionName: option.name, price: Number(option.price || 0) };
+  advanceOptionStep("product", groupId, optionGroupsForProduct(state.selectedProduct), state.selectedOptions);
+}
+function optionStepDomId(scope, groupId) {
+  return `option-step-${String(scope).replace(/[^a-z0-9_-]/gi, "-")}-${String(groupId).replace(/[^a-z0-9_-]/gi, "-")}`;
+}
+function scrollToOptionStep(scope, groupId) {
+  if (groupId == null) return;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    document.getElementById(optionStepDomId(scope, groupId))?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }));
+}
+function openOptionStep(scope, groupId) {
+  state.expandedOptionSteps[scope] = String(groupId);
   render();
+  scrollToOptionStep(scope, groupId);
+}
+function advanceOptionStep(scope, groupId, groups, selectedOptions) {
+  state.expandedOptionSteps[scope] = null;
+  const currentIndex = groups.findIndex((group) => String(group.id) === String(groupId));
+  const nextGroup = groups.slice(Math.max(0, currentIndex + 1)).find((group) => !selectedOptions[group.id]);
+  render();
+  if (nextGroup) scrollToOptionStep(scope, nextGroup.id);
+}
+function skipOptionStep(scope, groupId, drinkNumber = null) {
+  const group = state.optionGroups.find((item) => String(item.id) === String(groupId));
+  if (!group || group.required) return;
+  let selectedOptions = state.selectedOptions;
+  let product = state.selectedProduct;
+  if (drinkNumber === 1) { selectedOptions = state.bundle.drink1Options; product = state.bundle.drink1; }
+  if (drinkNumber === 2) { selectedOptions = state.bundle.drink2Options; product = state.bundle.drink2; }
+  if (!product) return;
+  selectedOptions[groupId] = { productId: product.id, optionId: null, optionName: "No thanks", price: 0, skipped: true };
+  advanceOptionStep(scope, groupId, optionGroupsForProduct(product), selectedOptions);
+}
+function renderProgressiveOptionGroups(product, selectedOptions, drinkNumber = null) {
+  const groups = optionGroupsForProduct(product);
+  if (!groups.length) return `<div class="hint">No customisation options for this item.</div>`;
+  const scope = drinkNumber == null ? "product" : `bundle${drinkNumber}`;
+  const requestedGroupId = state.expandedOptionSteps[scope];
+  const requestedIndex = requestedGroupId == null ? -1 : groups.findIndex((group) => String(group.id) === String(requestedGroupId));
+  const firstIncompleteIndex = groups.findIndex((group) => !selectedOptions[group.id]);
+  const activeIndex = requestedIndex >= 0 ? requestedIndex : firstIncompleteIndex;
+
+  return `<div class="progressive-options">${groups.map((group, index) => {
+    const selected = selectedOptions[group.id];
+    if (!selected && index !== activeIndex) return "";
+    const stepNumber = index + 1;
+    if (selected && index !== activeIndex) {
+      return `<button type="button" class="option-step-summary" id="${optionStepDomId(scope, group.id)}" onclick="openOptionStep('${scope}','${escapeHtml(group.id)}')">
+        <span class="option-step-number">${stepNumber}</span>
+        <span class="option-step-summary-copy"><strong>${escapeHtml(group.name)}</strong><small>${escapeHtml(selected.optionName || "Selected")}</small></span>
+        <span class="option-step-change">Change</span>
+      </button>`;
+    }
+    const options = getOptionsForGroup(group.id);
+    const optionHandler = drinkNumber == null
+      ? (optionId) => `selectOption('${escapeHtml(group.id)}','${escapeHtml(optionId)}')`
+      : (optionId) => `selectBundleOption(${drinkNumber},'${escapeHtml(group.id)}','${escapeHtml(optionId)}')`;
+    return `<section class="field product-option-group option-step-open" id="${optionStepDomId(scope, group.id)}">
+      <div class="option-step-heading">
+        <span class="option-step-number">${stepNumber}</span>
+        <label><span class="option-kana">カスタマイズ</span>${escapeHtml(group.name)}${group.required ? " *" : " (optional)"}</label>
+      </div>
+      <div>
+        ${options.map((option) => `<button type="button" class="slot ${selected && String(selected.optionId) === String(option.id) ? "active" : ""}" onclick="${optionHandler(option.id)}">
+          <div><div class="slot-day">${escapeHtml(option.name)}</div><div class="slot-time">${Number(option.price || 0) > 0 ? `+${money(option.price)}` : "Included"}</div></div>
+        </button>`).join("")}
+        ${group.required ? "" : `<button type="button" class="option-skip ${selected?.skipped ? "active" : ""}" onclick="skipOptionStep('${scope}','${escapeHtml(group.id)}',${drinkNumber == null ? "null" : drinkNumber})">No thanks</button>`}
+      </div>
+    </section>`;
+  }).join("")}</div>`;
 }
 function validateRequiredOptions() {
   for (const group of optionGroupsForProduct(state.selectedProduct)) {
@@ -705,7 +785,7 @@ function validateRequiredOptions() {
   return true;
 }
 function getSelectedOptionsForProduct(productId) {
-  return Object.values(state.selectedOptions).filter((selected) => String(selected.productId) === String(productId));
+  return Object.values(state.selectedOptions).filter((selected) => !selected.skipped && String(selected.productId) === String(productId));
 }
 function calculateProductPrice(product) {
   let price = salePrice(product);
@@ -720,6 +800,7 @@ function openProductOptions(productId) {
   if (isSoldOut(product)) { alert("Sorry, this item is sold out."); return; }
   state.selectedProduct = product;
   state.selectedOptions = {};
+  state.expandedOptionSteps = { product: null, bundle1: null, bundle2: null };
   if (isBundle(product)) {
     state.bundle = { drink1: null, drink2: null, drink1Options: {}, drink2Options: {} };
     state.screen = "bundle";
@@ -757,8 +838,8 @@ function selectBundleDrink(slot, productId) {
   const product = state.menu.find((item) => String(item.id) === String(productId));
   if (!product) return;
   if (isSoldOut(product)) { alert("Sorry, this drink is sold out."); return; }
-  if (slot === 1) { state.bundle.drink1 = product; state.bundle.drink1Options = {}; }
-  else { state.bundle.drink2 = product; state.bundle.drink2Options = {}; }
+  if (slot === 1) { state.bundle.drink1 = product; state.bundle.drink1Options = {}; state.expandedOptionSteps.bundle1 = null; }
+  else { state.bundle.drink2 = product; state.bundle.drink2Options = {}; state.expandedOptionSteps.bundle2 = null; }
   render();
 }
 function selectBundleOption(drinkNumber, groupId, optionId) {
@@ -770,7 +851,9 @@ function selectBundleOption(drinkNumber, groupId, optionId) {
   };
   if (drinkNumber === 1) state.bundle.drink1Options[groupId] = value;
   else state.bundle.drink2Options[groupId] = value;
-  render();
+  const drink = drinkNumber === 1 ? state.bundle.drink1 : state.bundle.drink2;
+  const selectedOptions = drinkNumber === 1 ? state.bundle.drink1Options : state.bundle.drink2Options;
+  advanceOptionStep(`bundle${drinkNumber}`, groupId, optionGroupsForProduct(drink), selectedOptions);
 }
 function validateBundleDrink(drink, selectedOptions) {
   if (!drink) return false;
@@ -791,8 +874,8 @@ function addBundleToCart() {
   if (String(drink1.id) !== String(drink2.id) && productStock(drink2) != null && productStock(drink2) < 1) { alert(`Sorry, ${drink2.name} is sold out.`); return; }
   if (!validateBundleDrink(drink1, state.bundle.drink1Options)) { alert("Please complete the options for Drink 1."); return; }
   if (!validateBundleDrink(drink2, state.bundle.drink2Options)) { alert("Please complete the options for Drink 2."); return; }
-  const drink1Options = Object.values(state.bundle.drink1Options);
-  const drink2Options = Object.values(state.bundle.drink2Options);
+  const drink1Options = Object.values(state.bundle.drink1Options).filter((option) => !option.skipped);
+  const drink2Options = Object.values(state.bundle.drink2Options).filter((option) => !option.skipped);
   const unitPrice = selectedBundlePrice(bundle, drink1, drink2, state.bundle.drink1Options, state.bundle.drink2Options);
   const bundleOptions = [
     { drinkNumber: 1, productId: drink1.id, productName: drink1.name, options: drink1Options },
@@ -1208,9 +1291,20 @@ function header({ showCart = false, showHome = false } = {}) {
         </div>
       </div>
       <svg class="drip-row" viewBox="0 0 300 30" aria-hidden="true">
-        <g><circle class="drip" cx="40" cy="4" r="2.4" fill="#4B5D3A"/><ellipse class="ripple" cx="40" cy="26" rx="7" ry="2.4" fill="none" stroke="#8C9B6E" stroke-width="1"/></g>
-        <g><circle class="drip drip2" cx="150" cy="4" r="2.4" fill="#4B5D3A"/><ellipse class="ripple drip2" cx="150" cy="26" rx="7" ry="2.4" fill="none" stroke="#8C9B6E" stroke-width="1"/></g>
-        <g><circle class="drip drip3" cx="260" cy="4" r="2.4" fill="#4B5D3A"/><ellipse class="ripple drip3" cx="260" cy="26" rx="7" ry="2.4" fill="none" stroke="#8C9B6E" stroke-width="1"/></g>
+        ${[0, .85, 1.7].map((delay, index) => {
+          const cx = [40, 150, 260][index];
+          return `<g class="native-drip">
+            <circle cx="${cx}" cy="4" r="2.4" fill="var(--matcha)" opacity="0">
+              <animate attributeName="cy" values="4;4;25;25" keyTimes="0;.08;.58;1" dur="2.6s" begin="${delay}s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values="0;1;1;0;0" keyTimes="0;.08;.52;.62;1" dur="2.6s" begin="${delay}s" repeatCount="indefinite"/>
+            </circle>
+            <ellipse cx="${cx}" cy="26" rx="2.5" ry=".7" fill="none" stroke="var(--matcha-lt)" stroke-width="1" opacity="0">
+              <animate attributeName="rx" values="2.5;2.5;9" keyTimes="0;.55;1" dur="2.6s" begin="${delay}s" repeatCount="indefinite"/>
+              <animate attributeName="ry" values=".7;.7;2.8" keyTimes="0;.55;1" dur="2.6s" begin="${delay}s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values="0;0;.58;0" keyTimes="0;.55;.66;1" dur="2.6s" begin="${delay}s" repeatCount="indefinite"/>
+            </ellipse>
+          </g>`;
+        }).join("")}
         <line x1="0" y1="27" x2="300" y2="27" stroke="#E1D9C8" stroke-width="1"/>
       </svg>
     </div>
@@ -1317,25 +1411,7 @@ function renderOptions() {
           <div class="stock-line">${stockMarkup(product)}</div>
         </div>
       </div>
-      ${optionGroupsForProduct(product).length === 0 ? `<div class="hint">No customisation options for this item.</div>` : optionGroupsForProduct(product).map((group) => {
-        const options = getOptionsForGroup(group.id);
-        const selected = state.selectedOptions[group.id];
-        return `
-          <div class="field product-option-group" style="margin-top:20px;">
-            <label><span class="option-kana">カスタマイズ</span>${escapeHtml(group.name)}${group.required ? " *" : " (optional)"}</label>
-            <div>
-              ${options.map((option) => `
-                <button type="button" class="slot ${selected && String(selected.optionId) === String(option.id) ? "active" : ""}" onclick="selectOption('${escapeHtml(group.id)}','${escapeHtml(option.id)}')">
-                  <div>
-                    <div class="slot-day">${escapeHtml(option.name)}</div>
-                    <div class="slot-time">${Number(option.price || 0) > 0 ? `+${money(option.price)}` : "Included"}</div>
-                  </div>
-                </button>
-              `).join("")}
-            </div>
-          </div>
-        `;
-      }).join("")}
+      ${renderProgressiveOptionGroups(product, state.selectedOptions)}
     </div>
     <div class="sticky-bar"><div class="sticky-bar-inner">
       <button class="primary-btn" ${isSoldOut(product) ? "disabled" : ""} onclick="addConfiguredProductToCart()">${isSoldOut(product) ? "Sold out" : `Add to cart · ${money(price)}`}</button>
@@ -1399,25 +1475,7 @@ function renderBundleDrinkOptions(drinkNumber, drink, selectedOptions) {
   return `
     <div class="bundle-customisation" style="margin-top:18px;">
       <div class="bundle-selected">${escapeHtml(drink.name)}</div>
-      ${optionGroupsForProduct(drink).map((group) => {
-        const options = getOptionsForGroup(group.id);
-        const selected = selectedOptions[group.id];
-        return `
-          <div class="field product-option-group" style="margin-top:16px;">
-            <label><span class="option-kana">カスタマイズ</span>${escapeHtml(group.name)}${group.required ? " *" : ""}</label>
-            <div>
-              ${options.map((option) => `
-                <button type="button" class="slot ${selected && String(selected.optionId) === String(option.id) ? "active" : ""}" onclick="selectBundleOption(${drinkNumber},'${escapeHtml(group.id)}','${escapeHtml(option.id)}')">
-                  <div>
-                    <div class="slot-day">${escapeHtml(option.name)}</div>
-                    <div class="slot-time">${Number(option.price || 0) > 0 ? `+${money(option.price)}` : "Included"}</div>
-                  </div>
-                </button>
-              `).join("")}
-            </div>
-          </div>
-        `;
-      }).join("")}
+      ${renderProgressiveOptionGroups(drink, selectedOptions, drinkNumber)}
     </div>
   `;
 }
