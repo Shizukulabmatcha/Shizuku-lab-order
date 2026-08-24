@@ -218,7 +218,7 @@ function salePrice(item) {
 function hasDiscount(item) { return salePrice(item) < originalPrice(item); }
 function productPriceMarkup(item, className = "item-price") {
   if (item?.show_price_on_menu === false) return `<div class="${className} menu-price-hidden" aria-hidden="true"></div>`;
-  if (isDynamicBundle(item)) return `<div class="${className}"><span class="discount-price">From ${money(bundleStartingPrice(item))}</span></div>`;
+  if (isDynamicBundle(item)) return `<div class="${className}"><span class="discount-price">From ${money(bundleDisplayFromPrice(item))}</span></div>`;
   return `<div class="${className}">${hasDiscount(item) ? `<span class="original-price">${money(originalPrice(item))}</span> ` : ""}<span class="discount-price">${money(salePrice(item))}</span></div>`;
 }
 function escapeHtml(value) {
@@ -317,6 +317,10 @@ function bundleStartingPrice(bundle) {
   const choices = getBundleDrinkProducts(bundle).map((drink) => bundleOptionPrice(bundle, drink));
   const minimum = choices.length ? Math.min(...choices) : 0;
   return Math.round((salePrice(bundle) + minimum * 2) * 100) / 100;
+}
+function bundleDisplayFromPrice(bundle) {
+  const saved = Number(bundle?.bundle_display_from_price);
+  return Number.isFinite(saved) && saved >= 0 ? saved : bundleStartingPrice(bundle);
 }
 function selectedBundlePrice(bundle, drink1, drink2, drink1Options = {}, drink2Options = {}) {
   if (!isDynamicBundle(bundle)) return salePrice(bundle);
@@ -1427,7 +1431,7 @@ function renderBundle() {
   const drink1 = state.bundle.drink1, drink2 = state.bundle.drink2;
   const currentBundlePrice = drink1 && drink2
     ? selectedBundlePrice(bundle, drink1, drink2, state.bundle.drink1Options, state.bundle.drink2Options)
-    : bundleStartingPrice(bundle);
+    : bundleDisplayFromPrice(bundle);
   const showChoicePrices = bundle.bundle_show_choice_prices === true;
   const bundleComplete = Boolean(drink1 && drink2);
   return `

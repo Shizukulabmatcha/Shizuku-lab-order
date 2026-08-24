@@ -1,14 +1,16 @@
 {
-  "cleanUrls": false,
-  "rewrites": [
-    { "source": "/", "destination": "/index.html" }
-  ],
   "headers": [
     {
-      "source": "/(.*).(html|css|js)",
-      "headers": [
-        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
-      ]
+      "source": "/",
+      "headers": [{ "key": "Cache-Control", "value": "no-store, max-age=0" }]
+    },
+    {
+      "source": "/(index|order|admin).html",
+      "headers": [{ "key": "Cache-Control", "value": "no-store, max-age=0" }]
+    },
+    {
+      "source": "/(app|admin|style).(js|css)",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, max-age=0, must-revalidate" }]
     }
   ]
 }
