@@ -1,0 +1,9 @@
+Shizuku Lab V31
+
+Upload this complete ZIP to Vercel.
+
+Change in this version:
+- Loyalty card greetings now show the customer's complete saved name, including spaces.
+  Example: Welcome back, Zhen wei
+
+No Supabase SQL is required for this update.

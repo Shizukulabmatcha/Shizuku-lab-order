@@ -2025,10 +2025,9 @@ function applyCmsWording() {
   const loyaltyCard = document.querySelector('.screen > div[style*="linear-gradient(135deg,#1e473e"]');
   const customerName = String(state.loyalty.account?.customer_name || "").trim();
   if (loyaltyCard && customerName) {
-    const firstName = customerName.split(/\s+/)[0];
     const greeting = document.createElement("div");
     greeting.style.cssText = "font-size:13px;font-weight:600;margin:10px 0 2px;color:inherit;opacity:.9;";
-    greeting.textContent = `Welcome back, ${firstName}`;
+    greeting.textContent = `Welcome back, ${customerName}`;
     const programmeTitle = Array.from(loyaltyCard.querySelectorAll(".display")).find((element) => element.textContent.trim() === (state.store.loyalty_heading || "Shizuku Club"));
     if (programmeTitle) programmeTitle.after(greeting);
     else loyaltyCard.prepend(greeting);
