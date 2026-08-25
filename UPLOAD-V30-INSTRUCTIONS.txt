@@ -1,0 +1,17 @@
+Shizuku Lab V30 — two-stage customer confirmation emails
+
+Upload the complete ZIP to Vercel.
+
+Customer email flow:
+1. Placing an order alone does not send the customer an email.
+2. After payment proof is submitted, the customer receives “We received your order” while payment is under review.
+3. After payment is marked Paid/Confirmed in Admin, the customer receives “Your order is confirmed”.
+
+Both customer templates are editable in Admin > Notifications.
+The owner continues to receive the enabled new-order and payment-proof notifications.
+
+Database migration already applied to Production:
+supabase-two-stage-customer-emails.sql
+
+Google Apps Script:
+Replace Code.gs with google-apps-script-email-notifications.gs while preserving the current SHARED_SECRET, then deploy a new Web app version.
