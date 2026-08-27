@@ -152,6 +152,30 @@ const state = {
     chat_auto_reply: "Thanks for your message. We will reply as soon as possible.",
     chat_business_hours: "",
     reviews_enabled: true,
+    review_cta_label: "Share your Shizuku moment",
+    review_cta_font: "work_sans",
+    review_cta_size: 14,
+    review_cta_color: "#4B5D3A",
+    review_portal_title: "Share your Shizuku experience",
+    review_portal_title_font: "fraunces",
+    review_portal_title_size: 27,
+    review_portal_title_color: "#2A2A22",
+    review_portal_intro: "Enter either your order number or phone number. We will show the drinks you collected — your order number will never be shown publicly.",
+    review_lookup_label: "Order number or phone number",
+    review_lookup_placeholder: "SL-XXXXXX or 91234567",
+    review_find_button_text: "Find my orders",
+    review_choose_order_text: "Choose the drinks to review",
+    review_name_label: "Name shown with review",
+    review_rating_label: "Rating",
+    review_experience_label: "Your experience",
+    review_submit_button_text: "Send my review",
+    review_back_button_text: "Back to menu",
+    marketing_opt_in_enabled: true,
+    marketing_email_enabled: true,
+    marketing_whatsapp_enabled: false,
+    marketing_checkout_heading: "Shizuku updates",
+    marketing_opt_in_label: "Keep me in the loop about monthly opening dates, new drinks and special offers.",
+    marketing_opt_in_help_text: "Occasional Shizuku Lab updates by email. You can opt out anytime.",
     business_country: "Singapore",
     store_currency: "SGD",
     store_language: "English",
@@ -161,7 +185,7 @@ const state = {
     touchngo_qr_url: "",
     malaysia_collection_points: [],
   },
-  form: { name: "", phone: "", email: "", instagram: "", pickupDate: "", slotId: "", collectionPoint: "", notes: "", promoCode: "" },
+  form: { name: "", phone: "", email: "", instagram: "", pickupDate: "", slotId: "", collectionPoint: "", notes: "", promoCode: "", marketingOptIn: false },
   promo: null,
   promoMsg: "",
   payment: { transactionReference: "", proofFile: null, expiresAt: null },
@@ -194,7 +218,7 @@ function themeFont(value, fallback) {
 }
 function storefrontThemeStyle() {
   const s = state.store;
-  return `<style>:root{--matcha:${escapeHtml(s.theme_primary_color || "#4B5D3A")};--cream:${escapeHtml(s.theme_background_color || "#F3EEE3")};--card:${escapeHtml(s.theme_card_color || "#FFFFFF")};--ink:${escapeHtml(s.theme_text_color || "#2A2A22")};--loyalty-card-bg:${escapeHtml(s.loyalty_card_background || "#1E473E")};--loyalty-card-text:${escapeHtml(s.loyalty_card_text_color || "#F9F4E8")};--loyalty-card-accent:${escapeHtml(s.loyalty_card_accent_color || "#CAE4B3")};--cms-body-size:${Math.max(12,Math.min(22,Number(s.theme_body_size||14)))}px;--cms-product-size:${Math.max(12,Math.min(26,Number(s.theme_product_name_size||15)))}px;--cms-price-size:${Math.max(12,Math.min(24,Number(s.theme_price_size||14)))}px;--cms-button-size:${Math.max(12,Math.min(22,Number(s.theme_button_size||14)))}px;}body{font-family:${themeFont(s.theme_body_font,"'Work Sans',sans-serif")};font-size:var(--cms-body-size)}.display{font-family:${themeFont(s.theme_heading_font,"'Fraunces',serif")}}.item-name{font-size:var(--cms-product-size)!important}.item-price,.discount-price{font-size:var(--cms-price-size)!important}.primary-btn,.pill{font-size:var(--cms-button-size)!important}.screen>div[style*="linear-gradient(135deg,#1e473e"]{background:var(--loyalty-card-bg)!important;color:var(--loyalty-card-text)!important}.screen>div[style*="linear-gradient(135deg,#1e473e"] [style*="background:#cae4b3"]{background:var(--loyalty-card-accent)!important}</style>`;
+  return `<style>:root{--matcha:${escapeHtml(s.theme_primary_color || "#4B5D3A")};--cream:${escapeHtml(s.theme_background_color || "#F3EEE3")};--card:${escapeHtml(s.theme_card_color || "#FFFFFF")};--ink:${escapeHtml(s.theme_text_color || "#2A2A22")};--loyalty-card-bg:${escapeHtml(s.loyalty_card_background || "#1E473E")};--loyalty-card-text:${escapeHtml(s.loyalty_card_text_color || "#F9F4E8")};--loyalty-card-accent:${escapeHtml(s.loyalty_card_accent_color || "#CAE4B3")};--cms-body-size:${Math.max(12,Math.min(22,Number(s.theme_body_size||14)))}px;--cms-product-size:${Math.max(12,Math.min(26,Number(s.theme_product_name_size||15)))}px;--cms-price-size:${Math.max(12,Math.min(24,Number(s.theme_price_size||14)))}px;--cms-button-size:${Math.max(12,Math.min(22,Number(s.theme_button_size||14)))}px;--review-cta-size:${Math.max(10,Math.min(32,Number(s.review_cta_size||14)))}px;--review-cta-color:${escapeHtml(s.review_cta_color||s.theme_primary_color||"#4B5D3A")};--review-title-size:${Math.max(16,Math.min(56,Number(s.review_portal_title_size||27)))}px;--review-title-color:${escapeHtml(s.review_portal_title_color||s.theme_text_color||"#2A2A22")};}body{font-family:${themeFont(s.theme_body_font,"'Work Sans',sans-serif")};font-size:var(--cms-body-size)}.display{font-family:${themeFont(s.theme_heading_font,"'Fraunces',serif")}}.item-name{font-size:var(--cms-product-size)!important}.item-price,.discount-price{font-size:var(--cms-price-size)!important}.primary-btn,.pill{font-size:var(--cms-button-size)!important}.write-review-link{font-family:${themeFont(s.review_cta_font,"'Work Sans',sans-serif")}!important;font-size:var(--review-cta-size)!important;color:var(--review-cta-color)!important}.review-portal-title{font-family:${themeFont(s.review_portal_title_font,"'Fraunces',serif")}!important;font-size:var(--review-title-size)!important;color:var(--review-title-color)!important}.screen>div[style*="linear-gradient(135deg,#1e473e"]{background:var(--loyalty-card-bg)!important;color:var(--loyalty-card-text)!important}.screen>div[style*="linear-gradient(135deg,#1e473e"] [style*="background:#cae4b3"]{background:var(--loyalty-card-accent)!important}</style>`;
 }
 function applyStorefrontThemeVariables() {
   const root = document.documentElement;
@@ -1063,6 +1087,10 @@ async function submitOrder() {
     payment_reference: orderNumber,
     market_code: state.market,
     currency_code: state.market === "MY" ? "MYR" : "SGD",
+    marketing_email_opt_in: Boolean(f.marketingOptIn && state.store.marketing_email_enabled !== false && f.email.trim()),
+    marketing_whatsapp_opt_in: Boolean(f.marketingOptIn && state.store.marketing_whatsapp_enabled === true),
+    marketing_consent_text: f.marketingOptIn ? String(state.store.marketing_opt_in_label || "Keep me in the loop about monthly opening dates, new drinks and special offers.") : null,
+    marketing_consent_at: f.marketingOptIn ? new Date().toISOString() : null,
   };
   if (state.customerId) orderPayload.customer_id = state.customerId;
 
@@ -1285,15 +1313,13 @@ function storeInfoPanel() {
   const tickerText = escapeHtml(state.store.ticker_text || "PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB");
   const storeDescription = escapeHtml(state.store.store_description || "Little cups, big comfort. Freshly whisked matcha made with care — one cup at a time.");
   const nextCollections = nextCollectionSchedule(2);
-  const marketSwitch = state.store.malaysia_enabled === true ? `<div class="market-switch" aria-label="Choose ordering country"><span aria-hidden="true">🌍</span><button type="button" class="${state.market === "SG" ? "active" : ""}" onclick="setMarket('SG')">Singapore · SGD</button><button type="button" class="${state.market === "MY" ? "active" : ""}" onclick="setMarket('MY')">Malaysia · MYR</button></div>` : "";
   return `
     ${state.store.show_ticker === false ? "" : `<div class="promo-ticker"><div class="promo-ticker-track"><span>${tickerText}</span><span>${tickerText}</span><span>${tickerText}</span></div></div>`}
     <div class="store-panel">
       <div class="store-banner" style="--banner-height:${bannerHeight}px;background-position:${bannerX}% ${bannerY}%;background-image:linear-gradient(90deg,rgba(52,69,39,.14),rgba(52,69,39,.05)),url('${escapeHtml(bannerImage)}');"><span class="store-logo-overlap" style="--logo-circle-size:${logoCircleSize}px;"><img src="${escapeHtml(logoUrl)}" style="transform:translate(${logoImageX}%,${logoImageY}%) scale(${logoImageScale});" alt="${escapeHtml(state.store.store_name)} logo"></span></div>
       <div class="store-panel-body" style="padding-top:${Math.round(logoCircleSize / 2 + 12)}px;">
         <a class="store-insta" href="https://instagram.com/${encodeURIComponent(igHandle)}" target="_blank" rel="noopener">@${escapeHtml(igHandle)}</a>${whatsappLink}
-        ${state.store.reviews_enabled === false ? "" : `<button type="button" class="write-review-link" onclick="setScreen('reviews')">Write a review</button>`}
-        ${marketSwitch}
+        ${state.store.reviews_enabled === false ? "" : `<button type="button" class="write-review-link" onclick="setScreen('reviews')">${escapeHtml(state.store.review_cta_label || "Share your Shizuku moment")}</button>`}
         <div class="store-dropoff">${escapeHtml(state.store.collection_address || "")}</div>
         <p class="store-desc">${storeDescription}</p>
         <div class="hours-card-dark">
@@ -1318,7 +1344,8 @@ function header({ showCart = false, showHome = false } = {}) {
           <div class="display brand-title">${storeName}</div>
           <div class="brand-sub">${storeTagline}</div>
         </div>
-        <div style="display:flex;align-items:center;gap:9px;">
+        <div class="header-actions">
+          ${state.store.malaysia_enabled === true ? `<div class="header-market-switch" aria-label="Ordering country"><span>Country</span><button type="button" class="${state.market === "SG" ? "active" : ""}" onclick="setMarket('SG')">SG</button><button type="button" class="${state.market === "MY" ? "active" : ""}" onclick="setMarket('MY')">MY</button></div>` : ""}
           ${showCart ? `
             <button class="cart-btn" onclick="setScreen('cart')" aria-label="Cart">
               ${ICONS.bag}
@@ -1411,7 +1438,7 @@ function reviewStars(rating) { return "★".repeat(Math.max(0, Math.min(5, Numbe
 function renderReviews() {
   if (state.store.reviews_enabled === false || !state.reviews.length) return "";
   const average = state.reviews.reduce((sum, item) => sum + Number(item.rating || 0), 0) / state.reviews.length;
-  return `<section class="faq-section review-section"><div class="faq-title"><span>お客様の声</span> · REVIEWS</div><div style="display:flex;align-items:center;gap:9px;margin:0 0 14px;"><b style="font:700 25px/1 Georgia,serif;">${average.toFixed(1)}</b><span style="color:#a36d1e;letter-spacing:2px;">${reviewStars(Math.round(average))}</span><span class="hint" style="margin:0;">${state.reviews.length} review${state.reviews.length === 1 ? "" : "s"}</span></div>${state.reviews.map((item) => `<article class="summary-card" style="margin:10px 0;padding:16px;"><div style="display:flex;justify-content:space-between;gap:12px;"><b>${escapeHtml(item.customer_name)}</b><span style="color:#a36d1e;letter-spacing:1px;">${reviewStars(item.rating)}</span></div>${item.product_summary ? `<div class="review-product-summary">${escapeHtml(item.product_summary)}</div>` : ""}<p style="margin:10px 0 0;line-height:1.55;">${escapeHtml(item.review_text)}</p></article>`).join("")}</section>`;
+  return `<section class="faq-section review-section"><div class="faq-title">${escapeHtml(state.store.reviews_heading || "お客様の声 · REVIEWS")}</div><div style="display:flex;align-items:center;gap:9px;margin:0 0 14px;"><b style="font:700 25px/1 Georgia,serif;">${average.toFixed(1)}</b><span style="color:#a36d1e;letter-spacing:2px;">${reviewStars(Math.round(average))}</span><span class="hint" style="margin:0;">${state.reviews.length} review${state.reviews.length === 1 ? "" : "s"}</span></div>${state.reviews.map((item) => `<article class="summary-card" style="margin:10px 0;padding:16px;"><div style="display:flex;justify-content:space-between;gap:12px;"><b>${escapeHtml(item.customer_name)}</b><span style="color:#a36d1e;letter-spacing:1px;">${reviewStars(item.rating)}</span></div>${item.product_summary ? `<div class="review-product-summary">${escapeHtml(item.product_summary)}</div>` : ""}<p style="margin:10px 0 0;line-height:1.55;">${escapeHtml(item.review_text)}</p></article>`).join("")}</section>`;
 }
 
 async function findReviewableOrders() {
@@ -1439,7 +1466,7 @@ async function submitReviewPortal() {
 }
 function renderReviewPortal() {
   const p = state.reviewPortal;
-  return `${header({ showHome: true })}<div class="screen review-portal"><button class="back-link" onclick="setScreen('menu')">${ICONS.back} Back to menu</button><div class="display" style="font-size:27px;">Write down your experience with Shizuku Lab</div><p class="hint" style="text-align:left;line-height:1.55;">Enter either your order number or phone number. We will show the drinks you collected — your order number will never be shown publicly.</p><div class="field"><label>Order number or phone number</label><input value="${escapeHtml(p.lookup)}" oninput="state.reviewPortal.lookup=this.value" placeholder="SL-XXXXXX or 91234567"></div><button class="primary-btn" ${p.loading ? "disabled" : ""} onclick="findReviewableOrders()">${p.loading ? "Checking…" : "Find my orders"}</button>${p.orders.length ? `<div class="review-order-list"><div class="bundle-heading">Choose the drinks to review</div>${p.orders.map((item) => `<button class="slot ${p.selected && String(p.selected.order_id) === String(item.order_id) ? "active" : ""}" ${item.already_reviewed ? "disabled" : ""} onclick="chooseReviewOrder('${escapeHtml(item.order_id)}')"><span><b>${escapeHtml(item.product_summary || "Shizuku drinks")}</b><br><span class="hint">Collected ${escapeHtml(item.collection_date || "")}${item.already_reviewed ? " · Review already submitted" : ""}</span></span></button>`).join("")}</div>` : ""}${p.selected && !p.selected.already_reviewed ? `<div class="summary-card review-write-card"><div class="field"><label>Name shown with review</label><input value="${escapeHtml(p.name)}" placeholder="Your name" oninput="state.reviewPortal.name=this.value"></div><div class="field"><label>Rating</label><select onchange="state.reviewPortal.rating=Number(this.value)">${[5,4,3,2,1].map((rating) => `<option value="${rating}" ${p.rating===rating?"selected":""}>${rating} star${rating===1?"":"s"}</option>`).join("")}</select></div><div class="field"><label>Your experience</label><textarea rows="5" oninput="state.reviewPortal.text=this.value">${escapeHtml(p.text)}</textarea></div><button class="primary-btn" ${p.loading ? "disabled" : ""} onclick="submitReviewPortal()">Submit review</button></div>` : ""}${p.message ? `<div class="ref-note" role="status">${escapeHtml(p.message)}</div>` : ""}</div>`;
+  return `${header({ showHome: true })}<div class="screen review-portal"><button class="back-link" onclick="setScreen('menu')">${ICONS.back} ${escapeHtml(state.store.review_back_button_text || "Back to menu")}</button><div class="display review-portal-title">${escapeHtml(state.store.review_portal_title || "Share your Shizuku experience")}</div><p class="hint" style="text-align:left;line-height:1.55;">${escapeHtml(state.store.review_portal_intro || "Enter either your order number or phone number. We will show the drinks you collected — your order number will never be shown publicly.")}</p><div class="field"><label>${escapeHtml(state.store.review_lookup_label || "Order number or phone number")}</label><input value="${escapeHtml(p.lookup)}" oninput="state.reviewPortal.lookup=this.value" placeholder="${escapeHtml(state.store.review_lookup_placeholder || "SL-XXXXXX or 91234567")}"></div><button class="primary-btn" ${p.loading ? "disabled" : ""} onclick="findReviewableOrders()">${p.loading ? "Checking…" : escapeHtml(state.store.review_find_button_text || "Find my orders")}</button>${p.orders.length ? `<div class="review-order-list"><div class="bundle-heading">${escapeHtml(state.store.review_choose_order_text || "Choose the drinks to review")}</div>${p.orders.map((item) => `<button class="slot ${p.selected && String(p.selected.order_id) === String(item.order_id) ? "active" : ""}" ${item.already_reviewed ? "disabled" : ""} onclick="chooseReviewOrder('${escapeHtml(item.order_id)}')"><span><b>${escapeHtml(item.product_summary || "Shizuku drinks")}</b><br><span class="hint">Collected ${escapeHtml(item.collection_date || "")}${item.already_reviewed ? " · Review already submitted" : ""}</span></span></button>`).join("")}</div>` : ""}${p.selected && !p.selected.already_reviewed ? `<div class="summary-card review-write-card"><div class="field"><label>${escapeHtml(state.store.review_name_label || "Name shown with review")}</label><input value="${escapeHtml(p.name)}" placeholder="Your name" oninput="state.reviewPortal.name=this.value"></div><div class="field"><label>${escapeHtml(state.store.review_rating_label || "Rating")}</label><select onchange="state.reviewPortal.rating=Number(this.value)">${[5,4,3,2,1].map((rating) => `<option value="${rating}" ${p.rating===rating?"selected":""}>${rating} star${rating===1?"":"s"}</option>`).join("")}</select></div><div class="field"><label>${escapeHtml(state.store.review_experience_label || "Your experience")}</label><textarea rows="5" oninput="state.reviewPortal.text=this.value">${escapeHtml(p.text)}</textarea></div><button class="primary-btn" ${p.loading ? "disabled" : ""} onclick="submitReviewPortal()">${escapeHtml(state.store.review_submit_button_text || "Send my review")}</button></div>` : ""}${p.message ? `<div class="ref-note" role="status">${escapeHtml(p.message)}</div>` : ""}</div>`;
 }
 
 /* ---------- FAQ ---------- */
@@ -1633,6 +1660,7 @@ function renderCheckout() {
             </div>`}
         ${state.promoMsg ? `<div class="ref-note">${escapeHtml(state.promoMsg)}</div>` : ""}
       </div>
+      ${state.store.marketing_opt_in_enabled === false ? "" : `<label class="slot" style="align-items:flex-start;cursor:pointer;margin:10px 0 16px;"><input type="checkbox" style="width:auto;margin-top:3px;accent-color:var(--matcha);" ${f.marketingOptIn ? "checked" : ""} onchange="onFormInput('marketingOptIn',this.checked)"><span><b>${escapeHtml(state.store.marketing_checkout_heading || "Shizuku updates")}</b><br>${escapeHtml(state.store.marketing_opt_in_label || "Keep me in the loop about monthly opening dates, new drinks and special offers.")}<br><span class="hint" style="text-align:left;margin-top:5px;display:block;">${escapeHtml(state.store.marketing_opt_in_help_text || "Occasional Shizuku Lab updates by email. You can opt out anytime.")}</span></span></label>`}
       <div class="summary-card">
         ${cartLines().map((line) => `
           <div class="row"><span class="label">${escapeHtml(line.productName)} × ${line.qty}</span><span>${money(line.unitPrice * line.qty)}</span></div>
@@ -1780,7 +1808,7 @@ function renderConfirmation() {
     ${header()}
     <div class="screen center">
       <div class="check-circle">${ICONS.check}</div>
-      <div class="display" style="font-size:20px;margin-bottom:4px;">Thanks, ${escapeHtml((order.customer_name || "there").split(" ")[0])}</div>
+      <div class="display" style="font-size:20px;margin-bottom:4px;">Thanks, ${escapeHtml(String(order.customer_name || "there").trim())}</div>
       <div class="hint" style="margin-bottom:20px;">We've received your payment submission and will confirm shortly.</div>
       <div class="code-box">
         <div class="mono code-text">${escapeHtml(order.order_number || order.id || "")}</div>
