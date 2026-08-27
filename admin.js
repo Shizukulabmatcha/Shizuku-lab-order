@@ -64,6 +64,8 @@ const astate = {
   recipeDraft: null,
   recipeDirty: false,
   recipeZeroCost: false,
+  costingMarket: (() => { try { return localStorage.getItem("shizuku-costing-market") === "MY" ? "MY" : "SG"; } catch (_) { return "SG"; } })(),
+  marketingSearch: "",
   suppliers: [],
   wholesaleItems: [],
   inspirationIdeas: [],
@@ -96,6 +98,10 @@ function money(n) {
   const locale = currency === "MYR" ? "en-MY" : currency === "CNY" ? "zh-CN" : "en-SG";
   try { return new Intl.NumberFormat(locale, { style: "currency", currency }).format(Number(n || 0)); }
   catch (_) { return `${currency} ${Number(n || 0).toFixed(2)}`; }
+}
+function marketMoney(n, market = astate.costingMarket) {
+  const currency = market === "MY" ? "MYR" : "SGD";
+  return new Intl.NumberFormat(market === "MY" ? "en-MY" : "en-SG", { style: "currency", currency }).format(Number(n || 0));
 }
 function bundleStartingPriceAdmin(bundle) {
   if (String(bundle?.bundle_pricing_mode || "fixed") !== "sum_selected") return Number(bundle?.discount_price || bundle?.price || 0);
@@ -1386,8 +1392,26 @@ async function setReviewStatus(id, status) {
 async function deleteReview(id) { if (!confirm("Delete this review permanently?")) return; const { error } = await db.from("customer_reviews").delete().eq("id", id); if (error) { alert(error.message); return; } astate.reviews = astate.reviews.filter((item) => String(item.id) !== String(id)); render(); }
 function renderReviewsTab() {
   const reviews = [...astate.reviews].sort((a, b) => (a.status === "pending" ? -1 : 1) - (b.status === "pending" ? -1 : 1) || new Date(b.created_at) - new Date(a.created_at));
-  return reviews.length ? reviews.map((item) => `<section class="dashboard-card" style="padding:20px;margin-bottom:14px;"><div class="queue-top"><div><b>${escapeHtml(item.customer_name || "Customer")}</b><div class="queue-name">${"★".repeat(Number(item.rating) || 0)}${"☆".repeat(5-(Number(item.rating)||0))}</div></div><div class="queue-status">${escapeHtml(item.status === "published" ? "APPROVED" : item.status === "hidden" ? "REJECTED" : "PENDING")}</div></div>${item.product_summary ? `<div class="ref-note"><b>Ordered drinks</b><br>${escapeHtml(item.product_summary)}</div>` : ""}<p style="line-height:1.6;white-space:pre-wrap;">${escapeHtml(item.review_text)}</p><div style="display:flex;gap:9px;flex-wrap:wrap;"><button class="btn-primary" onclick="setReviewStatus('${item.id}','published')">Approve</button><button class="btn-secondary" onclick="setReviewStatus('${item.id}','hidden')">Reject</button><button class="link-danger" onclick="deleteReview('${item.id}')">Delete</button></div></section>`).join("") : `<div class="dashboard-card"><div class="dashboard-empty">No reviews submitted yet.</div></div>`;
+  const s = astate.settingsDraft || {};
+  const fonts = [["work_sans","Work Sans"],["fraunces","Fraunces"],["georgia","Georgia"],["noto_serif_jp","Noto Serif JP"],["noto_sans_jp","Noto Sans JP"]];
+  const fontSelect = (key) => `<select onchange="onSettingsField('${key}',this.value);render()">${fonts.map(([v,l])=>`<option value="${v}" ${s[key]===v?"selected":""}>${l}</option>`).join("")}</select>`;
+  const field = (label,key,placeholder="") => `<div class="field"><label>${label}</label><input value="${escapeHtml(s[key] || "")}" placeholder="${escapeHtml(placeholder)}" oninput="onSettingsField('${key}',this.value)"></div>`;
+  return `<section class="dashboard-card" style="padding:20px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 16px"><div><h2>Customer review page</h2><span>Edit every review word and its main typography</span></div><span>${s.reviews_enabled===false?"Off":"On"}</span></div><label class="slot"><input type="checkbox" style="width:auto" ${s.reviews_enabled===false?"":"checked"} onchange="onSettingsField('reviews_enabled',this.checked);render()"><span><b>Show review invitation</b></span></label><div class="divider"></div><h3>Home invitation</h3><div class="workspace-preference-grid">${field("Button wording","review_cta_label","Share your Shizuku moment")}<div class="field"><label>Font</label>${fontSelect("review_cta_font")}</div><div class="field"><label>Size (px)</label><input type="number" min="10" max="32" value="${Number(s.review_cta_size||14)}" oninput="onSettingsField('review_cta_size',Number(this.value))"></div><div class="field"><label>Colour</label><input type="color" value="${escapeHtml(s.review_cta_color||'#4B5D3A')}" oninput="onSettingsField('review_cta_color',this.value)"></div></div><h3>Review portal</h3><div class="workspace-preference-grid">${field("Page title","review_portal_title","Share your Shizuku experience")}<div class="field"><label>Title font</label>${fontSelect("review_portal_title_font")}</div><div class="field"><label>Title size (px)</label><input type="number" min="16" max="56" value="${Number(s.review_portal_title_size||27)}" oninput="onSettingsField('review_portal_title_size',Number(this.value))"></div><div class="field"><label>Title colour</label><input type="color" value="${escapeHtml(s.review_portal_title_color||'#2A2A22')}" oninput="onSettingsField('review_portal_title_color',this.value)"></div></div>${field("Intro","review_portal_intro")}${field("Order / phone label","review_lookup_label")}${field("Lookup placeholder","review_lookup_placeholder")}${field("Find button","review_find_button_text")}${field("Choose order wording","review_choose_order_text")}${field("Name label","review_name_label")}${field("Rating label","review_rating_label")}${field("Experience label","review_experience_label")}${field("Submit button","review_submit_button_text")}${field("Back button","review_back_button_text")}<div class="ref-note"><b style="font-family:${s.review_portal_title_font==='fraunces'?'Fraunces,serif':'inherit'};font-size:${Number(s.review_portal_title_size||27)}px;color:${escapeHtml(s.review_portal_title_color||'#2A2A22')}">${escapeHtml(s.review_portal_title||'Share your Shizuku experience')}</b><br>${escapeHtml(s.review_portal_intro||'Tell us about the drinks you collected.')}</div><button class="btn-primary" onclick="saveSettings()">Save review settings</button></section><h2 style="margin:20px 0 12px">Review approvals</h2>${reviews.length ? reviews.map((item) => `<section class="dashboard-card" style="padding:20px;margin-bottom:14px;"><div class="queue-top"><div><b>${escapeHtml(item.customer_name || "Customer")}</b><div class="queue-name">${"★".repeat(Number(item.rating) || 0)}${"☆".repeat(5-(Number(item.rating)||0))}</div></div><div class="queue-status">${escapeHtml(item.status === "published" ? "APPROVED" : item.status === "hidden" ? "REJECTED" : "PENDING")}</div></div>${item.product_summary ? `<div class="ref-note"><b>Ordered drinks</b><br>${escapeHtml(item.product_summary)}</div>` : ""}<p style="line-height:1.6;white-space:pre-wrap;">${escapeHtml(item.review_text)}</p><div style="display:flex;gap:9px;flex-wrap:wrap;"><button class="btn-primary" onclick="setReviewStatus('${item.id}','published')">Approve</button><button class="btn-secondary" onclick="setReviewStatus('${item.id}','hidden')">Reject</button><button class="link-danger" onclick="deleteReview('${item.id}')">Delete</button></div></section>`).join("") : `<div class="dashboard-card"><div class="dashboard-empty">No reviews submitted yet.</div></div>`}`;
 }
+
+function marketingContacts() {
+  const map = new Map();
+  astate.orders.forEach((o) => {
+    if (!o.marketing_email_opt_in && !o.marketing_whatsapp_opt_in) return;
+    const email = String(o.customer_email || "").trim().toLowerCase(), phone = String(o.customer_phone || "").replace(/\D/g, "");
+    const key = email || phone; if (!key) return;
+    const old = map.get(key); if (!old || new Date(o.marketing_consent_at || o.created_at) > new Date(old.marketing_consent_at || old.created_at)) map.set(key, o);
+  });
+  const q = astate.marketingSearch.toLowerCase();
+  return [...map.values()].filter(o => !q || [o.customer_name,o.customer_email,o.customer_phone].some(v=>String(v||"").toLowerCase().includes(q)));
+}
+function exportMarketingContacts() { const rows=marketingContacts(); const csv=[["Name","Email","Phone","Email opt-in","WhatsApp opt-in","Consent date"],...rows.map(o=>[o.customer_name||"",o.customer_email||"",o.customer_phone||"",o.marketing_email_opt_in?"Yes":"No",o.marketing_whatsapp_opt_in?"Yes":"No",o.marketing_consent_at||o.created_at||""])].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n"); const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="shizuku-marketing-contacts.csv";a.click();URL.revokeObjectURL(a.href); }
+function renderMarketingTab() { const s=astate.settingsDraft||{}, contacts=marketingContacts(); return `<section class="dashboard-card" style="padding:20px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 16px"><div><h2>Checkout marketing consent</h2><span>Customers must actively tick this; it is never pre-selected</span></div><span>${s.marketing_opt_in_enabled===false?"Off":"On"}</span></div><label class="slot"><input type="checkbox" style="width:auto" ${s.marketing_opt_in_enabled===false?"":"checked"} onchange="onSettingsField('marketing_opt_in_enabled',this.checked);render()"><span><b>Show opt-in at checkout</b></span></label><div class="field"><label>Heading</label><input value="${escapeHtml(s.marketing_checkout_heading||"")}" oninput="onSettingsField('marketing_checkout_heading',this.value)"></div><div class="field"><label>Consent wording</label><textarea rows="3" oninput="onSettingsField('marketing_opt_in_label',this.value)">${escapeHtml(s.marketing_opt_in_label||"")}</textarea></div><div class="field"><label>Help text</label><textarea rows="2" oninput="onSettingsField('marketing_opt_in_help_text',this.value)">${escapeHtml(s.marketing_opt_in_help_text||"")}</textarea></div><label class="slot"><input type="checkbox" style="width:auto" ${s.marketing_email_enabled===false?"":"checked"} onchange="onSettingsField('marketing_email_enabled',this.checked)"><span>Email updates</span></label><label class="slot"><input type="checkbox" style="width:auto" ${s.marketing_whatsapp_enabled===true?"checked":""} onchange="onSettingsField('marketing_whatsapp_enabled',this.checked)"><span>WhatsApp updates (for later use)</span></label><button class="btn-primary" onclick="saveSettings()">Save marketing settings</button></section><section class="dashboard-card"><div class="dashboard-card-head"><div><h2>Marketing contacts</h2><span>${contacts.length} consented contact(s), newest consent kept</span></div><button class="btn-secondary" onclick="exportMarketingContacts()">Download CSV</button></div><div style="padding:14px 20px"><input placeholder="Search name, email or phone" value="${escapeHtml(astate.marketingSearch)}" oninput="astate.marketingSearch=this.value;render()"></div>${contacts.map(o=>`<div class="queue-row"><div class="queue-top"><div><b>${escapeHtml(o.customer_name||'Customer')}</b><div class="queue-name">${escapeHtml(o.customer_email||'No email')} · ${escapeHtml(o.customer_phone||'No phone')}</div></div><span class="queue-status">${[o.marketing_email_opt_in?'Email':'',o.marketing_whatsapp_opt_in?'WhatsApp':''].filter(Boolean).join(' + ')}</span></div></div>`).join('')||`<div class="dashboard-empty">No customers have opted in yet.</div>`}</section>`; }
 function renderDashboardTab() {
   const stats = dashboardStats();
   const workspaceName = astate.currentTeamMember?.display_name || "Ting";
@@ -1622,21 +1646,36 @@ async function saveEditedOrder() {
 }
 
 /* ---- inventory and food cost ---- */
-function newInventoryItem() { astate.inventoryDraft = { id: null, name: "", unit: "g", stock_quantity: 0, low_stock_level: 0, pack_size: 1, pack_cost: 0, supplier: "", cost_type: "ingredient" }; render(); }
+function currentCostingMarket() { return astate.costingMarket === "MY" ? "MY" : "SG"; }
+function inventoryForCostingMarket() { const market=currentCostingMarket(); return astate.inventory.filter((item) => String(item.market_code || "SG").toUpperCase() === market); }
+function productsForCostingMarket() { return astate.menu.filter((product) => !product.is_bundle && (currentCostingMarket() === "SG" || product.malaysia_available === true)); }
+function productSellingPriceForMarket(product) { return currentCostingMarket() === "MY" ? Number(product?.myr_price || 0) : Number(product?.discount_price || product?.price || 0); }
+function setCostingMarket(market) {
+  const next = String(market || "SG").toUpperCase() === "MY" ? "MY" : "SG";
+  if (next === currentCostingMarket()) return;
+  if (astate.recipeDirty && !confirm("You have unsaved food-cost changes. Discard them and switch country?")) { render(); return; }
+  astate.costingMarket = next;
+  try { localStorage.setItem("shizuku-costing-market", next); } catch (_) {}
+  astate.recipeProductId = null; astate.recipeDraftProductId = null; astate.recipeDraft = null; astate.recipeDirty = false; astate.inventoryDraft = null;
+  render();
+}
+function newInventoryItem() { astate.inventoryDraft = { id: null, market_code: currentCostingMarket(), name: "", unit: "g", stock_quantity: 0, low_stock_level: 0, pack_size: 1, pack_cost: 0, supplier: "", cost_type: "ingredient" }; render(); }
 function editInventoryItem(id) { const item = astate.inventory.find((row) => String(row.id) === String(id)); astate.inventoryDraft = item ? { ...item } : null; render(); }
 function inventoryField(key, value) { if (!astate.inventoryDraft) return; astate.inventoryDraft[key] = ["stock_quantity","low_stock_level","pack_size","pack_cost"].includes(key) ? Math.max(0, Number(value || 0)) : value; }
-async function saveInventoryItem() { const d = astate.inventoryDraft; if (!d || !String(d.name).trim()) return alert("Enter the ingredient name."); const payload = { name: String(d.name).trim(), unit: String(d.unit || "g").trim(), stock_quantity: Number(d.stock_quantity || 0), low_stock_level: Number(d.low_stock_level || 0), pack_size: Math.max(.0001, Number(d.pack_size || 1)), pack_cost: Number(d.pack_cost || 0), supplier: String(d.supplier || "").trim() || null, cost_type: d.cost_type === "packaging" ? "packaging" : "ingredient" }; const result = d.id ? await db.from("inventory_items").update(payload).eq("id", d.id).select().single() : await db.from("inventory_items").insert(payload).select().single(); if (result.error) return alert("Could not save ingredient: " + result.error.message); astate.inventoryDraft = null; await loadAll(); }
+async function saveInventoryItem() { const d = astate.inventoryDraft; if (!d || !String(d.name).trim()) return alert("Enter the ingredient name."); const payload = { market_code: String(d.market_code || currentCostingMarket()).toUpperCase(), name: String(d.name).trim(), unit: String(d.unit || "g").trim(), stock_quantity: Number(d.stock_quantity || 0), low_stock_level: Number(d.low_stock_level || 0), pack_size: Math.max(.0001, Number(d.pack_size || 1)), pack_cost: Number(d.pack_cost || 0), supplier: String(d.supplier || "").trim() || null, cost_type: d.cost_type === "packaging" ? "packaging" : "ingredient" }; const result = d.id ? await db.from("inventory_items").update(payload).eq("id", d.id).select().single() : await db.from("inventory_items").insert(payload).select().single(); if (result.error) return alert("Could not save ingredient: " + result.error.message); astate.inventoryDraft = null; await loadAll(); }
 async function deleteInventoryItem(id) { if (!confirm("Delete this ingredient and its recipe links?")) return; const { error } = await db.from("inventory_items").delete().eq("id", id); if (error) return alert(error.message); await loadAll(); }
 function beginRecipeDraft(productId) {
   const product = astate.menu.find((row) => String(row.id) === String(productId));
+  const market = currentCostingMarket();
   astate.recipeDraftProductId = productId;
-  astate.recipeDraft = astate.recipes.filter((row) => String(row.product_id) === String(productId)).map((row) => ({ ...row, draft_id: String(row.id) }));
-  astate.recipeZeroCost = product?.food_cost_confirmed_zero === true;
+  astate.recipeDraft = astate.recipes.filter((row) => String(row.product_id) === String(productId) && String(row.market_code || "SG").toUpperCase() === market).map((row) => ({ ...row, draft_id: String(row.id) }));
+  astate.recipeZeroCost = market === "MY" ? product?.malaysia_food_cost_confirmed_zero === true : product?.food_cost_confirmed_zero === true;
   astate.recipeDirty = false;
 }
 function activeRecipeRows(productId) {
   if (String(astate.recipeDraftProductId) === String(productId) && Array.isArray(astate.recipeDraft)) return astate.recipeDraft;
-  return astate.recipes.filter((row) => String(row.product_id) === String(productId));
+  const market = currentCostingMarket();
+  return astate.recipes.filter((row) => String(row.product_id) === String(productId) && String(row.market_code || "SG").toUpperCase() === market);
 }
 function setRecipeProduct(id) {
   if (astate.recipeDirty && !confirm("You have unsaved food-cost changes. Discard them and switch product?")) { render(); return; }
@@ -1651,6 +1690,7 @@ function addRecipeIngredient(inventoryId) {
   astate.recipeDraft.push({
     draft_id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     product_id: astate.recipeProductId,
+    market_code: currentCostingMarket(),
     inventory_item_id: inventoryId,
     quantity_used: 0,
   });
@@ -1683,12 +1723,13 @@ async function saveProductRecipe() {
   const button = document.getElementById("save-food-cost-btn");
   if (button) { button.disabled = true; button.textContent = "Saving…"; }
   const recipe = astate.recipeDraft.map((row) => ({ inventory_item_id: row.inventory_item_id, quantity_used: Math.max(0, Number(row.quantity_used || 0)) }));
-  const { error } = await db.rpc("save_shizuku_product_recipe", { p_product_id: String(productId), p_recipe: recipe });
+  const { error } = await db.rpc("save_shizuku_market_product_recipe", { p_product_id: String(productId), p_market_code: currentCostingMarket(), p_recipe: recipe });
   if (error) {
     if (button) { button.disabled = false; button.textContent = "Save food cost"; }
-    return alert("Could not save food cost: " + error.message + "\n\nRun the latest supabase-customer-product-stock.sql once if this is the first time using the Save button.");
+    return alert("Could not save food cost: " + error.message + "\n\nRun supabase-malaysia-independent-costing.sql once if this market costing update has not been installed.");
   }
-  const zeroResult = await db.from("products").update({ food_cost_confirmed_zero: astate.recipeZeroCost === true }).eq("id", productId);
+  const zeroField = currentCostingMarket() === "MY" ? "malaysia_food_cost_confirmed_zero" : "food_cost_confirmed_zero";
+  const zeroResult = await db.from("products").update({ [zeroField]: astate.recipeZeroCost === true }).eq("id", productId);
   if (zeroResult.error) {
     if (button) { button.disabled = false; button.textContent = "Save food cost"; }
     return alert("Food cost recipe was saved, but the $0 cost choice could not be saved: " + zeroResult.error.message + "\n\nRun supabase-zero-food-cost-option.sql once, then save again.");
@@ -1703,7 +1744,8 @@ async function saveProductRecipe() {
 function ingredientUnitCost(item) { return Number(item?.pack_cost || 0) / Math.max(.0001, Number(item?.pack_size || 1)); }
 function productFoodCost(productId) { return activeRecipeRows(productId).reduce((sum, row) => sum + Number(row.quantity_used || 0) * ingredientUnitCost(astate.inventory.find((item) => String(item.id) === String(row.inventory_item_id))), 0); }
 function productCostParts(productId) {
-  return astate.recipes.filter((row) => String(row.product_id) === String(productId)).reduce((totals, row) => {
+  const market = currentCostingMarket();
+  return astate.recipes.filter((row) => String(row.product_id) === String(productId) && String(row.market_code || "SG").toUpperCase() === market).reduce((totals, row) => {
     const item = astate.inventory.find((entry) => String(entry.id) === String(row.inventory_item_id));
     const value = Number(row.quantity_used || 0) * ingredientUnitCost(item);
     if (item?.cost_type === "packaging") totals.packaging += value; else totals.food += value;
@@ -1726,38 +1768,42 @@ function updateRecipePreview() {
   const productId = astate.recipeProductId;
   const selectedProduct = astate.menu.find((item) => String(item.id) === String(productId));
   const cost = productFoodCost(productId);
-  const sellingPrice = Number(selectedProduct?.discount_price || selectedProduct?.price || 0);
+  const sellingPrice = productSellingPriceForMarket(selectedProduct);
   const percentage = sellingPrice > 0 ? cost / sellingPrice * 100 : 0;
   const costValue = document.getElementById("selected-food-cost-value");
   const percentValue = document.getElementById("selected-food-cost-percent");
   const headerValue = document.getElementById("recipe-cost-header");
-  if (costValue) costValue.textContent = money(cost);
+  if (costValue) costValue.textContent = marketMoney(cost);
   if (percentValue) percentValue.textContent = `${percentage.toFixed(1)}%`;
-  if (headerValue) headerValue.textContent = `${money(cost)} per serving`;
+  if (headerValue) headerValue.textContent = `${marketMoney(cost)} per serving`;
   (astate.recipeDraft || []).forEach((row) => {
     const ingredient = astate.inventory.find((item) => String(item.id) === String(row.inventory_item_id));
     const line = document.getElementById(`recipe-line-cost-${row.draft_id}`);
-    if (line) line.textContent = money(Number(row.quantity_used || 0) * ingredientUnitCost(ingredient));
+    if (line) line.textContent = marketMoney(Number(row.quantity_used || 0) * ingredientUnitCost(ingredient));
   });
 }
 function renderInventoryTab() {
   if (!astate.inventoryReady) return `<section class="dashboard-card"><div class="dashboard-empty"><b>Inventory setup is not installed yet.</b><br><br>Run <code>supabase-inventory-food-cost.sql</code> once in Supabase SQL Editor, then refresh this page.</div></section>`;
-  const productId = astate.recipeProductId || astate.menu[0]?.id;
+  const market = currentCostingMarket();
+  const marketLabel = market === "MY" ? "Malaysia · MYR" : "Singapore · SGD";
+  const marketInventory = inventoryForCostingMarket();
+  const marketProducts = productsForCostingMarket();
+  const productId = astate.recipeProductId || marketProducts[0]?.id;
   if (!astate.recipeProductId && productId) astate.recipeProductId = productId;
   if (productId && (String(astate.recipeDraftProductId) !== String(productId) || !Array.isArray(astate.recipeDraft))) beginRecipeDraft(productId);
   const selectedProduct = astate.menu.find((item) => String(item.id) === String(productId));
   const recipeRows = activeRecipeRows(productId);
   const cost = productFoodCost(productId);
-  const sellingPrice = Number(selectedProduct?.discount_price || selectedProduct?.price || 0);
+  const sellingPrice = productSellingPriceForMarket(selectedProduct);
   const percentage = sellingPrice > 0 ? cost / sellingPrice * 100 : 0;
-  const overviewRows = astate.menu.map((product) => {
+  const overviewRows = marketProducts.map((product) => {
     const parts = productCostParts(product.id), total = parts.food + parts.packaging;
-    const price = Number(product.discount_price || product.price || 0), profit = price - total, margin = grossMargin(price,total);
-    return `<tr onclick="setRecipeProduct('${escapeHtml(product.id)}')" style="cursor:pointer;"><td><b>${escapeHtml(product.name)}</b></td><td>${money(price)}</td><td>${money(parts.food)}</td><td>${money(parts.packaging)}</td><td><b>${money(total)}</b></td><td>${money(profit)}</td><td>${marginBadge(margin)}</td></tr>`;
+    const price = productSellingPriceForMarket(product), profit = price - total, margin = grossMargin(price,total);
+    return `<tr onclick="setRecipeProduct('${escapeHtml(product.id)}')" style="cursor:pointer;"><td><b>${escapeHtml(product.name)}</b></td><td>${marketMoney(price)}</td><td>${marketMoney(parts.food)}</td><td>${marketMoney(parts.packaging)}</td><td><b>${marketMoney(total)}</b></td><td>${marketMoney(profit)}</td><td>${marginBadge(margin)}</td></tr>`;
   }).join("");
-  const inventoryHtml = astate.inventory.length ? astate.inventory.map((item) => `
+  const inventoryHtml = marketInventory.length ? marketInventory.map((item) => `
     <div class="queue-row"><div class="queue-top"><div><b>${escapeHtml(item.name)}</b>
-      <div class="queue-name">${escapeHtml(item.supplier || "No supplier")} · ${money(item.pack_cost)} / ${escapeHtml(item.pack_size)} ${escapeHtml(item.unit)}</div>
+      <div class="queue-name">${escapeHtml(item.supplier || "No supplier")} · ${marketMoney(item.pack_cost)} / ${escapeHtml(item.pack_size)} ${escapeHtml(item.unit)}</div>
     </div><div style="text-align:right"><b style="color:${Number(item.stock_quantity) <= Number(item.low_stock_level) ? "#B33333" : "inherit"}">${Number(item.stock_quantity)} ${escapeHtml(item.unit)}</b>
       <div style="margin-top:7px"><button class="link-btn" onclick="editInventoryItem('${item.id}')">Edit</button> <button class="link-danger" onclick="deleteInventoryItem('${item.id}')">Delete</button></div>
     </div></div></div>`).join("") : `<div class="dashboard-empty">Add matcha, milk, syrup, cups and other ingredients.</div>`;
@@ -1765,31 +1811,32 @@ function renderInventoryTab() {
     const ingredient = astate.inventory.find((item) => String(item.id) === String(row.inventory_item_id));
     const lineCost = Number(row.quantity_used || 0) * ingredientUnitCost(ingredient);
     return `<div style="display:grid;grid-template-columns:1fr 105px 70px;gap:8px;align-items:end;margin:10px 0">
-      <div><b>${escapeHtml(ingredient?.name || "Ingredient")}</b><div id="recipe-line-cost-${escapeHtml(row.draft_id)}" class="hint" style="text-align:left;margin:3px 0 0">${money(lineCost)}</div></div>
+      <div><b>${escapeHtml(ingredient?.name || "Ingredient")}</b><div id="recipe-line-cost-${escapeHtml(row.draft_id)}" class="hint" style="text-align:left;margin:3px 0 0">${marketMoney(lineCost)}</div></div>
       <div><label style="font-size:11px">Use (${escapeHtml(ingredient?.unit || "unit")})</label><input type="number" min="0" step="0.01" value="${Number(row.quantity_used || 0)}" oninput="updateRecipeQuantity('${escapeHtml(row.draft_id)}',this.value)"></div>
       <button class="link-danger" onclick="deleteRecipeRow('${escapeHtml(row.draft_id)}')">Remove</button>
     </div>`;
   }).join("");
   return `
-    <section class="dashboard-card" style="margin-bottom:20px;"><div class="dashboard-card-head"><div><h2>Costing overview</h2><span>All products · updates automatically from the existing recipes</span></div></div><div class="costing-table-wrap"><table class="costing-table"><thead><tr><th>Product</th><th>Selling price</th><th>Food cost</th><th>Packaging</th><th>Total cost</th><th>Profit</th><th>Margin</th></tr></thead><tbody>${overviewRows || `<tr><td colspan="7">No products yet.</td></tr>`}</tbody></table></div><div class="hint" style="text-align:left;padding:10px 20px 0;">Tap a product row to open its existing detailed ingredient breakdown.</div><div style="padding:0 20px 18px;">${marginGuideInfo("direct")}</div></section>
+    <section class="dashboard-card" style="padding:18px;margin-bottom:20px"><div class="dashboard-card-head" style="padding:0 0 14px"><div><h2>Country costing</h2><span>Each country keeps its own inventory, recipe and costs</span></div><b>${marketLabel}</b></div><div class="tabs" style="margin:0"><button class="${market === "SG" ? "active" : ""}" onclick="setCostingMarket('SG')">Singapore · SGD</button><button class="${market === "MY" ? "active" : ""}" onclick="setCostingMarket('MY')">Malaysia · MYR</button></div>${market === "MY" ? `<div class="ref-note" style="margin-top:14px">Only products enabled for Malaysia appear here. Add Malaysia ingredients below and build a separate MY recipe; Singapore costing is never changed.</div>` : ""}</section>
+    <section class="dashboard-card" style="margin-bottom:20px;"><div class="dashboard-card-head"><div><h2>${marketLabel} costing overview</h2><span>Updates automatically from this country's recipes</span></div></div><div class="costing-table-wrap"><table class="costing-table"><thead><tr><th>Product</th><th>Selling price</th><th>Food cost</th><th>Packaging</th><th>Total cost</th><th>Profit</th><th>Margin</th></tr></thead><tbody>${overviewRows || `<tr><td colspan="7">${market === "MY" ? "Turn on Malaysia availability and add MYR prices in Products first." : "No products yet."}</td></tr>`}</tbody></table></div><div class="hint" style="text-align:left;padding:10px 20px 0;">Tap a product row to open its existing detailed ingredient breakdown.</div><div style="padding:0 20px 18px;">${marginGuideInfo("direct")}</div></section>
     <div class="stat-grid">
-      <div class="stat"><div class="stat-label">Ingredients</div><div class="stat-value">${astate.inventory.length}</div><div class="stat-help">${astate.inventory.filter((item) => Number(item.stock_quantity) <= Number(item.low_stock_level)).length} low-stock item(s)</div></div>
-      <div class="stat"><div class="stat-label">Food + packaging cost</div><div id="selected-food-cost-value" class="stat-value">${money(cost)}</div><div class="stat-help">Ingredients and packaging per serving</div></div>
-      <div class="stat"><div class="stat-label">Product-cost %</div><div id="selected-food-cost-percent" class="stat-value">${percentage.toFixed(1)}%</div><div class="stat-help">Selling price ${money(sellingPrice)}</div></div>
+      <div class="stat"><div class="stat-label">${marketLabel} cost items</div><div class="stat-value">${marketInventory.length}</div><div class="stat-help">${marketInventory.filter((item) => Number(item.stock_quantity) <= Number(item.low_stock_level)).length} low-stock item(s)</div></div>
+      <div class="stat"><div class="stat-label">Food + packaging cost</div><div id="selected-food-cost-value" class="stat-value">${marketMoney(cost)}</div><div class="stat-help">Ingredients and packaging per serving</div></div>
+      <div class="stat"><div class="stat-label">Product-cost %</div><div id="selected-food-cost-percent" class="stat-value">${percentage.toFixed(1)}%</div><div class="stat-help">Selling price ${marketMoney(sellingPrice)}</div></div>
     </div>
     <div class="dashboard-grid">
-      <section class="dashboard-card"><div class="dashboard-card-head"><h2>Inventory stock</h2><button class="btn-primary" onclick="newInventoryItem()">+ Ingredient / packaging</button></div>${inventoryHtml}</section>
-      <section id="food-cost-editor" class="dashboard-card"><div class="dashboard-card-head"><div><h2>Food cost recipe</h2><span id="recipe-cost-header">${money(cost)} per serving</span></div><button id="save-food-cost-btn" class="btn-primary" ${astate.recipeDirty ? "" : "disabled"} onclick="saveProductRecipe()">Save food cost</button></div>
-        <div style="padding:20px"><div class="field"><label>Product</label><select onchange="setRecipeProduct(this.value)">${astate.menu.map((product) => `<option value="${product.id}" ${String(product.id) === String(productId) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div>
+      <section class="dashboard-card"><div class="dashboard-card-head"><div><h2>${marketLabel} inventory</h2><span>Stock is deducted only by ${market === "MY" ? "Malaysia" : "Singapore"} orders</span></div><button class="btn-primary" onclick="newInventoryItem()">+ Ingredient / packaging</button></div>${inventoryHtml}</section>
+      <section id="food-cost-editor" class="dashboard-card"><div class="dashboard-card-head"><div><h2>${marketLabel} food cost recipe</h2><span id="recipe-cost-header">${marketMoney(cost)} per serving</span></div><button id="save-food-cost-btn" class="btn-primary" ${astate.recipeDirty ? "" : "disabled"} onclick="saveProductRecipe()">Save food cost</button></div>
+        <div style="padding:20px"><div class="field"><label>Product</label><select onchange="setRecipeProduct(this.value)">${marketProducts.map((product) => `<option value="${product.id}" ${String(product.id) === String(productId) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div>
           ${recipeHtml}
           <label class="slot" style="cursor:pointer;gap:10px;margin:16px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${astate.recipeZeroCost ? "checked" : ""} onchange="setRecipeZeroCost(this.checked)"><span><b>This product intentionally has $0 cost</b><br><span class="hint">Use this only when there is genuinely no direct food or packaging cost.</span></span></label>
-          <div class="field" style="margin-top:18px"><label>Add ingredient or packaging</label><select id="food-cost-add-item" ${astate.recipeZeroCost ? "disabled" : ""} onchange="if(this.value){addRecipeIngredient(this.value)}"><option value="">Choose cost item…</option>${astate.inventory.filter((item) => !recipeRows.some((row) => String(row.inventory_item_id) === String(item.id))).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></div>
+          <div class="field" style="margin-top:18px"><label>Add ingredient or packaging</label><select id="food-cost-add-item" ${astate.recipeZeroCost ? "disabled" : ""} onchange="if(this.value){addRecipeIngredient(this.value)}"><option value="">Choose cost item…</option>${marketInventory.filter((item) => !recipeRows.some((row) => String(row.inventory_item_id) === String(item.id))).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select></div>
           <div class="ref-note">Add both ingredients and packaging (cup, lid, straw, sticker or carrier). Edit everything first, then press Save food cost once.</div>
         </div>
       </section>
     </div>${astate.inventoryDraft ? renderInventoryEditor() : ""}`;
 }
-function renderInventoryEditor() { const d = astate.inventoryDraft; return `<div class="overlay"><div class="overlay-card" style="max-height:85vh;overflow:auto"><div class="display overlay-title" style="font-size:19px">${d.id ? "Edit ingredient" : "New ingredient"}</div><div class="field"><label>Name</label><input value="${escapeHtml(d.name)}" oninput="inventoryField('name',this.value)"></div><div class="field"><label>Cost type</label><select onchange="inventoryField('cost_type',this.value)"><option value="ingredient" ${d.cost_type!=="packaging"?"selected":""}>Ingredient / food</option><option value="packaging" ${d.cost_type==="packaging"?"selected":""}>Packaging</option></select></div><div class="field"><label>Unit</label><select onchange="inventoryField('unit',this.value)">${["g","ml","pc","pack","bottle"].map((unit) => `<option ${d.unit === unit ? "selected" : ""}>${unit}</option>`).join("")}</select></div><div class="field"><label>Current stock</label><input type="number" min="0" step="0.01" value="${d.stock_quantity}" oninput="inventoryField('stock_quantity',this.value)"></div><div class="field"><label>Low-stock alert at</label><input type="number" min="0" step="0.01" value="${d.low_stock_level}" oninput="inventoryField('low_stock_level',this.value)"></div><div class="field"><label>Purchased pack size</label><input type="number" min="0.0001" step="0.01" value="${d.pack_size}" oninput="inventoryField('pack_size',this.value)"></div><div class="field"><label>Pack cost ($)</label><input type="number" min="0" step="0.01" value="${d.pack_cost}" oninput="inventoryField('pack_cost',this.value)"></div><div class="field"><label>Supplier</label><input value="${escapeHtml(d.supplier || "")}" oninput="inventoryField('supplier',this.value)"></div><div class="btn-row"><button class="btn-secondary" onclick="astate.inventoryDraft=null;render()">Cancel</button><button class="btn-primary" onclick="saveInventoryItem()">Save ingredient</button></div></div></div>`; }
+function renderInventoryEditor() { const d = astate.inventoryDraft, currency=String(d.market_code||currentCostingMarket()).toUpperCase()==="MY"?"MYR":"SGD"; return `<div class="overlay"><div class="overlay-card" style="max-height:85vh;overflow:auto"><div class="display overlay-title" style="font-size:19px">${d.id ? "Edit ingredient" : "New ingredient"}</div><div class="ref-note"><b>${currency === "MYR" ? "Malaysia" : "Singapore"} inventory · ${currency}</b><br>This cost item is kept separate from the other country.</div><div class="field"><label>Name</label><input value="${escapeHtml(d.name)}" oninput="inventoryField('name',this.value)"></div><div class="field"><label>Cost type</label><select onchange="inventoryField('cost_type',this.value)"><option value="ingredient" ${d.cost_type!=="packaging"?"selected":""}>Ingredient / food</option><option value="packaging" ${d.cost_type==="packaging"?"selected":""}>Packaging</option></select></div><div class="field"><label>Unit</label><select onchange="inventoryField('unit',this.value)">${["g","ml","pc","pack","bottle"].map((unit) => `<option ${d.unit === unit ? "selected" : ""}>${unit}</option>`).join("")}</select></div><div class="field"><label>Current stock</label><input type="number" min="0" step="0.01" value="${d.stock_quantity}" oninput="inventoryField('stock_quantity',this.value)"></div><div class="field"><label>Low-stock alert at</label><input type="number" min="0" step="0.01" value="${d.low_stock_level}" oninput="inventoryField('low_stock_level',this.value)"></div><div class="field"><label>Purchased pack size</label><input type="number" min="0.0001" step="0.01" value="${d.pack_size}" oninput="inventoryField('pack_size',this.value)"></div><div class="field"><label>Pack cost (${currency})</label><input type="number" min="0" step="0.01" value="${d.pack_cost}" oninput="inventoryField('pack_cost',this.value)"></div><div class="field"><label>Supplier</label><input value="${escapeHtml(d.supplier || "")}" oninput="inventoryField('supplier',this.value)"></div><div class="btn-row"><button class="btn-secondary" onclick="astate.inventoryDraft=null;render()">Cancel</button><button class="btn-primary" onclick="saveInventoryItem()">Save ingredient</button></div></div></div>`; }
 
 /* ---- Wholesale / B2B ---- */
 function newSupplier(){astate.supplierDraft={id:null,name:"",contact_person:"",phone:"",email:"",website_instagram:"",products_supplied:"",notes:""};render();}
@@ -1940,6 +1987,11 @@ function renderTeamTab() {
 function setMalaysiaCollectionPoints(value) {
   astate.settingsDraft.malaysia_collection_points = String(value || "").split("\n").map((item) => item.trim()).filter(Boolean);
 }
+function openMalaysiaCosting() {
+  astate.costingMarket = "MY";
+  try { localStorage.setItem("shizuku-costing-market", "MY"); } catch (_) {}
+  setTab("inventory");
+}
 function renderMalaysiaTab() {
   const s = astate.settingsDraft || {};
   const points = Array.isArray(s.malaysia_collection_points) ? s.malaysia_collection_points.join("\n") : "";
@@ -1951,7 +2003,8 @@ function renderMalaysiaTab() {
     <div class="field"><label>Touch ’n Go QR image</label><input value="${escapeHtml(s.touchngo_qr_url || "")}" placeholder="Upload below or paste image URL" oninput="onSettingsField('touchngo_qr_url',this.value)"><input type="file" accept="image/*" style="margin-top:8px" onchange="uploadStorefrontImage(this,'touchngo_qr_url')">${s.touchngo_qr_url ? `<img src="${escapeHtml(s.touchngo_qr_url)}" alt="Touch ’n Go QR preview" style="display:block;max-width:260px;width:100%;aspect-ratio:1;object-fit:contain;background:#fff;border:1px solid var(--admin-line);border-radius:14px;margin-top:10px">` : ""}<div class="hint" style="text-align:left;margin-top:6px">The checkout always shows the exact locked order total in MYR. Customers cannot edit the order amount inside Shizuku Lab; verify the paid amount against the order before confirming.</div></div>
     <div class="field"><label>Malaysia collection points — one per line</label><textarea rows="5" placeholder="Johor Bahru collection point" oninput="setMalaysiaCollectionPoints(this.value)">${escapeHtml(points)}</textarea></div>
     <div class="ref-note"><b>Product prices</b><br>Open Products → Edit to choose which drinks are available in Malaysia and enter their MYR price. Singapore prices are stored separately and will not change.</div>
-    <button class="btn-primary" id="save-settings-btn" style="margin-top:16px" onclick="saveSettings()">Save Malaysia settings</button>
+    <div class="ref-note"><b>Malaysia costing &amp; inventory</b><br>Ingredients, packaging, recipes, stock and profit are stored separately in MYR. They never overwrite Singapore costing.</div>
+    <div class="btn-row" style="margin-top:16px"><button class="btn-secondary" onclick="openMalaysiaCosting()">Open Malaysia costing →</button><button class="btn-primary" id="save-settings-btn" onclick="saveSettings()">Save Malaysia settings</button></div>
   </section>`;
 }
 function renderIdeaEditor(){const d=astate.ideaDraft;return `<div class="overlay"><div class="overlay-card"><div class="display overlay-title">${d.id?"Edit":"New"} idea</div><div class="field"><label>Title</label><input value="${escapeHtml(d.title||"")}" oninput="ideaField('title',this.value)"></div><div class="field"><label>Notes</label><textarea rows="6" oninput="ideaField('notes',this.value)">${escapeHtml(d.notes||"")}</textarea></div><div class="field"><label>Category</label><select onchange="ideaField('category',this.value)">${IDEA_CATEGORIES.map(x=>`<option ${d.category===x?"selected":""}>${x}</option>`).join("")}</select></div><div class="field"><label>Status</label><select onchange="ideaField('status',this.value)"><option value="active" ${d.status!=="archived"?"selected":""}>Active</option><option value="archived" ${d.status==="archived"?"selected":""}>Done / archived</option></select></div><label class="slot"><input type="checkbox" style="width:auto" ${d.is_pinned?"checked":""} onchange="ideaField('is_pinned',this.checked)"> Pin this idea</label><div class="btn-row"><button class="btn-secondary" onclick="astate.ideaDraft=null;render()">Cancel</button><button class="btn-primary" onclick="saveIdea()">Save idea</button></div></div></div>`;}
@@ -2824,6 +2877,7 @@ function render() {
     ["customers", "◉", "Customers"],
     ["messages", "✉", `Messages${unreadMessageCount() ? ` (${unreadMessageCount()})` : ""}`],
     ["reviews", "★", "Reviews"],
+    ["marketing", "✉", "Marketing"],
     ["availability", "◷", "Availability"],
     ["faq", "?", "FAQ"],
     ["notifications", "🔔", "Notifications"],
@@ -2833,12 +2887,12 @@ function render() {
     ["settings", "⚙", "Store settings"],
   ];
   const sortedNav = orderedAdminNav(nav);
-  const tabTitle = { preparation: "Today's preparation", orders: "Orders", menu: "Products", inventory: "Inventory & food cost", wholesale:"Wholesale / B2B", inspiration:"Inspiration", team:"Team & activity", malaysia:"Malaysia ordering", promos: "Promos", rewards: "Rewards", customers: "Customers", messages: "Messages", reviews: "Reviews", availability: "Availability", faq: "FAQ", notifications: "Notifications", theme_design: "Theme & design", wording: "Customer wording", checkout_comms: "Checkout & communication", settings: "Store settings" };
-  const tabSubtitle = { preparation: "See every paid drink to prepare and print today's list.", orders: "Review payments and edit every customer order.", menu: "Keep your drinks, prices and availability up to date.", inventory: "Track stock and review every product cost in one place.", wholesale:"Manage private B2B products, pricing and suppliers.", inspiration:"Capture, pin and organise private business ideas.", team:"Manage workspace access, F&B roles, activity and regional preferences.", malaysia:"Turn MYR ordering and Touch ’n Go payment on only when you are ready.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", messages: "Read and reply to order-linked customer messages.", reviews: "Approve or reject verified order reviews before they appear publicly.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose where you receive new-order alerts.", theme_design: "Choose a theme, then customise colours, fonts and layout in one place.", wording: "Edit the main words customers see across your shop.", checkout_comms: "Control checkout fields, payment wording, chat and reviews.", settings: "Manage your store details, images, contact information and payment details." };
+  const tabTitle = { preparation: "Today's preparation", orders: "Orders", menu: "Products", inventory: "Inventory & food cost", wholesale:"Wholesale / B2B", inspiration:"Inspiration", team:"Team & activity", malaysia:"Malaysia ordering", promos: "Promos", rewards: "Rewards", customers: "Customers", messages: "Messages", reviews: "Reviews", marketing:"Marketing", availability: "Availability", faq: "FAQ", notifications: "Notifications", theme_design: "Theme & design", wording: "Customer wording", checkout_comms: "Checkout & communication", settings: "Store settings" };
+  const tabSubtitle = { preparation: "See every paid drink to prepare and print today's list.", orders: "Review payments and edit every customer order.", menu: "Keep your drinks, prices and availability up to date.", inventory: "Track stock and review every product cost in one place.", wholesale:"Manage private B2B products, pricing and suppliers.", inspiration:"Capture, pin and organise private business ideas.", team:"Manage workspace access, F&B roles, activity and regional preferences.", malaysia:"Turn MYR ordering and Touch ’n Go payment on only when you are ready.", promos: "Create discounts customers can use at checkout.", rewards: "Choose a stamp card or points programme for repeat customers.", customers: "See every customer and save private remarks.", messages: "Read and reply to order-linked customer messages.", reviews: "Edit the review experience and moderate verified reviews.", marketing:"Manage checkout consent and your opted-in contact list.", availability: "Choose your pickup window and collection calendar.", faq: "Edit the answers customers see on your ordering page.", notifications: "Choose where you receive new-order alerts.", theme_design: "Choose a theme, then customise colours, fonts and layout in one place.", wording: "Edit the main words customers see across your shop.", checkout_comms: "Control checkout fields, payment wording, chat and reviews.", settings: "Manage your store details, images, contact information and payment details." };
   const page = astate.tab === "dashboard" ? renderDashboardTab() : `
     <div class="admin-top"><div><div class="admin-eyebrow">Shizuku Lab admin</div><h1 class="tab-page-title">${tabTitle[astate.tab] || "Dashboard"}</h1><p class="tab-page-subtitle">${tabSubtitle[astate.tab] || ""}</p></div><a class="open-shop" href="order.html">Open customer shop ↗</a></div>
     <div class="admin-content">
-      ${astate.tab === "preparation" ? renderPreparationTab() : astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "inventory" ? renderInventoryTab() : astate.tab === "wholesale" ? renderWholesaleTab() : astate.tab === "inspiration" ? renderInspirationTab() : astate.tab === "team" ? renderTeamTab() : astate.tab === "malaysia" ? renderMalaysiaTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "messages" ? renderMessagesTab() : astate.tab === "reviews" ? renderReviewsTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : astate.tab === "theme_design" ? renderThemeDesignTab() : astate.tab === "wording" ? renderWordingTab() : astate.tab === "checkout_comms" ? renderCheckoutCommunicationTab() : renderSettingsTab()}
+      ${astate.tab === "preparation" ? renderPreparationTab() : astate.tab === "orders" ? renderOrders() : astate.tab === "menu" ? renderMenuTab() : astate.tab === "inventory" ? renderInventoryTab() : astate.tab === "wholesale" ? renderWholesaleTab() : astate.tab === "inspiration" ? renderInspirationTab() : astate.tab === "team" ? renderTeamTab() : astate.tab === "malaysia" ? renderMalaysiaTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "messages" ? renderMessagesTab() : astate.tab === "reviews" ? renderReviewsTab() : astate.tab === "marketing" ? renderMarketingTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : astate.tab === "theme_design" ? renderThemeDesignTab() : astate.tab === "wording" ? renderWordingTab() : astate.tab === "checkout_comms" ? renderCheckoutCommunicationTab() : renderSettingsTab()}
     </div>`;
   app.innerHTML = `
     ${dashboardStyles()}
