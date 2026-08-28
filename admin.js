@@ -42,6 +42,7 @@ const astate = {
   messages: [],
   messageDrafts: {},
   selectedAvailabilityDate: null,
+  availabilityMarket: (() => { try { return localStorage.getItem("shizuku-availability-market") === "MY" ? "MY" : "SG"; } catch (_) { return "SG"; } })(),
   settingsSection: "welcome",
   availabilityDraft: null,
   offlineOrderDraft: null,
@@ -139,7 +140,7 @@ function weeklyAvailability(dateText) {
   return { is_open: !!day?.is_open, collection_time: windows.map((item) => item.range).filter(Boolean).join(" | "), pickup_windows: windows };
 }
 function availabilityForDate(dateText) {
-  const override = astate.openingOverrides.find((item) => item.collection_date === dateText);
+  const override = astate.openingOverrides.find((item) => item.collection_date === dateText && String(item.market_code || "SG") === astate.availabilityMarket);
   return override ? { is_open: !!override.is_open, collection_time: override.collection_time || "", pickup_windows: Array.isArray(override.pickup_windows) ? override.pickup_windows : availabilityRanges(override.collection_time).filter(Boolean).map((range) => ({ range, capacity: null })), override: true } : { ...weeklyAvailability(dateText), override: false };
 }
 function setAvailabilityDraft(dateText) {
@@ -148,6 +149,12 @@ function setAvailabilityDraft(dateText) {
   astate.availabilityDraft = { collection_date: dateText, is_open: value.is_open, collection_time: value.collection_time, pickup_windows: (value.pickup_windows || []).map((item) => ({ ...item })) };
 }
 function selectAvailabilityDate(dateText) { setAvailabilityDraft(dateText); render(); }
+function setAvailabilityMarket(market) {
+  astate.availabilityMarket = market === "MY" ? "MY" : "SG";
+  try { localStorage.setItem("shizuku-availability-market", astate.availabilityMarket); } catch (_) {}
+  setAvailabilityDraft(astate.selectedAvailabilityDate || localDateText(new Date()));
+  render();
+}
 function changeCalendarMonth(amount) {
   const current = new Date(`${astate.calendarMonth}T12:00:00`);
   current.setMonth(current.getMonth() + amount);
@@ -164,12 +171,13 @@ function availabilityRanges(value) {
 }
 const WEEKDAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 function weeklySchedule() {
-  const saved = astate.settingsDraft?.weekly_pickup_schedule;
+  const key = astate.availabilityMarket === "MY" ? "malaysia_weekly_pickup_schedule" : "weekly_pickup_schedule";
+  const saved = astate.settingsDraft?.[key];
   if (Array.isArray(saved) && saved.length === 7) return saved;
   const saturday = astate.settingsDraft?.saturday_collection_time || "10:00 AM - 12:00 PM";
   const sunday = astate.settingsDraft?.sunday_collection_time || "10:00 AM - 1:00 PM";
   const schedule = WEEKDAYS.map((label, day) => ({ day, label, is_open: day === 0 || day === 6, windows: day === 0 ? [{ range:sunday, capacity:null }] : day === 6 ? [{ range:saturday, capacity:null }] : [] }));
-  if (astate.settingsDraft) astate.settingsDraft.weekly_pickup_schedule = schedule;
+  if (astate.settingsDraft) astate.settingsDraft[key] = schedule;
   return schedule;
 }
 function setWeeklyDayOpen(day, value) { const row=weeklySchedule().find((item)=>Number(item.day)===Number(day)); if (!row) return; row.is_open=!!value; if (row.is_open && !row.windows.length) row.windows=[{range:"10:00 AM - 12:00 PM",capacity:null}]; render(); }
@@ -197,17 +205,17 @@ async function saveAvailabilityOverride() {
   if (button) { button.textContent = "Saving…"; button.disabled = true; }
   const pickupWindows = specialWindows().filter((item)=>String(item.range||"").trim()).map((item)=>({range:String(item.range).trim(),capacity:item.capacity==null?null:Math.max(1,Number(item.capacity))}));
   const cleanWindows = pickupWindows.map((item)=>item.range).join(" | ");
-  const payload = { collection_date: entry.collection_date, is_open: !!entry.is_open, collection_time: entry.is_open ? cleanWindows : null, pickup_windows: entry.is_open ? pickupWindows : [] };
-  const { data, error } = await db.from("store_opening_overrides").upsert(payload, { onConflict: "collection_date" }).select().single();
+  const payload = { market_code: astate.availabilityMarket, collection_date: entry.collection_date, is_open: !!entry.is_open, collection_time: entry.is_open ? cleanWindows : null, pickup_windows: entry.is_open ? pickupWindows : [] };
+  const { data, error } = await db.from("store_opening_overrides").upsert(payload, { onConflict: "market_code,collection_date" }).select().single();
   if (button) { button.textContent = "Save day"; button.disabled = false; }
   if (error) { alert("Could not save this day: " + error.message); return; }
-  astate.openingOverrides = [...astate.openingOverrides.filter((item) => item.collection_date !== data.collection_date), data];
+  astate.openingOverrides = [...astate.openingOverrides.filter((item) => !(item.collection_date === data.collection_date && String(item.market_code || "SG") === String(data.market_code || "SG"))), data];
   setAvailabilityDraft(data.collection_date);
   render();
 }
 async function clearAvailabilityOverride() {
   const dateText = astate.selectedAvailabilityDate;
-  const existing = astate.openingOverrides.find((item) => item.collection_date === dateText);
+  const existing = astate.openingOverrides.find((item) => item.collection_date === dateText && String(item.market_code || "SG") === astate.availabilityMarket);
   if (!existing) return;
   if (!confirm("Remove this special calendar setting and use the normal weekly hours again?")) return;
   const { error } = await db.from("store_opening_overrides").delete().eq("id", existing.id);
@@ -1992,6 +2000,12 @@ function openMalaysiaCosting() {
   try { localStorage.setItem("shizuku-costing-market", "MY"); } catch (_) {}
   setTab("inventory");
 }
+function openMalaysiaAvailability() {
+  astate.availabilityMarket = "MY";
+  try { localStorage.setItem("shizuku-availability-market", "MY"); } catch (_) {}
+  setAvailabilityDraft(astate.selectedAvailabilityDate || localDateText(new Date()));
+  setTab("availability");
+}
 function renderMalaysiaTab() {
   const s = astate.settingsDraft || {};
   const points = Array.isArray(s.malaysia_collection_points) ? s.malaysia_collection_points.join("\n") : "";
@@ -2004,7 +2018,7 @@ function renderMalaysiaTab() {
     <div class="field"><label>Malaysia collection points — one per line</label><textarea rows="5" placeholder="Johor Bahru collection point" oninput="setMalaysiaCollectionPoints(this.value)">${escapeHtml(points)}</textarea></div>
     <div class="ref-note"><b>Product prices</b><br>Open Products → Edit to choose which drinks are available in Malaysia and enter their MYR price. Singapore prices are stored separately and will not change.</div>
     <div class="ref-note"><b>Malaysia costing &amp; inventory</b><br>Ingredients, packaging, recipes, stock and profit are stored separately in MYR. They never overwrite Singapore costing.</div>
-    <div class="btn-row" style="margin-top:16px"><button class="btn-secondary" onclick="openMalaysiaCosting()">Open Malaysia costing →</button><button class="btn-primary" id="save-settings-btn" onclick="saveSettings()">Save Malaysia settings</button></div>
+    <div class="btn-row" style="margin-top:16px"><button class="btn-secondary" onclick="openMalaysiaCosting()">Open Malaysia costing →</button><button class="btn-secondary" onclick="openMalaysiaAvailability()">Open Malaysia availability →</button><button class="btn-primary" id="save-settings-btn" onclick="saveSettings()">Save Malaysia settings</button></div>
   </section>`;
 }
 function renderIdeaEditor(){const d=astate.ideaDraft;return `<div class="overlay"><div class="overlay-card"><div class="display overlay-title">${d.id?"Edit":"New"} idea</div><div class="field"><label>Title</label><input value="${escapeHtml(d.title||"")}" oninput="ideaField('title',this.value)"></div><div class="field"><label>Notes</label><textarea rows="6" oninput="ideaField('notes',this.value)">${escapeHtml(d.notes||"")}</textarea></div><div class="field"><label>Category</label><select onchange="ideaField('category',this.value)">${IDEA_CATEGORIES.map(x=>`<option ${d.category===x?"selected":""}>${x}</option>`).join("")}</select></div><div class="field"><label>Status</label><select onchange="ideaField('status',this.value)"><option value="active" ${d.status!=="archived"?"selected":""}>Active</option><option value="archived" ${d.status==="archived"?"selected":""}>Done / archived</option></select></div><label class="slot"><input type="checkbox" style="width:auto" ${d.is_pinned?"checked":""} onchange="ideaField('is_pinned',this.checked)"> Pin this idea</label><div class="btn-row"><button class="btn-secondary" onclick="astate.ideaDraft=null;render()">Cancel</button><button class="btn-primary" onclick="saveIdea()">Save idea</button></div></div></div>`;}
@@ -2740,6 +2754,11 @@ function renderFaqTab() {
 function renderAvailabilityTab() {
   if (!astate.settingsDraft || !astate.availabilityDraft) return `<div class="empty">Loading availability…</div>`;
   const s = astate.settingsDraft;
+  const market = astate.availabilityMarket === "MY" ? "MY" : "SG";
+  const marketLabel = market === "MY" ? "Malaysia · MYR" : "Singapore · SGD";
+  const advanceKey = market === "MY" ? "malaysia_order_advance_days" : "order_advance_days";
+  const noticeKey = market === "MY" ? "malaysia_minimum_order_notice_hours" : "minimum_order_notice_hours";
+  const intervalKey = market === "MY" ? "malaysia_pickup_slot_interval_minutes" : "pickup_slot_interval_minutes";
   const selected = astate.availabilityDraft;
   const month = new Date(`${astate.calendarMonth}T12:00:00`);
   const year = month.getFullYear(), monthIndex = month.getMonth();
@@ -2755,13 +2774,14 @@ function renderAvailabilityTab() {
     const color = status.is_open ? "#4B5D3A" : status.override ? "#B33333" : "#8A8478";
     cells.push(`<button class="slot availability-day" style="min-height:70px;padding:8px;text-align:left;display:block;border-color:${isSelected ? "#4B5D3A" : "#E1D9C8"};background:${isSelected ? "#F1F5EA" : "#fff"};" onclick="selectAvailabilityDate('${dateText}')"><b>${day}</b><br><span style="font-size:11px;color:${color};">${label}</span></button>`);
   }
-  const existing = astate.openingOverrides.find((item) => item.collection_date === selected.collection_date);
+  const existing = astate.openingOverrides.find((item) => item.collection_date === selected.collection_date && String(item.market_code || "SG") === market);
   const weeklyCards = weeklySchedule().map((day) => `<div class="order-card" style="margin-bottom:10px;padding:14px;"><div class="queue-top"><label style="display:flex;align-items:center;gap:9px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${day.is_open ? "checked" : ""} onchange="setWeeklyDayOpen(${day.day},this.checked)"><b>${escapeHtml(day.label)}</b></label><span class="queue-status">${day.is_open ? "OPEN" : "CLOSED"}</span></div>${day.is_open ? `<div style="margin-top:10px;">${day.windows.map((window,index)=>`<div style="display:grid;grid-template-columns:minmax(190px,1fr) 130px auto;gap:8px;align-items:end;margin:8px 0;"><div class="field" style="margin:0"><label>Pickup window</label><input value="${escapeHtml(window.range||"")}" placeholder="10:00 AM - 12:00 PM" oninput="setWeeklyWindow(${day.day},${index},'range',this.value)"></div><div class="field" style="margin:0"><label>Order limit</label><input type="number" min="1" value="${window.capacity ?? ""}" placeholder="Unlimited" oninput="setWeeklyWindow(${day.day},${index},'capacity',this.value)"></div><button class="link-danger" style="height:44px" onclick="removeWeeklyWindow(${day.day},${index})">Remove</button></div>`).join("")}<button class="link-btn" onclick="addWeeklyWindow(${day.day})">+ Add pickup window</button></div>` : ""}</div>`).join("");
   return `
+    <section class="dashboard-card" style="padding:16px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 12px"><div><h2>${marketLabel} availability</h2><span>Weekly hours, notice period and date exceptions are separate for each country.</span></div></div><div class="tabs" style="margin:0"><button class="${market === "SG" ? "active" : ""}" onclick="setAvailabilityMarket('SG')">Singapore · SGD</button><button class="${market === "MY" ? "active" : ""}" onclick="setAvailabilityMarket('MY')">Malaysia · MYR</button></div></section>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Ordering window</div>
-    <div class="field"><label>How many days ahead can customers order?</label><input type="number" min="0" max="60" value="${s.order_advance_days ?? 14}" oninput="onSettingsField('order_advance_days', Number(this.value))"><div class="hint">Example: 14 lets customers order up to 2 weeks ahead.</div></div>
-    <div class="field"><label>Minimum notice before pickup (hours)</label><input type="number" min="0" max="168" value="${s.minimum_order_notice_hours ?? 0}" oninput="onSettingsField('minimum_order_notice_hours', Number(this.value))"><div class="hint">Example: 24 means customers must order at least 24 hours before pickup.</div></div>
-    <div class="field"><label>Pickup time interval (minutes)</label><select onchange="onSettingsField('pickup_slot_interval_minutes', Number(this.value))"><option value="15" ${Number(s.pickup_slot_interval_minutes) === 15 ? "selected" : ""}>Every 15 minutes</option><option value="30" ${Number(s.pickup_slot_interval_minutes || 30) === 30 ? "selected" : ""}>Every 30 minutes</option><option value="60" ${Number(s.pickup_slot_interval_minutes) === 60 ? "selected" : ""}>Every 60 minutes</option></select><div class="hint">Customers choose a date first, then see times based on this interval.</div></div>
+    <div class="field"><label>How many days ahead can customers order?</label><input type="number" min="0" max="60" value="${s[advanceKey] ?? 14}" oninput="onSettingsField('${advanceKey}', Number(this.value))"><div class="hint">Example: 14 lets customers order up to 2 weeks ahead.</div></div>
+    <div class="field"><label>Minimum notice before pickup (hours)</label><input type="number" min="0" max="168" value="${s[noticeKey] ?? 0}" oninput="onSettingsField('${noticeKey}', Number(this.value))"><div class="hint">Example: 24 means customers must order at least 24 hours before pickup.</div></div>
+    <div class="field"><label>Pickup time interval (minutes)</label><select onchange="onSettingsField('${intervalKey}', Number(this.value))"><option value="15" ${Number(s[intervalKey]) === 15 ? "selected" : ""}>Every 15 minutes</option><option value="30" ${Number(s[intervalKey] ?? 30) === 30 ? "selected" : ""}>Every 30 minutes</option><option value="60" ${Number(s[intervalKey]) === 60 ? "selected" : ""}>Every 60 minutes</option></select><div class="hint">Customers choose a date first, then see times based on this interval.</div></div>
     <button class="btn-primary" id="settings-save-btn" style="width:100%;margin:2px 0 20px;" onclick="saveSettings()">Save ordering window</button>
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:16px 0 6px;">Weekly schedule</div>
