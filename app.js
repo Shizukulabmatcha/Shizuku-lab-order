@@ -413,8 +413,9 @@ async function ensureCustomerSession() {
 
 /* ---------- pickup slots ---------- */
 function getWeeklyConfig() {
-  if (Array.isArray(state.store.weekly_pickup_schedule)) {
-    return state.store.weekly_pickup_schedule.map((item) => ({
+  const schedule = state.market === "MY" ? state.store.malaysia_weekly_pickup_schedule : state.store.weekly_pickup_schedule;
+  if (Array.isArray(schedule)) {
+    return schedule.map((item) => ({
       day: Number(item.day), label: String(item.label || "Collection"), is_open: item.is_open !== false,
       windows: (Array.isArray(item.windows) ? item.windows : []).filter((window) => String(window?.range || "").trim())
     }));
@@ -502,7 +503,8 @@ function timesFromRange(rangeText) {
     const times = String(range || "").split(/\s*[–-]\s*/);
     const start = pickupMinutesFromToken(times[0], times[1]);
     const end = pickupMinutesFromToken(times[1], times[0]);
-    const interval = Math.max(5, Math.min(120, Number(state.store.pickup_slot_interval_minutes || 30)));
+    const configuredInterval = state.market === "MY" ? state.store.malaysia_pickup_slot_interval_minutes : state.store.pickup_slot_interval_minutes;
+    const interval = Math.max(5, Math.min(120, Number(configuredInterval || 30)));
     if (start == null) return [];
     if (end == null || end < start) return [formatPickupTime(start)];
     const values = [];
@@ -514,8 +516,10 @@ function timesFromRange(rangeText) {
 function computeSlots() {
   const now = new Date();
   const weekly = new Map(getWeeklyConfig().map((item) => [item.day, item]));
-  const maxDays = Math.max(0, Math.min(60, Number(state.store.order_advance_days || 14)));
-  const noticeHours = Math.max(0, Number(state.store.minimum_order_notice_hours || 0));
+  const configuredAdvanceDays = state.market === "MY" ? state.store.malaysia_order_advance_days : state.store.order_advance_days;
+  const configuredNoticeHours = state.market === "MY" ? state.store.malaysia_minimum_order_notice_hours : state.store.minimum_order_notice_hours;
+  const maxDays = Math.max(0, Math.min(60, Number(configuredAdvanceDays ?? 14)));
+  const noticeHours = Math.max(0, Number(configuredNoticeHours ?? 0));
   const earliest = new Date(now.getTime() + noticeHours * 60 * 60 * 1000);
   const slots = [];
   for (let offset = 0; offset <= maxDays; offset++) {
@@ -524,7 +528,7 @@ function computeSlots() {
     date.setDate(date.getDate() + offset);
     const dateText = formatDateForDatabase(date);
     const weeklyConfig = weekly.get(date.getDay());
-    const override = state.openingOverrides.find((item) => item.collection_date === dateText);
+    const override = state.openingOverrides.find((item) => item.collection_date === dateText && String(item.market_code || "SG") === state.market);
     if (override && !override.is_open) continue;
     if (!override && (!weeklyConfig || !weeklyConfig.is_open)) continue;
     const windows = override
@@ -547,7 +551,7 @@ function nextCollectionSchedule(limit = 2) {
     date.setHours(0, 0, 0, 0);
     date.setDate(date.getDate() + offset);
     const dateText = formatDateForDatabase(date);
-    const override = state.openingOverrides.find((item) => item.collection_date === dateText);
+    const override = state.openingOverrides.find((item) => item.collection_date === dateText && String(item.market_code || "SG") === state.market);
     const weeklyConfig = weekly.get(date.getDay());
     if (override && !override.is_open) continue;
     if (!override && (!weeklyConfig || !weeklyConfig.is_open)) continue;
@@ -598,6 +602,8 @@ function setMarket(market) {
   clearSavedCart();
   state.promo = null;
   state.form.collectionPoint = "";
+  state.form.pickupDate = "";
+  state.form.slotId = "";
   applyMarketMenu();
   render();
 }
