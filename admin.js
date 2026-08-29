@@ -1173,40 +1173,44 @@ function dashboardStyles() {
   </style>`;
 }
 
-function paidOrders() { return astate.orders.filter((order) => order.payment_status === "paid" && order.order_status !== "cancelled"); }
-function savedProductFoodCost(productId) {
-  return astate.recipes
-    .filter((row) => String(row.product_id) === String(productId))
-    .reduce((sum, row) => {
-      const ingredient = astate.inventory.find((item) => String(item.id) === String(row.inventory_item_id));
-      return sum + Number(row.quantity_used || 0) * ingredientUnitCost(ingredient);
-    }, 0);
+const DASHBOARD_MARKET = "SG";
+function ordersForMarket(market = DASHBOARD_MARKET) { return AdminMarketRules.ordersForMarket(astate.orders, market); }
+function paidOrders(market = DASHBOARD_MARKET) { return ordersForMarket(market).filter((order) => order.payment_status === "paid" && order.order_status !== "cancelled"); }
+function savedProductFoodCost(productId, market = DASHBOARD_MARKET) {
+  return AdminMarketRules.savedProductFoodCost({
+    recipes: astate.recipes,
+    inventory: astate.inventory,
+    productId,
+    market,
+    unitCost: ingredientUnitCost,
+  });
 }
 function dashboardStats() {
-  const paid = paidOrders();
+  const marketOrders = ordersForMarket(DASHBOARD_MARKET);
+  const paid = paidOrders(DASHBOARD_MARKET);
   const now = new Date();
   const monthly = paid.filter((order) => { const d = new Date(order.created_at); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); });
   const monthlySales = monthly.filter((order) => order.counts_as_sale !== false);
-  const customerKeys = new Set(astate.orders.map((order) => String(order.customer_phone || order.instagram || order.customer_name || "").trim()).filter(Boolean));
+  const customerKeys = new Set(marketOrders.map((order) => String(order.customer_phone || order.instagram || order.customer_name || "").trim()).filter(Boolean));
   const revenue = monthlySales.reduce((sum, order) => sum + Number(order.total || 0), 0);
   const missingRecipeProducts = new Map();
   const foodCost = monthlySales.reduce((orderSum, order) => orderSum + (order.order_items || []).reduce((itemSum, item) => {
-    const recipeRows = astate.recipes.filter((row) => String(row.product_id) === String(item.product_id));
+    const recipeRows = AdminMarketRules.recipesForProductMarket(astate.recipes, item.product_id, DASHBOARD_MARKET);
     const product = astate.menu.find((row) => String(row.id) === String(item.product_id))
       || astate.menu.find((row) => String(row.name) === String(item.product_name));
     if (!recipeRows.length && product?.food_cost_confirmed_zero !== true) {
       const id = product?.id || item.product_id;
       if (id) missingRecipeProducts.set(String(id), { id, name: product?.name || item.product_name || "Unknown product" });
     }
-    return itemSum + savedProductFoodCost(item.product_id) * Number(item.quantity || 0);
+    return itemSum + savedProductFoodCost(item.product_id, DASHBOARD_MARKET) * Number(item.quantity || 0);
   }, 0), 0);
   const grossProfit = revenue - foodCost;
   const profitMargin = revenue > 0 ? grossProfit / revenue * 100 : 0;
-  return { revenue, foodCost, grossProfit, profitMargin, missingRecipeProducts: [...missingRecipeProducts.values()], orders: monthly.length, customers: customerKeys.size, paymentReview: astate.orders.filter(AdminOrderRules.isPaymentReviewOrder).length };
+  return { revenue, foodCost, grossProfit, profitMargin, missingRecipeProducts: [...missingRecipeProducts.values()], orders: monthly.length, customers: customerKeys.size, paymentReview: marketOrders.filter(AdminOrderRules.isPaymentReviewOrder).length };
 }
 function salesPerformance() {
   const now = new Date();
-  const paid = paidOrders();
+  const paid = paidOrders(DASHBOARD_MARKET);
   const monthly = paid.filter((order) => {
     const date = new Date(order.created_at);
     return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
@@ -1240,7 +1244,7 @@ function pickupTimeMinutes(value) {
 }
 
 function nextPickupProduction() {
-  const active = paidOrders().filter((order) => ["confirmed", "preparing", "ready"].includes(order.order_status));
+  const active = paidOrders(DASHBOARD_MARKET).filter((order) => ["confirmed", "preparing", "ready"].includes(order.order_status));
   const dates = [...new Set(active.map((order) => order.collection_date).filter(Boolean))].sort();
   const today = new Date();
   const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
@@ -1254,7 +1258,7 @@ function nextPickupProduction() {
   return { date, orders };
 }
 function customerInsights() {
-  const list = customers();
+  const list = customers(ordersForMarket(DASHBOARD_MARKET));
   const top = [...list].sort((a, b) => b.spent - a.spent)[0] || null;
   const repeat = list.filter((customer) => customer.orders.length > 1);
   const now = new Date();
@@ -1424,7 +1428,7 @@ function renderDashboardTab() {
   const stats = dashboardStats();
   const workspaceName = astate.currentTeamMember?.display_name || "Ting";
   const workspaceRole = astate.currentTeamMember?.role || "Owner";
-  const liveOrders = astate.orders.filter((order) => order.order_status !== "cancelled" && order.order_status !== "collected").slice(0, 6);
+  const liveOrders = ordersForMarket(DASHBOARD_MARKET).filter((order) => order.order_status !== "cancelled" && order.order_status !== "collected").slice(0, 6);
   const performance = salesPerformance();
   const production = nextPickupProduction();
   const insights = customerInsights();
@@ -1436,10 +1440,10 @@ function renderDashboardTab() {
   return `
     <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${escapeHtml(workspaceName)}</h1><div class="workspace-role-pill">${escapeHtml(workspaceRole)}</div><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><div class="dashboard-top-actions">${astate.settings?.show_dashboard_refresh !== false ? `<button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing ? "disabled" : ""}>${astate.dashboardRefreshing ? "Refreshing…" : "↻ Refresh"}</button><span class="dashboard-refresh-meta">Last updated: ${escapeHtml(updatedTime)}</span>` : ""}<a class="open-shop" href="order.html">Open customer shop ↗</a></div></div>
     <div class="stat-grid dashboard-summary-grid">
-      <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Revenue this month</div><div class="stat-value">${money(stats.revenue)}</div><div class="stat-help">Paid orders only</div></div>
-      <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Non-cancelled paid orders this month</div><div class="stat-value">${stats.orders}</div><div class="stat-help">${stats.paymentReview ? `<button class="dashboard-warning-link" onclick="focusDashboardIssue('payment_review')">${stats.paymentReview} need payment review →</button>` : "Everything is up to date"}</div></div>
-      <div class="stat"><div class="stat-label"><span class="stat-icon">◉</span>Customers</div><div class="stat-value">${stats.customers}</div><div class="stat-help">Across all orders</div></div>
-      <div class="stat profit-stat"><div class="stat-label"><span class="stat-icon">$</span>Gross profit this month</div><div class="stat-value">${money(stats.grossProfit)}</div><div class="stat-help">Sales ${money(stats.revenue)} − food cost ${money(stats.foodCost)} · ${stats.profitMargin.toFixed(1)}% margin${stats.missingRecipeProducts.length ? `<div class="dashboard-warning-list">${foodCostWarnings}</div>` : ""}</div></div>
+      <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Singapore revenue this month</div><div class="stat-value">${money(stats.revenue)}</div><div class="stat-help">Singapore paid orders only</div></div>
+      <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Singapore non-cancelled paid orders this month</div><div class="stat-value">${stats.orders}</div><div class="stat-help">${stats.paymentReview ? `<button class="dashboard-warning-link" onclick="focusDashboardIssue('payment_review')">${stats.paymentReview} need payment review →</button>` : "Everything is up to date"}</div></div>
+      <div class="stat"><div class="stat-label"><span class="stat-icon">◉</span>Singapore customers</div><div class="stat-value">${stats.customers}</div><div class="stat-help">Across Singapore orders</div></div>
+      <div class="stat profit-stat"><div class="stat-label"><span class="stat-icon">$</span>Singapore gross profit this month</div><div class="stat-value">${money(stats.grossProfit)}</div><div class="stat-help">Sales ${money(stats.revenue)} − food cost ${money(stats.foodCost)} · ${stats.profitMargin.toFixed(1)}% margin${stats.missingRecipeProducts.length ? `<div class="dashboard-warning-list">${foodCostWarnings}</div>` : ""}</div></div>
     </div>
     <div class="dashboard-grid"><section class="dashboard-card"><div class="dashboard-card-head"><h2>Order queue</h2><button class="link-btn" onclick="setTab('orders')">View all</button></div>${liveOrders.length ? liveOrders.map((order) => `<div class="queue-row" onclick="setTab('orders')"><div class="queue-top"><div class="queue-number">${escapeHtml(order.order_number || order.id)}</div><div class="queue-status">${escapeHtml(PAY_LABEL[order.payment_status] || order.payment_status || "Pending")}</div></div><div class="queue-top"><div class="queue-name">${escapeHtml(order.customer_name || "Customer")} · ${escapeHtml(order.collection_date || "Pickup date pending")}</div><div class="queue-amount">${money(order.total)}</div></div></div>`).join("") : `<div class="dashboard-empty">You’re all caught up — no active orders right now.</div>`}</section>
     <section class="dashboard-card"><div class="dashboard-card-head"><h2>Next steps</h2><span>Shop checklist</span></div><div class="action-list"><button class="action dashboard-action" onclick="focusDashboardIssue('payment_review')"><span class="action-icon">✓</span><span><strong>Review payment proofs</strong><p>${stats.paymentReview ? `${stats.paymentReview} customer payment${stats.paymentReview === 1 ? "" : "s"} waiting for confirmation.` : "No payment proof waiting right now."}</p></span></button><button class="action dashboard-action" onclick="setTab('availability')"><span class="action-icon">◷</span><span><strong>Set pickup availability</strong><p>Open or close special collection days in your calendar.</p></span></button><button class="action dashboard-action" onclick="setTab('menu')"><span class="action-icon">✦</span><span><strong>Keep your menu fresh</strong><p>Edit prices, availability and products whenever you need.</p></span></button></div></section></div>
@@ -1656,7 +1660,7 @@ async function saveEditedOrder() {
 /* ---- inventory and food cost ---- */
 function currentCostingMarket() { return astate.costingMarket === "MY" ? "MY" : "SG"; }
 function inventoryForCostingMarket() { const market=currentCostingMarket(); return astate.inventory.filter((item) => String(item.market_code || "SG").toUpperCase() === market); }
-function productsForCostingMarket() { return astate.menu.filter((product) => !product.is_bundle && (currentCostingMarket() === "SG" || product.malaysia_available === true)); }
+function productsForCostingMarket() { return AdminMarketRules.productsForCostingMarket(astate.menu, currentCostingMarket()); }
 function productSellingPriceForMarket(product) { return currentCostingMarket() === "MY" ? Number(product?.myr_price || 0) : Number(product?.discount_price || product?.price || 0); }
 function setCostingMarket(market) {
   const next = String(market || "SG").toUpperCase() === "MY" ? "MY" : "SG";
@@ -2329,7 +2333,7 @@ function customerKey(order) {
   const phone = digits.length === 10 && digits.startsWith("65") ? digits.slice(2) : digits;
   return String(phone || order.instagram || order.customer_name || "Unknown customer").trim();
 }
-function customers() { const result = new Map(); astate.orders.forEach((order) => { const key = customerKey(order); const customer = result.get(key) || { key, name: order.customer_name || "Customer", phone: order.customer_phone || "", instagram: order.instagram || "", orders: [], spent: 0 }; customer.orders.push(order); if (order.payment_status === "paid" && order.order_status !== "cancelled") customer.spent += Number(order.total || 0); result.set(key, customer); }); return [...result.values()].sort((a,b) => new Date(b.orders[0]?.created_at || 0) - new Date(a.orders[0]?.created_at || 0)); }
+function customers(orders = astate.orders) { const result = new Map(); orders.forEach((order) => { const key = customerKey(order); const customer = result.get(key) || { key, name: order.customer_name || "Customer", phone: order.customer_phone || "", instagram: order.instagram || "", orders: [], spent: 0 }; customer.orders.push(order); if (order.payment_status === "paid" && order.order_status !== "cancelled") customer.spent += Number(order.total || 0); result.set(key, customer); }); return [...result.values()].sort((a,b) => new Date(b.orders[0]?.created_at || 0) - new Date(a.orders[0]?.created_at || 0)); }
 function chooseCustomer(key) { astate.selectedCustomerKey = key; render(); }
 function setCustomerNote(value) { if (astate.selectedCustomerKey) astate.customerNotes[astate.selectedCustomerKey] = value; }
 async function saveCustomerNote() { const key = astate.selectedCustomerKey; if (!key) return; const button = document.getElementById("save-customer-note"); if (button) { button.textContent = "Saving…"; button.disabled = true; } const { error } = await db.from("customer_notes").upsert({ customer_key: key, note: String(astate.customerNotes[key] || "").trim() }, { onConflict: "customer_key" }); if (button) { button.textContent = "Save remark"; button.disabled = false; } if (error) return alert("Could not save remark: " + error.message); alert("Remark saved."); }
