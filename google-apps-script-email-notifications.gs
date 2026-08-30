@@ -11,7 +11,10 @@ function doPost(e) {
     const suppliedSecret = payload.secret || (e && e.parameter && e.parameter.key) || "";
     if (suppliedSecret !== SHARED_SECRET) return jsonResponse({ ok: false, error: "Unauthorized" });
 
-    const eventName = payload.event || "payment_proof";
+    const incomingEventName = payload.event || "payment_proof";
+    const eventName = incomingEventName === "order_ready"
+      ? "order_ready_for_collection"
+      : incomingEventName;
     const order = payload.order || payload || {};
     const orderNumber = text(order.order_number || order.id || payload.order_number || "Unknown order");
     const customerName = text(order.customer_name || payload.customer_name);
@@ -57,6 +60,13 @@ function doPost(e) {
       accent = "#4B5D3A";
       rows = orderRows(order, orderNumber, customerName, customerPhone, total);
       action = "Prepare this order for its scheduled collection time.";
+    } else if (eventName === "order_ready_for_collection") {
+      title = "Order ready for collection";
+      subject = "Order ready for collection · " + orderNumber;
+      intro = "The customer has been notified that this order is ready for collection.";
+      accent = "#4B5D3A";
+      rows = orderRows(order, orderNumber, customerName, customerPhone, total);
+      action = "The order is ready at the selected collection point.";
     } else {
       title = "Payment proof received";
       subject = "Payment proof received · " + orderNumber;
@@ -115,6 +125,12 @@ function sendCustomerUpdate(eventName, payload, order, orderNumber, customerName
     intro = text(order.payment_rejection_reason || payload.payment_rejection_reason || "The screenshot was unclear.");
     action = "Open Track Order with your order number and phone, then choose Upload a new screenshot.";
     accent = "#B33333";
+  } else if (eventName === "order_ready_for_collection") {
+    if (payload.customer_ready_email_enabled === false) return;
+    title = fillTemplate(payload.customer_ready_email_heading_template || "Your order is ready for collection", templateValues);
+    subject = fillTemplate(payload.customer_ready_email_subject_template || "Your order is ready for collection · {order_number}", templateValues);
+    intro = fillTemplate(payload.customer_ready_email_message_template || "Your order is ready for collection. We look forward to seeing you at your selected pickup time.", templateValues);
+    action = "Collection: " + text(order.collection_date) + " · " + text(order.collection_time) + " · " + text(order.collection_point);
   } else return;
   const rows = [["Order",orderNumber],["Customer",customerName],["Amount","$" + total.toFixed(2)],["Pickup",text(order.collection_date) + " · " + text(order.collection_time)],["Collection point",text(order.collection_point)]];
   const body = [title,"",intro,"","Order: " + orderNumber,"Amount: $" + total.toFixed(2),"",action].join("\n");
@@ -178,10 +194,23 @@ function sendConfirmationSampleEmail() {
   }, order, order.order_number, order.customer_name, order.total, customerSampleItems());
 }
 
-/** Backwards-compatible customer sample: sends both customer stages. */
+/** Run manually to preview the third customer email (ready for collection). */
+function sendReadyForCollectionSampleEmail() {
+  const order = customerSampleOrder();
+  sendCustomerUpdate("order_ready_for_collection", {
+    customer_email: order.customer_email,
+    customer_ready_email_enabled: true,
+    customer_ready_email_subject_template: "Your order is ready for collection · {order_number}",
+    customer_ready_email_heading_template: "Your order is ready for collection",
+    customer_ready_email_message_template: "Your order is ready for collection. We look forward to seeing you at your selected pickup time."
+  }, order, order.order_number, order.customer_name, order.total, customerSampleItems());
+}
+
+/** Backwards-compatible customer sample: sends all three customer stages. */
 function sendCustomerSampleEmail() {
   sendPaymentReviewSampleEmail();
   sendConfirmationSampleEmail();
+  sendReadyForCollectionSampleEmail();
 }
 
 /** Legacy sample kept for older Apps Script dropdowns. */
