@@ -935,11 +935,15 @@ function updateCustomerConfirmationPreviews() {
   const reviewSubject = document.getElementById("payment-review-email-subject-preview");
   const emailPreview = document.getElementById("customer-email-template-preview");
   const emailSubject = document.getElementById("customer-email-subject-preview");
+  const readyEmailPreview = document.getElementById("customer-ready-email-template-preview");
+  const readyEmailSubject = document.getElementById("customer-ready-email-subject-preview");
   const whatsappPreview = document.getElementById("notification-whatsapp-template-preview");
   if (reviewPreview) reviewPreview.textContent = `${fillCustomerEmailTemplate(astate.notificationDraft?.payment_review_email_heading_template,values)}\n\n${fillCustomerEmailTemplate(astate.notificationDraft?.payment_review_email_message_template,values)}\n\nOrder items\n${values.order_items}\n\nCollection: ${values.date} · ${values.time} · ${values.collection_point}`;
   if (reviewSubject) reviewSubject.textContent = fillCustomerEmailTemplate(astate.notificationDraft?.payment_review_email_subject_template,values);
   if (emailPreview) emailPreview.textContent = `${fillCustomerEmailTemplate(astate.notificationDraft?.customer_email_heading_template,values)}\n\n${fillCustomerEmailTemplate(astate.notificationDraft?.customer_email_message_template,values)}\n\nOrder items\n${values.order_items}\n\nCollection: ${values.date} · ${values.time} · ${values.collection_point}`;
   if (emailSubject) emailSubject.textContent = fillCustomerEmailTemplate(astate.notificationDraft?.customer_email_subject_template,values);
+  if (readyEmailPreview) readyEmailPreview.textContent = `${fillCustomerEmailTemplate(astate.notificationDraft?.customer_ready_email_heading_template,values)}\n\n${fillCustomerEmailTemplate(astate.notificationDraft?.customer_ready_email_message_template,values)}\n\nOrder items\n${values.order_items}\n\nCollection: ${values.date} · ${values.time} · ${values.collection_point}`;
+  if (readyEmailSubject) readyEmailSubject.textContent = fillCustomerEmailTemplate(astate.notificationDraft?.customer_ready_email_subject_template,values);
   if (whatsappPreview) whatsappPreview.textContent = fillWhatsAppConfirmationTemplate(astate.settingsDraft?.whatsapp_confirmation_template,values);
 }
 async function saveNotificationSettings() {
@@ -968,6 +972,10 @@ async function saveNotificationSettings() {
     customer_email_subject_template: String(draft.customer_email_subject_template || "Your order is confirmed · {order_number}").trim(),
     customer_email_heading_template: String(draft.customer_email_heading_template || "Your order is confirmed").trim(),
     customer_email_message_template: String(draft.customer_email_message_template || "Thank you for ordering with Shizuku Lab. We look forward to preparing your order.").trim(),
+    customer_ready_email_enabled: draft.customer_ready_email_enabled !== false,
+    customer_ready_email_subject_template: String(draft.customer_ready_email_subject_template || "Your order is ready for collection · {order_number}").trim(),
+    customer_ready_email_heading_template: String(draft.customer_ready_email_heading_template || "Your order is ready for collection").trim(),
+    customer_ready_email_message_template: String(draft.customer_ready_email_message_template || "Your order is ready for collection. We look forward to seeing you at your selected pickup time.").trim(),
   };
   // Update the existing row so the private webhook secret (configured only in
   // Supabase) is never overwritten by values coming from the browser.
@@ -2537,13 +2545,15 @@ function renderSettingsTab() {
 }
 
 function renderNotificationsTab() {
-  const n = astate.notificationDraft || { recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true, alert_live_chat: true, customer_email_enabled:true };
+  const n = astate.notificationDraft || { recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true, alert_live_chat: true, customer_email_enabled:true, customer_ready_email_enabled:true };
   const s = astate.settingsDraft || {};
   const values = { customer_name:"Shermin", order_number:"SL-SAMPLE", date:"30 Aug 2026", time:"11:30 AM", collection_point:"Near Creamier", total:"$13.80", order_items:"• 1 × Ichigo Matcha Latte\n• 1 × Strawberry Milk" };
   const reviewEmailSubject = fillCustomerEmailTemplate(n.payment_review_email_subject_template || "We received your order · {order_number}",values);
   const reviewEmailPreview = `${fillCustomerEmailTemplate(n.payment_review_email_heading_template || "Hi {customer_name}, we received your order",values)}\n\n${fillCustomerEmailTemplate(n.payment_review_email_message_template || "Your payment screenshot has been submitted for review. We’ll email you again once your order is confirmed.",values)}\n\nOrder items\n${values.order_items}\n\nCollection: ${values.date} · ${values.time} · ${values.collection_point}`;
   const emailSubject = fillCustomerEmailTemplate(n.customer_email_subject_template || "Your order is confirmed · {order_number}",values);
   const emailPreview = `${fillCustomerEmailTemplate(n.customer_email_heading_template || "Your order is confirmed",values)}\n\n${fillCustomerEmailTemplate(n.customer_email_message_template || "Thank you for ordering with Shizuku Lab. We look forward to preparing your order.",values)}\n\nOrder items\n${values.order_items}\n\nCollection: ${values.date} · ${values.time} · ${values.collection_point}`;
+  const readyEmailSubject = fillCustomerEmailTemplate(n.customer_ready_email_subject_template || "Your order is ready for collection · {order_number}",values);
+  const readyEmailPreview = `${fillCustomerEmailTemplate(n.customer_ready_email_heading_template || "Your order is ready for collection",values)}\n\n${fillCustomerEmailTemplate(n.customer_ready_email_message_template || "Your order is ready for collection. We look forward to seeing you at your selected pickup time.",values)}\n\nOrder items\n${values.order_items}\n\nCollection: ${values.date} · ${values.time} · ${values.collection_point}`;
   const whatsappTemplate = s.whatsapp_confirmation_template || DEFAULT_WHATSAPP_CONFIRMATION_TEMPLATE;
   const whatsappPreview = fillWhatsAppConfirmationTemplate(whatsappTemplate,values);
   return `<div style="display:grid;gap:18px;max-width:900px;"><section class="dashboard-card" style="padding:22px;">
@@ -2558,7 +2568,7 @@ function renderNotificationsTab() {
   </section><section class="dashboard-card" style="padding:22px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Customer order confirmations</h2><span>Email + WhatsApp</span></div><p class="hint" style="text-align:left;margin:0 0 16px;">Manage both customer confirmation channels in one place. Each channel has its own on/off switch.</p>
     <div class="order-card" style="margin-bottom:16px;">
       <div class="order-top"><b>Automatic customer emails</b><span>${n.customer_email_enabled !== false ? "On" : "Off"}</span></div>
-      <label class="slot" style="cursor:pointer;gap:10px;margin:12px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.customer_email_enabled !== false ? "checked" : ""} onchange="onNotificationField('customer_email_enabled',this.checked)"><span><b>Send two-stage customer updates</b><br><span class="hint">No email is sent when the order is first placed. Email 1 is sent after payment proof upload; Email 2 is sent when you confirm payment.</span></span></label>
+      <label class="slot" style="cursor:pointer;gap:10px;margin:12px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.customer_email_enabled !== false ? "checked" : ""} onchange="onNotificationField('customer_email_enabled',this.checked)"><span><b>Send three-stage customer updates</b><br><span class="hint">Email 1 is sent after payment proof upload; Email 2 is sent when payment is confirmed; Email 3 is sent automatically when you change the order to Ready for Collection.</span></span></label>
       <div class="display" style="font-size:18px;margin:18px 0 8px;">Email 1 · Payment under review</div>
       <div class="field"><label>Subject</label><input value="${escapeHtml(n.payment_review_email_subject_template || "We received your order · {order_number}")}" oninput="onNotificationField('payment_review_email_subject_template',this.value);updateCustomerConfirmationPreviews()"></div>
       <div class="field"><label>Heading</label><input value="${escapeHtml(n.payment_review_email_heading_template || "Hi {customer_name}, we received your order")}" oninput="onNotificationField('payment_review_email_heading_template',this.value);updateCustomerConfirmationPreviews()"></div>
@@ -2571,6 +2581,14 @@ function renderNotificationsTab() {
       <div class="field"><label>Message</label><textarea rows="3" oninput="onNotificationField('customer_email_message_template',this.value);updateCustomerConfirmationPreviews()">${escapeHtml(n.customer_email_message_template || "Thank you for ordering with Shizuku Lab. We look forward to preparing your order.")}</textarea></div>
       <div class="hint" style="text-align:left;margin:-4px 0 10px;">Variables: <code>{customer_name}</code> <code>{order_number}</code> <code>{date}</code> <code>{time}</code> <code>{collection_point}</code> <code>{total}</code></div>
       <div class="ref-note"><b>Subject</b><div id="customer-email-subject-preview" style="margin-top:5px;">${escapeHtml(emailSubject)}</div><div style="border-top:1px solid #dfd8ca;margin:12px 0;"></div><b>Email preview</b><div id="customer-email-template-preview" style="white-space:pre-wrap;line-height:1.55;margin-top:7px;">${escapeHtml(emailPreview)}</div></div>
+      <div class="divider"></div>
+      <div class="display" style="font-size:18px;margin:4px 0 8px;">Email 3 · Ready for collection</div>
+      <label class="slot" style="cursor:pointer;gap:10px;margin:10px 0 14px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.customer_ready_email_enabled !== false ? "checked" : ""} onchange="onNotificationField('customer_ready_email_enabled',this.checked)"><span><b>Send Email 3 automatically when status becomes Ready for Collection</b><br><span class="hint">Turning this off keeps Email 1 and Email 2 working.</span></span></label>
+      <div class="field"><label>Subject</label><input value="${escapeHtml(n.customer_ready_email_subject_template || "Your order is ready for collection · {order_number}")}" oninput="onNotificationField('customer_ready_email_subject_template',this.value);updateCustomerConfirmationPreviews()"></div>
+      <div class="field"><label>Heading</label><input value="${escapeHtml(n.customer_ready_email_heading_template || "Your order is ready for collection")}" oninput="onNotificationField('customer_ready_email_heading_template',this.value);updateCustomerConfirmationPreviews()"></div>
+      <div class="field"><label>Message</label><textarea rows="3" oninput="onNotificationField('customer_ready_email_message_template',this.value);updateCustomerConfirmationPreviews()">${escapeHtml(n.customer_ready_email_message_template || "Your order is ready for collection. We look forward to seeing you at your selected pickup time.")}</textarea></div>
+      <div class="hint" style="text-align:left;margin:-4px 0 10px;">Variables: <code>{customer_name}</code> <code>{order_number}</code> <code>{date}</code> <code>{time}</code> <code>{collection_point}</code> <code>{total}</code></div>
+      <div class="ref-note"><b>Subject</b><div id="customer-ready-email-subject-preview" style="margin-top:5px;">${escapeHtml(readyEmailSubject)}</div><div style="border-top:1px solid #dfd8ca;margin:12px 0;"></div><b>Email preview</b><div id="customer-ready-email-template-preview" style="white-space:pre-wrap;line-height:1.55;margin-top:7px;">${escapeHtml(readyEmailPreview)}</div></div>
     </div>
     <div class="order-card"><div class="order-top"><b>WhatsApp confirmation</b><span>${s.whatsapp_confirmation_enabled !== false ? "On" : "Off"}</span></div><label class="slot" style="cursor:pointer;gap:10px;margin:12px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.whatsapp_confirmation_enabled !== false ? "checked" : ""} onchange="onSettingsField('whatsapp_confirmation_enabled',this.checked)"><span><b>Show WhatsApp customer button on confirmed orders</b></span></label><div class="field"><label>WhatsApp message</label><textarea rows="6" oninput="onSettingsField('whatsapp_confirmation_template',this.value);updateCustomerConfirmationPreviews()">${escapeHtml(whatsappTemplate)}</textarea></div><div class="hint" style="text-align:left;margin:-4px 0 10px;">Variables: <code>{customer_name}</code> <code>{date}</code> <code>{time}</code> <code>{collection_point}</code> <code>{order_items}</code></div><div class="ref-note"><b>WhatsApp preview</b><div id="notification-whatsapp-template-preview" style="white-space:pre-wrap;line-height:1.55;margin-top:7px;">${escapeHtml(whatsappPreview)}</div></div></div>
     <button class="btn-primary" id="notification-save-btn" style="width:100%;margin-top:16px;" onclick="saveNotificationSettings()">Save confirmation settings</button>
