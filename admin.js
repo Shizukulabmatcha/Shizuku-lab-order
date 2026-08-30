@@ -42,6 +42,7 @@ const astate = {
   messages: [],
   messageDrafts: {},
   selectedAvailabilityDate: null,
+  availabilityMarket: (() => { try { return localStorage.getItem("shizuku-availability-market") === "MY" ? "MY" : "SG"; } catch (_) { return "SG"; } })(),
   settingsSection: "welcome",
   availabilityDraft: null,
   offlineOrderDraft: null,
@@ -139,7 +140,7 @@ function weeklyAvailability(dateText) {
   return { is_open: !!day?.is_open, collection_time: windows.map((item) => item.range).filter(Boolean).join(" | "), pickup_windows: windows };
 }
 function availabilityForDate(dateText) {
-  const override = astate.openingOverrides.find((item) => item.collection_date === dateText);
+  const override = astate.openingOverrides.find((item) => item.collection_date === dateText && String(item.market_code || "SG") === astate.availabilityMarket);
   return override ? { is_open: !!override.is_open, collection_time: override.collection_time || "", pickup_windows: Array.isArray(override.pickup_windows) ? override.pickup_windows : availabilityRanges(override.collection_time).filter(Boolean).map((range) => ({ range, capacity: null })), override: true } : { ...weeklyAvailability(dateText), override: false };
 }
 function setAvailabilityDraft(dateText) {
@@ -148,6 +149,12 @@ function setAvailabilityDraft(dateText) {
   astate.availabilityDraft = { collection_date: dateText, is_open: value.is_open, collection_time: value.collection_time, pickup_windows: (value.pickup_windows || []).map((item) => ({ ...item })) };
 }
 function selectAvailabilityDate(dateText) { setAvailabilityDraft(dateText); render(); }
+function setAvailabilityMarket(market) {
+  astate.availabilityMarket = market === "MY" ? "MY" : "SG";
+  try { localStorage.setItem("shizuku-availability-market", astate.availabilityMarket); } catch (_) {}
+  setAvailabilityDraft(astate.selectedAvailabilityDate || localDateText(new Date()));
+  render();
+}
 function changeCalendarMonth(amount) {
   const current = new Date(`${astate.calendarMonth}T12:00:00`);
   current.setMonth(current.getMonth() + amount);
@@ -164,12 +171,13 @@ function availabilityRanges(value) {
 }
 const WEEKDAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 function weeklySchedule() {
-  const saved = astate.settingsDraft?.weekly_pickup_schedule;
+  const key = astate.availabilityMarket === "MY" ? "malaysia_weekly_pickup_schedule" : "weekly_pickup_schedule";
+  const saved = astate.settingsDraft?.[key];
   if (Array.isArray(saved) && saved.length === 7) return saved;
   const saturday = astate.settingsDraft?.saturday_collection_time || "10:00 AM - 12:00 PM";
   const sunday = astate.settingsDraft?.sunday_collection_time || "10:00 AM - 1:00 PM";
   const schedule = WEEKDAYS.map((label, day) => ({ day, label, is_open: day === 0 || day === 6, windows: day === 0 ? [{ range:sunday, capacity:null }] : day === 6 ? [{ range:saturday, capacity:null }] : [] }));
-  if (astate.settingsDraft) astate.settingsDraft.weekly_pickup_schedule = schedule;
+  if (astate.settingsDraft) astate.settingsDraft[key] = schedule;
   return schedule;
 }
 function setWeeklyDayOpen(day, value) { const row=weeklySchedule().find((item)=>Number(item.day)===Number(day)); if (!row) return; row.is_open=!!value; if (row.is_open && !row.windows.length) row.windows=[{range:"10:00 AM - 12:00 PM",capacity:null}]; render(); }
@@ -197,17 +205,17 @@ async function saveAvailabilityOverride() {
   if (button) { button.textContent = "Saving…"; button.disabled = true; }
   const pickupWindows = specialWindows().filter((item)=>String(item.range||"").trim()).map((item)=>({range:String(item.range).trim(),capacity:item.capacity==null?null:Math.max(1,Number(item.capacity))}));
   const cleanWindows = pickupWindows.map((item)=>item.range).join(" | ");
-  const payload = { collection_date: entry.collection_date, is_open: !!entry.is_open, collection_time: entry.is_open ? cleanWindows : null, pickup_windows: entry.is_open ? pickupWindows : [] };
-  const { data, error } = await db.from("store_opening_overrides").upsert(payload, { onConflict: "collection_date" }).select().single();
+  const payload = { market_code: astate.availabilityMarket, collection_date: entry.collection_date, is_open: !!entry.is_open, collection_time: entry.is_open ? cleanWindows : null, pickup_windows: entry.is_open ? pickupWindows : [] };
+  const { data, error } = await db.from("store_opening_overrides").upsert(payload, { onConflict: "market_code,collection_date" }).select().single();
   if (button) { button.textContent = "Save day"; button.disabled = false; }
   if (error) { alert("Could not save this day: " + error.message); return; }
-  astate.openingOverrides = [...astate.openingOverrides.filter((item) => item.collection_date !== data.collection_date), data];
+  astate.openingOverrides = [...astate.openingOverrides.filter((item) => !(item.collection_date === data.collection_date && String(item.market_code || "SG") === String(data.market_code || "SG"))), data];
   setAvailabilityDraft(data.collection_date);
   render();
 }
 async function clearAvailabilityOverride() {
   const dateText = astate.selectedAvailabilityDate;
-  const existing = astate.openingOverrides.find((item) => item.collection_date === dateText);
+  const existing = astate.openingOverrides.find((item) => item.collection_date === dateText && String(item.market_code || "SG") === astate.availabilityMarket);
   if (!existing) return;
   if (!confirm("Remove this special calendar setting and use the normal weekly hours again?")) return;
   const { error } = await db.from("store_opening_overrides").delete().eq("id", existing.id);
@@ -927,11 +935,15 @@ function updateCustomerConfirmationPreviews() {
   const reviewSubject = document.getElementById("payment-review-email-subject-preview");
   const emailPreview = document.getElementById("customer-email-template-preview");
   const emailSubject = document.getElementById("customer-email-subject-preview");
+  const readyEmailPreview = document.getElementById("customer-ready-email-template-preview");
+  const readyEmailSubject = document.getElementById("customer-ready-email-subject-preview");
   const whatsappPreview = document.getElementById("notification-whatsapp-template-preview");
   if (reviewPreview) reviewPreview.textContent = `${fillCustomerEmailTemplate(astate.notificationDraft?.payment_review_email_heading_template,values)}\n\n${fillCustomerEmailTemplate(astate.notificationDraft?.payment_review_email_message_template,values)}\n\nOrder items\n${values.order_items}\n\nCollection: ${values.date} · ${values.time} · ${values.collection_point}`;
   if (reviewSubject) reviewSubject.textContent = fillCustomerEmailTemplate(astate.notificationDraft?.payment_review_email_subject_template,values);
   if (emailPreview) emailPreview.textContent = `${fillCustomerEmailTemplate(astate.notificationDraft?.customer_email_heading_template,values)}\n\n${fillCustomerEmailTemplate(astate.notificationDraft?.customer_email_message_template,values)}\n\nOrder items\n${values.order_items}\n\nCollection: ${values.date} · ${values.time} · ${values.collection_point}`;
   if (emailSubject) emailSubject.textContent = fillCustomerEmailTemplate(astate.notificationDraft?.customer_email_subject_template,values);
+  if (readyEmailPreview) readyEmailPreview.textContent = `${fillCustomerEmailTemplate(astate.notificationDraft?.customer_ready_email_heading_template,values)}\n\n${fillCustomerEmailTemplate(astate.notificationDraft?.customer_ready_email_message_template,values)}\n\nOrder items\n${values.order_items}\n\nCollection: ${values.date} · ${values.time} · ${values.collection_point}`;
+  if (readyEmailSubject) readyEmailSubject.textContent = fillCustomerEmailTemplate(astate.notificationDraft?.customer_ready_email_subject_template,values);
   if (whatsappPreview) whatsappPreview.textContent = fillWhatsAppConfirmationTemplate(astate.settingsDraft?.whatsapp_confirmation_template,values);
 }
 async function saveNotificationSettings() {
@@ -960,6 +972,10 @@ async function saveNotificationSettings() {
     customer_email_subject_template: String(draft.customer_email_subject_template || "Your order is confirmed · {order_number}").trim(),
     customer_email_heading_template: String(draft.customer_email_heading_template || "Your order is confirmed").trim(),
     customer_email_message_template: String(draft.customer_email_message_template || "Thank you for ordering with Shizuku Lab. We look forward to preparing your order.").trim(),
+    customer_ready_email_enabled: draft.customer_ready_email_enabled !== false,
+    customer_ready_email_subject_template: String(draft.customer_ready_email_subject_template || "Your order is ready for collection · {order_number}").trim(),
+    customer_ready_email_heading_template: String(draft.customer_ready_email_heading_template || "Your order is ready for collection").trim(),
+    customer_ready_email_message_template: String(draft.customer_ready_email_message_template || "Your order is ready for collection. We look forward to seeing you at your selected pickup time.").trim(),
   };
   // Update the existing row so the private webhook secret (configured only in
   // Supabase) is never overwritten by values coming from the browser.
@@ -1165,40 +1181,44 @@ function dashboardStyles() {
   </style>`;
 }
 
-function paidOrders() { return astate.orders.filter((order) => order.payment_status === "paid" && order.order_status !== "cancelled"); }
-function savedProductFoodCost(productId) {
-  return astate.recipes
-    .filter((row) => String(row.product_id) === String(productId))
-    .reduce((sum, row) => {
-      const ingredient = astate.inventory.find((item) => String(item.id) === String(row.inventory_item_id));
-      return sum + Number(row.quantity_used || 0) * ingredientUnitCost(ingredient);
-    }, 0);
+const DASHBOARD_MARKET = "SG";
+function ordersForMarket(market = DASHBOARD_MARKET) { return AdminMarketRules.ordersForMarket(astate.orders, market); }
+function paidOrders(market = DASHBOARD_MARKET) { return ordersForMarket(market).filter((order) => order.payment_status === "paid" && order.order_status !== "cancelled"); }
+function savedProductFoodCost(productId, market = DASHBOARD_MARKET) {
+  return AdminMarketRules.savedProductFoodCost({
+    recipes: astate.recipes,
+    inventory: astate.inventory,
+    productId,
+    market,
+    unitCost: ingredientUnitCost,
+  });
 }
 function dashboardStats() {
-  const paid = paidOrders();
+  const marketOrders = ordersForMarket(DASHBOARD_MARKET);
+  const paid = paidOrders(DASHBOARD_MARKET);
   const now = new Date();
   const monthly = paid.filter((order) => { const d = new Date(order.created_at); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); });
   const monthlySales = monthly.filter((order) => order.counts_as_sale !== false);
-  const customerKeys = new Set(astate.orders.map((order) => String(order.customer_phone || order.instagram || order.customer_name || "").trim()).filter(Boolean));
+  const customerKeys = new Set(marketOrders.map((order) => String(order.customer_phone || order.instagram || order.customer_name || "").trim()).filter(Boolean));
   const revenue = monthlySales.reduce((sum, order) => sum + Number(order.total || 0), 0);
   const missingRecipeProducts = new Map();
   const foodCost = monthlySales.reduce((orderSum, order) => orderSum + (order.order_items || []).reduce((itemSum, item) => {
-    const recipeRows = astate.recipes.filter((row) => String(row.product_id) === String(item.product_id));
+    const recipeRows = AdminMarketRules.recipesForProductMarket(astate.recipes, item.product_id, DASHBOARD_MARKET);
     const product = astate.menu.find((row) => String(row.id) === String(item.product_id))
       || astate.menu.find((row) => String(row.name) === String(item.product_name));
     if (!recipeRows.length && product?.food_cost_confirmed_zero !== true) {
       const id = product?.id || item.product_id;
       if (id) missingRecipeProducts.set(String(id), { id, name: product?.name || item.product_name || "Unknown product" });
     }
-    return itemSum + savedProductFoodCost(item.product_id) * Number(item.quantity || 0);
+    return itemSum + savedProductFoodCost(item.product_id, DASHBOARD_MARKET) * Number(item.quantity || 0);
   }, 0), 0);
   const grossProfit = revenue - foodCost;
   const profitMargin = revenue > 0 ? grossProfit / revenue * 100 : 0;
-  return { revenue, foodCost, grossProfit, profitMargin, missingRecipeProducts: [...missingRecipeProducts.values()], orders: monthly.length, customers: customerKeys.size, paymentReview: astate.orders.filter(AdminOrderRules.isPaymentReviewOrder).length };
+  return { revenue, foodCost, grossProfit, profitMargin, missingRecipeProducts: [...missingRecipeProducts.values()], orders: monthly.length, customers: customerKeys.size, paymentReview: marketOrders.filter(AdminOrderRules.isPaymentReviewOrder).length };
 }
 function salesPerformance() {
   const now = new Date();
-  const paid = paidOrders();
+  const paid = paidOrders(DASHBOARD_MARKET);
   const monthly = paid.filter((order) => {
     const date = new Date(order.created_at);
     return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
@@ -1232,7 +1252,7 @@ function pickupTimeMinutes(value) {
 }
 
 function nextPickupProduction() {
-  const active = paidOrders().filter((order) => ["confirmed", "preparing", "ready"].includes(order.order_status));
+  const active = paidOrders(DASHBOARD_MARKET).filter((order) => ["confirmed", "preparing", "ready"].includes(order.order_status));
   const dates = [...new Set(active.map((order) => order.collection_date).filter(Boolean))].sort();
   const today = new Date();
   const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
@@ -1246,7 +1266,7 @@ function nextPickupProduction() {
   return { date, orders };
 }
 function customerInsights() {
-  const list = customers();
+  const list = customers(ordersForMarket(DASHBOARD_MARKET));
   const top = [...list].sort((a, b) => b.spent - a.spent)[0] || null;
   const repeat = list.filter((customer) => customer.orders.length > 1);
   const now = new Date();
@@ -1416,7 +1436,7 @@ function renderDashboardTab() {
   const stats = dashboardStats();
   const workspaceName = astate.currentTeamMember?.display_name || "Ting";
   const workspaceRole = astate.currentTeamMember?.role || "Owner";
-  const liveOrders = astate.orders.filter((order) => order.order_status !== "cancelled" && order.order_status !== "collected").slice(0, 6);
+  const liveOrders = ordersForMarket(DASHBOARD_MARKET).filter((order) => order.order_status !== "cancelled" && order.order_status !== "collected").slice(0, 6);
   const performance = salesPerformance();
   const production = nextPickupProduction();
   const insights = customerInsights();
@@ -1428,10 +1448,10 @@ function renderDashboardTab() {
   return `
     <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${escapeHtml(workspaceName)}</h1><div class="workspace-role-pill">${escapeHtml(workspaceRole)}</div><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><div class="dashboard-top-actions">${astate.settings?.show_dashboard_refresh !== false ? `<button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing ? "disabled" : ""}>${astate.dashboardRefreshing ? "Refreshing…" : "↻ Refresh"}</button><span class="dashboard-refresh-meta">Last updated: ${escapeHtml(updatedTime)}</span>` : ""}<a class="open-shop" href="order.html">Open customer shop ↗</a></div></div>
     <div class="stat-grid dashboard-summary-grid">
-      <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Revenue this month</div><div class="stat-value">${money(stats.revenue)}</div><div class="stat-help">Paid orders only</div></div>
-      <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Non-cancelled paid orders this month</div><div class="stat-value">${stats.orders}</div><div class="stat-help">${stats.paymentReview ? `<button class="dashboard-warning-link" onclick="focusDashboardIssue('payment_review')">${stats.paymentReview} need payment review →</button>` : "Everything is up to date"}</div></div>
-      <div class="stat"><div class="stat-label"><span class="stat-icon">◉</span>Customers</div><div class="stat-value">${stats.customers}</div><div class="stat-help">Across all orders</div></div>
-      <div class="stat profit-stat"><div class="stat-label"><span class="stat-icon">$</span>Gross profit this month</div><div class="stat-value">${money(stats.grossProfit)}</div><div class="stat-help">Sales ${money(stats.revenue)} − food cost ${money(stats.foodCost)} · ${stats.profitMargin.toFixed(1)}% margin${stats.missingRecipeProducts.length ? `<div class="dashboard-warning-list">${foodCostWarnings}</div>` : ""}</div></div>
+      <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Singapore revenue this month</div><div class="stat-value">${money(stats.revenue)}</div><div class="stat-help">Singapore paid orders only</div></div>
+      <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Singapore non-cancelled paid orders this month</div><div class="stat-value">${stats.orders}</div><div class="stat-help">${stats.paymentReview ? `<button class="dashboard-warning-link" onclick="focusDashboardIssue('payment_review')">${stats.paymentReview} need payment review →</button>` : "Everything is up to date"}</div></div>
+      <div class="stat"><div class="stat-label"><span class="stat-icon">◉</span>Singapore customers</div><div class="stat-value">${stats.customers}</div><div class="stat-help">Across Singapore orders</div></div>
+      <div class="stat profit-stat"><div class="stat-label"><span class="stat-icon">$</span>Singapore gross profit this month</div><div class="stat-value">${money(stats.grossProfit)}</div><div class="stat-help">Sales ${money(stats.revenue)} − food cost ${money(stats.foodCost)} · ${stats.profitMargin.toFixed(1)}% margin${stats.missingRecipeProducts.length ? `<div class="dashboard-warning-list">${foodCostWarnings}</div>` : ""}</div></div>
     </div>
     <div class="dashboard-grid"><section class="dashboard-card"><div class="dashboard-card-head"><h2>Order queue</h2><button class="link-btn" onclick="setTab('orders')">View all</button></div>${liveOrders.length ? liveOrders.map((order) => `<div class="queue-row" onclick="setTab('orders')"><div class="queue-top"><div class="queue-number">${escapeHtml(order.order_number || order.id)}</div><div class="queue-status">${escapeHtml(PAY_LABEL[order.payment_status] || order.payment_status || "Pending")}</div></div><div class="queue-top"><div class="queue-name">${escapeHtml(order.customer_name || "Customer")} · ${escapeHtml(order.collection_date || "Pickup date pending")}</div><div class="queue-amount">${money(order.total)}</div></div></div>`).join("") : `<div class="dashboard-empty">You’re all caught up — no active orders right now.</div>`}</section>
     <section class="dashboard-card"><div class="dashboard-card-head"><h2>Next steps</h2><span>Shop checklist</span></div><div class="action-list"><button class="action dashboard-action" onclick="focusDashboardIssue('payment_review')"><span class="action-icon">✓</span><span><strong>Review payment proofs</strong><p>${stats.paymentReview ? `${stats.paymentReview} customer payment${stats.paymentReview === 1 ? "" : "s"} waiting for confirmation.` : "No payment proof waiting right now."}</p></span></button><button class="action dashboard-action" onclick="setTab('availability')"><span class="action-icon">◷</span><span><strong>Set pickup availability</strong><p>Open or close special collection days in your calendar.</p></span></button><button class="action dashboard-action" onclick="setTab('menu')"><span class="action-icon">✦</span><span><strong>Keep your menu fresh</strong><p>Edit prices, availability and products whenever you need.</p></span></button></div></section></div>
@@ -1648,7 +1668,7 @@ async function saveEditedOrder() {
 /* ---- inventory and food cost ---- */
 function currentCostingMarket() { return astate.costingMarket === "MY" ? "MY" : "SG"; }
 function inventoryForCostingMarket() { const market=currentCostingMarket(); return astate.inventory.filter((item) => String(item.market_code || "SG").toUpperCase() === market); }
-function productsForCostingMarket() { return astate.menu.filter((product) => !product.is_bundle && (currentCostingMarket() === "SG" || product.malaysia_available === true)); }
+function productsForCostingMarket() { return AdminMarketRules.productsForCostingMarket(astate.menu, currentCostingMarket()); }
 function productSellingPriceForMarket(product) { return currentCostingMarket() === "MY" ? Number(product?.myr_price || 0) : Number(product?.discount_price || product?.price || 0); }
 function setCostingMarket(market) {
   const next = String(market || "SG").toUpperCase() === "MY" ? "MY" : "SG";
@@ -1992,6 +2012,12 @@ function openMalaysiaCosting() {
   try { localStorage.setItem("shizuku-costing-market", "MY"); } catch (_) {}
   setTab("inventory");
 }
+function openMalaysiaAvailability() {
+  astate.availabilityMarket = "MY";
+  try { localStorage.setItem("shizuku-availability-market", "MY"); } catch (_) {}
+  setAvailabilityDraft(astate.selectedAvailabilityDate || localDateText(new Date()));
+  setTab("availability");
+}
 function renderMalaysiaTab() {
   const s = astate.settingsDraft || {};
   const points = Array.isArray(s.malaysia_collection_points) ? s.malaysia_collection_points.join("\n") : "";
@@ -2004,7 +2030,7 @@ function renderMalaysiaTab() {
     <div class="field"><label>Malaysia collection points — one per line</label><textarea rows="5" placeholder="Johor Bahru collection point" oninput="setMalaysiaCollectionPoints(this.value)">${escapeHtml(points)}</textarea></div>
     <div class="ref-note"><b>Product prices</b><br>Open Products → Edit to choose which drinks are available in Malaysia and enter their MYR price. Singapore prices are stored separately and will not change.</div>
     <div class="ref-note"><b>Malaysia costing &amp; inventory</b><br>Ingredients, packaging, recipes, stock and profit are stored separately in MYR. They never overwrite Singapore costing.</div>
-    <div class="btn-row" style="margin-top:16px"><button class="btn-secondary" onclick="openMalaysiaCosting()">Open Malaysia costing →</button><button class="btn-primary" id="save-settings-btn" onclick="saveSettings()">Save Malaysia settings</button></div>
+    <div class="btn-row" style="margin-top:16px"><button class="btn-secondary" onclick="openMalaysiaCosting()">Open Malaysia costing →</button><button class="btn-secondary" onclick="openMalaysiaAvailability()">Open Malaysia availability →</button><button class="btn-primary" id="save-settings-btn" onclick="saveSettings()">Save Malaysia settings</button></div>
   </section>`;
 }
 function renderIdeaEditor(){const d=astate.ideaDraft;return `<div class="overlay"><div class="overlay-card"><div class="display overlay-title">${d.id?"Edit":"New"} idea</div><div class="field"><label>Title</label><input value="${escapeHtml(d.title||"")}" oninput="ideaField('title',this.value)"></div><div class="field"><label>Notes</label><textarea rows="6" oninput="ideaField('notes',this.value)">${escapeHtml(d.notes||"")}</textarea></div><div class="field"><label>Category</label><select onchange="ideaField('category',this.value)">${IDEA_CATEGORIES.map(x=>`<option ${d.category===x?"selected":""}>${x}</option>`).join("")}</select></div><div class="field"><label>Status</label><select onchange="ideaField('status',this.value)"><option value="active" ${d.status!=="archived"?"selected":""}>Active</option><option value="archived" ${d.status==="archived"?"selected":""}>Done / archived</option></select></div><label class="slot"><input type="checkbox" style="width:auto" ${d.is_pinned?"checked":""} onchange="ideaField('is_pinned',this.checked)"> Pin this idea</label><div class="btn-row"><button class="btn-secondary" onclick="astate.ideaDraft=null;render()">Cancel</button><button class="btn-primary" onclick="saveIdea()">Save idea</button></div></div></div>`;}
@@ -2315,7 +2341,7 @@ function customerKey(order) {
   const phone = digits.length === 10 && digits.startsWith("65") ? digits.slice(2) : digits;
   return String(phone || order.instagram || order.customer_name || "Unknown customer").trim();
 }
-function customers() { const result = new Map(); astate.orders.forEach((order) => { const key = customerKey(order); const customer = result.get(key) || { key, name: order.customer_name || "Customer", phone: order.customer_phone || "", instagram: order.instagram || "", orders: [], spent: 0 }; customer.orders.push(order); if (order.payment_status === "paid" && order.order_status !== "cancelled") customer.spent += Number(order.total || 0); result.set(key, customer); }); return [...result.values()].sort((a,b) => new Date(b.orders[0]?.created_at || 0) - new Date(a.orders[0]?.created_at || 0)); }
+function customers(orders = astate.orders) { const result = new Map(); orders.forEach((order) => { const key = customerKey(order); const customer = result.get(key) || { key, name: order.customer_name || "Customer", phone: order.customer_phone || "", instagram: order.instagram || "", orders: [], spent: 0 }; customer.orders.push(order); if (order.payment_status === "paid" && order.order_status !== "cancelled") customer.spent += Number(order.total || 0); result.set(key, customer); }); return [...result.values()].sort((a,b) => new Date(b.orders[0]?.created_at || 0) - new Date(a.orders[0]?.created_at || 0)); }
 function chooseCustomer(key) { astate.selectedCustomerKey = key; render(); }
 function setCustomerNote(value) { if (astate.selectedCustomerKey) astate.customerNotes[astate.selectedCustomerKey] = value; }
 async function saveCustomerNote() { const key = astate.selectedCustomerKey; if (!key) return; const button = document.getElementById("save-customer-note"); if (button) { button.textContent = "Saving…"; button.disabled = true; } const { error } = await db.from("customer_notes").upsert({ customer_key: key, note: String(astate.customerNotes[key] || "").trim() }, { onConflict: "customer_key" }); if (button) { button.textContent = "Save remark"; button.disabled = false; } if (error) return alert("Could not save remark: " + error.message); alert("Remark saved."); }
@@ -2519,13 +2545,15 @@ function renderSettingsTab() {
 }
 
 function renderNotificationsTab() {
-  const n = astate.notificationDraft || { recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true, alert_live_chat: true, customer_email_enabled:true };
+  const n = astate.notificationDraft || { recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true, alert_live_chat: true, customer_email_enabled:true, customer_ready_email_enabled:true };
   const s = astate.settingsDraft || {};
   const values = { customer_name:"Shermin", order_number:"SL-SAMPLE", date:"30 Aug 2026", time:"11:30 AM", collection_point:"Near Creamier", total:"$13.80", order_items:"• 1 × Ichigo Matcha Latte\n• 1 × Strawberry Milk" };
   const reviewEmailSubject = fillCustomerEmailTemplate(n.payment_review_email_subject_template || "We received your order · {order_number}",values);
   const reviewEmailPreview = `${fillCustomerEmailTemplate(n.payment_review_email_heading_template || "Hi {customer_name}, we received your order",values)}\n\n${fillCustomerEmailTemplate(n.payment_review_email_message_template || "Your payment screenshot has been submitted for review. We’ll email you again once your order is confirmed.",values)}\n\nOrder items\n${values.order_items}\n\nCollection: ${values.date} · ${values.time} · ${values.collection_point}`;
   const emailSubject = fillCustomerEmailTemplate(n.customer_email_subject_template || "Your order is confirmed · {order_number}",values);
   const emailPreview = `${fillCustomerEmailTemplate(n.customer_email_heading_template || "Your order is confirmed",values)}\n\n${fillCustomerEmailTemplate(n.customer_email_message_template || "Thank you for ordering with Shizuku Lab. We look forward to preparing your order.",values)}\n\nOrder items\n${values.order_items}\n\nCollection: ${values.date} · ${values.time} · ${values.collection_point}`;
+  const readyEmailSubject = fillCustomerEmailTemplate(n.customer_ready_email_subject_template || "Your order is ready for collection · {order_number}",values);
+  const readyEmailPreview = `${fillCustomerEmailTemplate(n.customer_ready_email_heading_template || "Your order is ready for collection",values)}\n\n${fillCustomerEmailTemplate(n.customer_ready_email_message_template || "Your order is ready for collection. We look forward to seeing you at your selected pickup time.",values)}\n\nOrder items\n${values.order_items}\n\nCollection: ${values.date} · ${values.time} · ${values.collection_point}`;
   const whatsappTemplate = s.whatsapp_confirmation_template || DEFAULT_WHATSAPP_CONFIRMATION_TEMPLATE;
   const whatsappPreview = fillWhatsAppConfirmationTemplate(whatsappTemplate,values);
   return `<div style="display:grid;gap:18px;max-width:900px;"><section class="dashboard-card" style="padding:22px;">
@@ -2540,7 +2568,7 @@ function renderNotificationsTab() {
   </section><section class="dashboard-card" style="padding:22px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Customer order confirmations</h2><span>Email + WhatsApp</span></div><p class="hint" style="text-align:left;margin:0 0 16px;">Manage both customer confirmation channels in one place. Each channel has its own on/off switch.</p>
     <div class="order-card" style="margin-bottom:16px;">
       <div class="order-top"><b>Automatic customer emails</b><span>${n.customer_email_enabled !== false ? "On" : "Off"}</span></div>
-      <label class="slot" style="cursor:pointer;gap:10px;margin:12px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.customer_email_enabled !== false ? "checked" : ""} onchange="onNotificationField('customer_email_enabled',this.checked)"><span><b>Send two-stage customer updates</b><br><span class="hint">No email is sent when the order is first placed. Email 1 is sent after payment proof upload; Email 2 is sent when you confirm payment.</span></span></label>
+      <label class="slot" style="cursor:pointer;gap:10px;margin:12px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.customer_email_enabled !== false ? "checked" : ""} onchange="onNotificationField('customer_email_enabled',this.checked)"><span><b>Send three-stage customer updates</b><br><span class="hint">Email 1 is sent after payment proof upload; Email 2 is sent when payment is confirmed; Email 3 is sent automatically when you change the order to Ready for Collection.</span></span></label>
       <div class="display" style="font-size:18px;margin:18px 0 8px;">Email 1 · Payment under review</div>
       <div class="field"><label>Subject</label><input value="${escapeHtml(n.payment_review_email_subject_template || "We received your order · {order_number}")}" oninput="onNotificationField('payment_review_email_subject_template',this.value);updateCustomerConfirmationPreviews()"></div>
       <div class="field"><label>Heading</label><input value="${escapeHtml(n.payment_review_email_heading_template || "Hi {customer_name}, we received your order")}" oninput="onNotificationField('payment_review_email_heading_template',this.value);updateCustomerConfirmationPreviews()"></div>
@@ -2553,6 +2581,14 @@ function renderNotificationsTab() {
       <div class="field"><label>Message</label><textarea rows="3" oninput="onNotificationField('customer_email_message_template',this.value);updateCustomerConfirmationPreviews()">${escapeHtml(n.customer_email_message_template || "Thank you for ordering with Shizuku Lab. We look forward to preparing your order.")}</textarea></div>
       <div class="hint" style="text-align:left;margin:-4px 0 10px;">Variables: <code>{customer_name}</code> <code>{order_number}</code> <code>{date}</code> <code>{time}</code> <code>{collection_point}</code> <code>{total}</code></div>
       <div class="ref-note"><b>Subject</b><div id="customer-email-subject-preview" style="margin-top:5px;">${escapeHtml(emailSubject)}</div><div style="border-top:1px solid #dfd8ca;margin:12px 0;"></div><b>Email preview</b><div id="customer-email-template-preview" style="white-space:pre-wrap;line-height:1.55;margin-top:7px;">${escapeHtml(emailPreview)}</div></div>
+      <div class="divider"></div>
+      <div class="display" style="font-size:18px;margin:4px 0 8px;">Email 3 · Ready for collection</div>
+      <label class="slot" style="cursor:pointer;gap:10px;margin:10px 0 14px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${n.customer_ready_email_enabled !== false ? "checked" : ""} onchange="onNotificationField('customer_ready_email_enabled',this.checked)"><span><b>Send Email 3 automatically when status becomes Ready for Collection</b><br><span class="hint">Turning this off keeps Email 1 and Email 2 working.</span></span></label>
+      <div class="field"><label>Subject</label><input value="${escapeHtml(n.customer_ready_email_subject_template || "Your order is ready for collection · {order_number}")}" oninput="onNotificationField('customer_ready_email_subject_template',this.value);updateCustomerConfirmationPreviews()"></div>
+      <div class="field"><label>Heading</label><input value="${escapeHtml(n.customer_ready_email_heading_template || "Your order is ready for collection")}" oninput="onNotificationField('customer_ready_email_heading_template',this.value);updateCustomerConfirmationPreviews()"></div>
+      <div class="field"><label>Message</label><textarea rows="3" oninput="onNotificationField('customer_ready_email_message_template',this.value);updateCustomerConfirmationPreviews()">${escapeHtml(n.customer_ready_email_message_template || "Your order is ready for collection. We look forward to seeing you at your selected pickup time.")}</textarea></div>
+      <div class="hint" style="text-align:left;margin:-4px 0 10px;">Variables: <code>{customer_name}</code> <code>{order_number}</code> <code>{date}</code> <code>{time}</code> <code>{collection_point}</code> <code>{total}</code></div>
+      <div class="ref-note"><b>Subject</b><div id="customer-ready-email-subject-preview" style="margin-top:5px;">${escapeHtml(readyEmailSubject)}</div><div style="border-top:1px solid #dfd8ca;margin:12px 0;"></div><b>Email preview</b><div id="customer-ready-email-template-preview" style="white-space:pre-wrap;line-height:1.55;margin-top:7px;">${escapeHtml(readyEmailPreview)}</div></div>
     </div>
     <div class="order-card"><div class="order-top"><b>WhatsApp confirmation</b><span>${s.whatsapp_confirmation_enabled !== false ? "On" : "Off"}</span></div><label class="slot" style="cursor:pointer;gap:10px;margin:12px 0;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${s.whatsapp_confirmation_enabled !== false ? "checked" : ""} onchange="onSettingsField('whatsapp_confirmation_enabled',this.checked)"><span><b>Show WhatsApp customer button on confirmed orders</b></span></label><div class="field"><label>WhatsApp message</label><textarea rows="6" oninput="onSettingsField('whatsapp_confirmation_template',this.value);updateCustomerConfirmationPreviews()">${escapeHtml(whatsappTemplate)}</textarea></div><div class="hint" style="text-align:left;margin:-4px 0 10px;">Variables: <code>{customer_name}</code> <code>{date}</code> <code>{time}</code> <code>{collection_point}</code> <code>{order_items}</code></div><div class="ref-note"><b>WhatsApp preview</b><div id="notification-whatsapp-template-preview" style="white-space:pre-wrap;line-height:1.55;margin-top:7px;">${escapeHtml(whatsappPreview)}</div></div></div>
     <button class="btn-primary" id="notification-save-btn" style="width:100%;margin-top:16px;" onclick="saveNotificationSettings()">Save confirmation settings</button>
@@ -2740,6 +2776,11 @@ function renderFaqTab() {
 function renderAvailabilityTab() {
   if (!astate.settingsDraft || !astate.availabilityDraft) return `<div class="empty">Loading availability…</div>`;
   const s = astate.settingsDraft;
+  const market = astate.availabilityMarket === "MY" ? "MY" : "SG";
+  const marketLabel = market === "MY" ? "Malaysia · MYR" : "Singapore · SGD";
+  const advanceKey = market === "MY" ? "malaysia_order_advance_days" : "order_advance_days";
+  const noticeKey = market === "MY" ? "malaysia_minimum_order_notice_hours" : "minimum_order_notice_hours";
+  const intervalKey = market === "MY" ? "malaysia_pickup_slot_interval_minutes" : "pickup_slot_interval_minutes";
   const selected = astate.availabilityDraft;
   const month = new Date(`${astate.calendarMonth}T12:00:00`);
   const year = month.getFullYear(), monthIndex = month.getMonth();
@@ -2755,13 +2796,14 @@ function renderAvailabilityTab() {
     const color = status.is_open ? "#4B5D3A" : status.override ? "#B33333" : "#8A8478";
     cells.push(`<button class="slot availability-day" style="min-height:70px;padding:8px;text-align:left;display:block;border-color:${isSelected ? "#4B5D3A" : "#E1D9C8"};background:${isSelected ? "#F1F5EA" : "#fff"};" onclick="selectAvailabilityDate('${dateText}')"><b>${day}</b><br><span style="font-size:11px;color:${color};">${label}</span></button>`);
   }
-  const existing = astate.openingOverrides.find((item) => item.collection_date === selected.collection_date);
+  const existing = astate.openingOverrides.find((item) => item.collection_date === selected.collection_date && String(item.market_code || "SG") === market);
   const weeklyCards = weeklySchedule().map((day) => `<div class="order-card" style="margin-bottom:10px;padding:14px;"><div class="queue-top"><label style="display:flex;align-items:center;gap:9px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${day.is_open ? "checked" : ""} onchange="setWeeklyDayOpen(${day.day},this.checked)"><b>${escapeHtml(day.label)}</b></label><span class="queue-status">${day.is_open ? "OPEN" : "CLOSED"}</span></div>${day.is_open ? `<div style="margin-top:10px;">${day.windows.map((window,index)=>`<div style="display:grid;grid-template-columns:minmax(190px,1fr) 130px auto;gap:8px;align-items:end;margin:8px 0;"><div class="field" style="margin:0"><label>Pickup window</label><input value="${escapeHtml(window.range||"")}" placeholder="10:00 AM - 12:00 PM" oninput="setWeeklyWindow(${day.day},${index},'range',this.value)"></div><div class="field" style="margin:0"><label>Order limit</label><input type="number" min="1" value="${window.capacity ?? ""}" placeholder="Unlimited" oninput="setWeeklyWindow(${day.day},${index},'capacity',this.value)"></div><button class="link-danger" style="height:44px" onclick="removeWeeklyWindow(${day.day},${index})">Remove</button></div>`).join("")}<button class="link-btn" onclick="addWeeklyWindow(${day.day})">+ Add pickup window</button></div>` : ""}</div>`).join("");
   return `
+    <section class="dashboard-card" style="padding:16px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 12px"><div><h2>${marketLabel} availability</h2><span>Weekly hours, notice period and date exceptions are separate for each country.</span></div></div><div class="tabs" style="margin:0"><button class="${market === "SG" ? "active" : ""}" onclick="setAvailabilityMarket('SG')">Singapore · SGD</button><button class="${market === "MY" ? "active" : ""}" onclick="setAvailabilityMarket('MY')">Malaysia · MYR</button></div></section>
     <div class="display" style="font-size:20px;margin:4px 0 8px;">Ordering window</div>
-    <div class="field"><label>How many days ahead can customers order?</label><input type="number" min="0" max="60" value="${s.order_advance_days ?? 14}" oninput="onSettingsField('order_advance_days', Number(this.value))"><div class="hint">Example: 14 lets customers order up to 2 weeks ahead.</div></div>
-    <div class="field"><label>Minimum notice before pickup (hours)</label><input type="number" min="0" max="168" value="${s.minimum_order_notice_hours ?? 0}" oninput="onSettingsField('minimum_order_notice_hours', Number(this.value))"><div class="hint">Example: 24 means customers must order at least 24 hours before pickup.</div></div>
-    <div class="field"><label>Pickup time interval (minutes)</label><select onchange="onSettingsField('pickup_slot_interval_minutes', Number(this.value))"><option value="15" ${Number(s.pickup_slot_interval_minutes) === 15 ? "selected" : ""}>Every 15 minutes</option><option value="30" ${Number(s.pickup_slot_interval_minutes || 30) === 30 ? "selected" : ""}>Every 30 minutes</option><option value="60" ${Number(s.pickup_slot_interval_minutes) === 60 ? "selected" : ""}>Every 60 minutes</option></select><div class="hint">Customers choose a date first, then see times based on this interval.</div></div>
+    <div class="field"><label>How many days ahead can customers order?</label><input type="number" min="0" max="60" value="${s[advanceKey] ?? 14}" oninput="onSettingsField('${advanceKey}', Number(this.value))"><div class="hint">Example: 14 lets customers order up to 2 weeks ahead.</div></div>
+    <div class="field"><label>Minimum notice before pickup (hours)</label><input type="number" min="0" max="168" value="${s[noticeKey] ?? 0}" oninput="onSettingsField('${noticeKey}', Number(this.value))"><div class="hint">Example: 24 means customers must order at least 24 hours before pickup.</div></div>
+    <div class="field"><label>Pickup time interval (minutes)</label><select onchange="onSettingsField('${intervalKey}', Number(this.value))"><option value="15" ${Number(s[intervalKey]) === 15 ? "selected" : ""}>Every 15 minutes</option><option value="30" ${Number(s[intervalKey] ?? 30) === 30 ? "selected" : ""}>Every 30 minutes</option><option value="60" ${Number(s[intervalKey]) === 60 ? "selected" : ""}>Every 60 minutes</option></select><div class="hint">Customers choose a date first, then see times based on this interval.</div></div>
     <button class="btn-primary" id="settings-save-btn" style="width:100%;margin:2px 0 20px;" onclick="saveSettings()">Save ordering window</button>
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:16px 0 6px;">Weekly schedule</div>
