@@ -67,6 +67,11 @@ const astate = {
   recipeZeroCost: false,
   costingMarket: (() => { try { return localStorage.getItem("shizuku-costing-market") === "MY" ? "MY" : "SG"; } catch (_) { return "SG"; } })(),
   marketingSearch: "",
+  marketingSelectedEmails: [],
+  marketingSelectedPhones: [],
+  marketingSendBusy: false,
+  marketingSendProgress: "",
+  marketingAttachmentUploading: false,
   suppliers: [],
   wholesaleItems: [],
   inspirationIdeas: [],
@@ -127,6 +132,27 @@ const PAY_LABEL = { awaiting_payment: "Awaiting payment", submitted: "Payment se
 const PAY_COLOR = { awaiting_payment: "#B78A2E", submitted: "#B78A2E", rejected: "#B33333", paid: "#4B5D3A" };
 const ORDER_LABEL = { pending: "Pending", awaiting_confirmation: "Awaiting confirmation", confirmed: "Confirmed", preparing: "Preparing", ready: "Ready for collection", collected: "Collected", cancelled: "Cancelled" };
 const ORDER_COLOR = { cancelled: "#B33333", preparing: "#A36D1E", ready: "#267A47" };
+
+const DEFAULT_MARKETING_EMAIL_SUBJECT = "September Opening Dates + A Little Treat 🍵";
+const DEFAULT_MARKETING_EMAIL_BODY = `Hi there ♡
+
+Our September opening dates are here
+
+You can find our available collection dates and timings in the calendar attached. For the latest availability or any schedule updates, please refer to our ordering page.
+
+And a little update for this month — we’re retiring our previous promo code SHIZUKULABAUG and changing it to:
+FIRSTDROP
+
+Use FIRSTDROP to enjoy $1 OFF your order ✨
+Even if you’ve used SHIZUKULABAUG before, you can still use FIRSTDROP one more time.
+
+One-time use per customer.
+
+Thank you for supporting our little lab ♡
+See you this September!
+Shizuku Lab
+Crafted drop by drop.`;
+const DEFAULT_MARKETING_WHATSAPP_BODY = `Hi {customer_name} ♡\n\nOur September opening dates are here 🍵\n\nPlease check our ordering page for the latest collection dates and timings. Use FIRSTDROP to enjoy $1 OFF your order ✨\n\nOne-time use per customer.\n\nThank you for supporting our little lab ♡\nShizuku Lab · Crafted drop by drop.`;
 
 function localDateText(date) {
   const y = date.getFullYear(), m = String(date.getMonth() + 1).padStart(2, "0"), d = String(date.getDate()).padStart(2, "0");
@@ -620,6 +646,29 @@ async function uploadStorefrontImage(input, target) {
   const { data } = db.storage.from("storefront-images").getPublicUrl(path);
   if (target === "products") astate.editing.image_url = data.publicUrl;
   else { astate.settingsDraft[target] = data.publicUrl; }
+  render();
+}
+async function uploadMarketingAttachment(input) {
+  const file = input?.files?.[0];
+  if (!file) return;
+  const allowed = file.type.startsWith("image/") || ["application/pdf","text/plain","text/csv","application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document","application/vnd.ms-excel","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"].includes(file.type);
+  if (!allowed) { alert("Please choose an image, PDF, Word, Excel, CSV or text file."); return; }
+  if (file.size > 8 * 1024 * 1024) { alert("Please use a file smaller than 8 MB."); return; }
+  astate.marketingAttachmentUploading = true; render();
+  const extension = (file.name.split(".").pop() || "file").replace(/[^a-z0-9]/gi, "");
+  const path = `marketing/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${extension}`;
+  const { error } = await db.storage.from("storefront-images").upload(path, file, { upsert:false, contentType:file.type || "application/octet-stream" });
+  if (error) { astate.marketingAttachmentUploading=false; alert("Could not upload attachment: " + error.message); render(); return; }
+  const { data } = db.storage.from("storefront-images").getPublicUrl(path);
+  astate.settingsDraft.marketing_attachment_url = data.publicUrl;
+  astate.settingsDraft.marketing_attachment_name = file.name;
+  astate.settingsDraft.marketing_attachment_type = file.type || "application/octet-stream";
+  astate.marketingAttachmentUploading = false; render();
+}
+function removeMarketingAttachment() {
+  astate.settingsDraft.marketing_attachment_url = null;
+  astate.settingsDraft.marketing_attachment_name = null;
+  astate.settingsDraft.marketing_attachment_type = null;
   render();
 }
 async function saveMenuItem() {
@@ -1431,7 +1480,41 @@ function marketingContacts() {
   return [...map.values()].filter(o => !q || [o.customer_name,o.customer_email,o.customer_phone].some(v=>String(v||"").toLowerCase().includes(q)));
 }
 function exportMarketingContacts() { const rows=marketingContacts(); const csv=[["Name","Email","Phone","Email opt-in","WhatsApp opt-in","Consent date"],...rows.map(o=>[o.customer_name||"",o.customer_email||"",o.customer_phone||"",o.marketing_email_opt_in?"Yes":"No",o.marketing_whatsapp_opt_in?"Yes":"No",o.marketing_consent_at||o.created_at||""])].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n"); const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="shizuku-marketing-contacts.csv";a.click();URL.revokeObjectURL(a.href); }
-function renderMarketingTab() { const s=astate.settingsDraft||{}, contacts=marketingContacts(); return `<section class="dashboard-card" style="padding:20px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 16px"><div><h2>Checkout marketing consent</h2><span>Customers must actively tick this; it is never pre-selected</span></div><span>${s.marketing_opt_in_enabled===false?"Off":"On"}</span></div><label class="slot"><input type="checkbox" style="width:auto" ${s.marketing_opt_in_enabled===false?"":"checked"} onchange="onSettingsField('marketing_opt_in_enabled',this.checked);render()"><span><b>Show opt-in at checkout</b></span></label><div class="field"><label>Heading</label><input value="${escapeHtml(s.marketing_checkout_heading||"")}" oninput="onSettingsField('marketing_checkout_heading',this.value)"></div><div class="field"><label>Consent wording</label><textarea rows="3" oninput="onSettingsField('marketing_opt_in_label',this.value)">${escapeHtml(s.marketing_opt_in_label||"")}</textarea></div><div class="field"><label>Help text</label><textarea rows="2" oninput="onSettingsField('marketing_opt_in_help_text',this.value)">${escapeHtml(s.marketing_opt_in_help_text||"")}</textarea></div><label class="slot"><input type="checkbox" style="width:auto" ${s.marketing_email_enabled===false?"":"checked"} onchange="onSettingsField('marketing_email_enabled',this.checked)"><span>Email updates</span></label><label class="slot"><input type="checkbox" style="width:auto" ${s.marketing_whatsapp_enabled===true?"checked":""} onchange="onSettingsField('marketing_whatsapp_enabled',this.checked)"><span>WhatsApp updates (for later use)</span></label><button class="btn-primary" onclick="saveSettings()">Save marketing settings</button></section><section class="dashboard-card"><div class="dashboard-card-head"><div><h2>Marketing contacts</h2><span>${contacts.length} consented contact(s), newest consent kept</span></div><button class="btn-secondary" onclick="exportMarketingContacts()">Download CSV</button></div><div style="padding:14px 20px"><input placeholder="Search name, email or phone" value="${escapeHtml(astate.marketingSearch)}" oninput="astate.marketingSearch=this.value;render()"></div>${contacts.map(o=>`<div class="queue-row"><div class="queue-top"><div><b>${escapeHtml(o.customer_name||'Customer')}</b><div class="queue-name">${escapeHtml(o.customer_email||'No email')} · ${escapeHtml(o.customer_phone||'No phone')}</div></div><span class="queue-status">${[o.marketing_email_opt_in?'Email':'',o.marketing_whatsapp_opt_in?'WhatsApp':''].filter(Boolean).join(' + ')}</span></div></div>`).join('')||`<div class="dashboard-empty">No customers have opted in yet.</div>`}</section>`; }
+function marketingEmailContacts() { return marketingContacts().filter(o => o.marketing_email_opt_in && /^\S+@\S+\.\S+$/.test(String(o.customer_email||"").trim())); }
+function marketingWhatsappContacts() { return marketingContacts().filter(o => o.marketing_whatsapp_opt_in && String(o.customer_phone||"").replace(/\D/g,"").length >= 8); }
+function toggleMarketingEmail(email, checked) { const key=String(email||"").trim().toLowerCase(); astate.marketingSelectedEmails=checked?[...new Set([...astate.marketingSelectedEmails,key])]:astate.marketingSelectedEmails.filter(v=>v!==key); render(); }
+function toggleMarketingPhone(phone, checked) { const key=String(phone||"").replace(/\D/g,""); astate.marketingSelectedPhones=checked?[...new Set([...astate.marketingSelectedPhones,key])]:astate.marketingSelectedPhones.filter(v=>v!==key); render(); }
+function selectAllMarketing(channel) { if(channel==='email') astate.marketingSelectedEmails=marketingEmailContacts().map(o=>String(o.customer_email).trim().toLowerCase()); else astate.marketingSelectedPhones=marketingWhatsappContacts().map(o=>String(o.customer_phone).replace(/\D/g,"")); render(); }
+async function persistMarketingSettings() {
+  const { id,created_at,updated_at,...fields }=astate.settingsDraft;
+  const {error}=await db.from("store_settings").update(fields).eq("id",astate.settings.id);
+  if(error) throw error; astate.settings={...astate.settingsDraft};
+}
+async function sendSelectedMarketingEmails() {
+  const selected=marketingEmailContacts().filter(o=>astate.marketingSelectedEmails.includes(String(o.customer_email).trim().toLowerCase()));
+  if(!selected.length) return alert("Select at least one opted-in email contact.");
+  if(!confirm(`Send to ${selected.length} selected contacts?`)) return;
+  astate.marketingSendBusy=true; astate.marketingSendProgress=`Sending 0 of ${selected.length}…`; render();
+  try { await persistMarketingSettings(); let sent=0, failed=[];
+    for(const contact of selected) { const {error}=await db.rpc("send_marketing_campaign_email",{p_customer_email:contact.customer_email}); if(error) failed.push(contact.customer_email); else sent++; astate.marketingSendProgress=`Sending ${sent+failed.length} of ${selected.length}…`; render(); }
+    astate.marketingSelectedEmails=failed.map(v=>String(v).toLowerCase()); alert(failed.length?`${sent} sent. ${failed.length} failed: ${failed.join(", ")}`:`Sent to ${sent} selected contacts.`);
+  } catch(e) { alert("Could not send campaign: "+(e.message||e)); } finally { astate.marketingSendBusy=false; astate.marketingSendProgress=""; render(); }
+}
+function openSelectedMarketingWhatsapps() {
+  const selected=marketingWhatsappContacts().filter(o=>astate.marketingSelectedPhones.includes(String(o.customer_phone).replace(/\D/g,"")));
+  if(!selected.length) return alert("Select at least one opted-in WhatsApp contact.");
+  if(!confirm(`Open WhatsApp for ${selected.length} selected contacts?`)) return;
+  const template=String(astate.settingsDraft.marketing_whatsapp_message||DEFAULT_MARKETING_WHATSAPP_BODY);
+  selected.forEach((contact,index)=>setTimeout(()=>window.open(`https://wa.me/${String(contact.customer_phone).replace(/\D/g,"")}?text=${encodeURIComponent(template.replace(/\{customer_name\}/g,contact.customer_name||"there"))}`,"_blank"),index*350));
+}
+function renderMarketingTab() {
+  const s=astate.settingsDraft||{}, contacts=marketingContacts(), emails=marketingEmailContacts(), whatsapps=marketingWhatsappContacts();
+  const subject=s.marketing_email_subject||DEFAULT_MARKETING_EMAIL_SUBJECT, body=s.marketing_email_body||DEFAULT_MARKETING_EMAIL_BODY, whatsapp=s.marketing_whatsapp_message||DEFAULT_MARKETING_WHATSAPP_BODY;
+  return `<section class="dashboard-card" style="padding:20px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 16px"><div><h2>Checkout marketing consent</h2><span>Customers must actively tick this; it is never pre-selected</span></div><span>${s.marketing_opt_in_enabled===false?"Off":"On"}</span></div><label class="slot"><input type="checkbox" style="width:auto" ${s.marketing_opt_in_enabled===false?"":"checked"} onchange="onSettingsField('marketing_opt_in_enabled',this.checked);render()"><span><b>Show opt-in at checkout</b></span></label><div class="field"><label>Heading</label><input value="${escapeHtml(s.marketing_checkout_heading||"")}" oninput="onSettingsField('marketing_checkout_heading',this.value)"></div><div class="field"><label>Consent wording</label><textarea rows="3" oninput="onSettingsField('marketing_opt_in_label',this.value)">${escapeHtml(s.marketing_opt_in_label||"")}</textarea></div><div class="field"><label>Help text</label><textarea rows="2" oninput="onSettingsField('marketing_opt_in_help_text',this.value)">${escapeHtml(s.marketing_opt_in_help_text||"")}</textarea></div><label class="slot"><input type="checkbox" style="width:auto" ${s.marketing_email_enabled===false?"":"checked"} onchange="onSettingsField('marketing_email_enabled',this.checked)"><span>Email updates</span></label><label class="slot"><input type="checkbox" style="width:auto" ${s.marketing_whatsapp_enabled===true?"checked":""} onchange="onSettingsField('marketing_whatsapp_enabled',this.checked)"><span>WhatsApp updates</span></label><button class="btn-primary" onclick="saveSettings()">Save marketing settings</button></section>
+  <section class="dashboard-card" style="padding:20px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 16px"><div><h2>Marketing email template</h2><span>Edit, preview, attach and send to selected opted-in customers</span></div></div><div class="field"><label>Subject</label><input value="${escapeHtml(subject)}" oninput="onSettingsField('marketing_email_subject',this.value);render()"></div><div class="field"><label>Email message</label><textarea rows="14" oninput="onSettingsField('marketing_email_body',this.value);render()">${escapeHtml(body)}</textarea></div><div class="btn-row"><label class="btn-secondary">Take photo<input hidden type="file" accept="image/*" capture="environment" onchange="uploadMarketingAttachment(this)"></label><label class="btn-secondary">Photo library<input hidden type="file" accept="image/*" onchange="uploadMarketingAttachment(this)"></label><label class="btn-secondary">Upload file<input hidden type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt" onchange="uploadMarketingAttachment(this)"></label></div>${astate.marketingAttachmentUploading?`<div class="ref-note">Uploading…</div>`:s.marketing_attachment_url?`<div class="ref-note"><b>Attachment:</b> <a href="${escapeHtml(s.marketing_attachment_url)}" target="_blank">${escapeHtml(s.marketing_attachment_name||"Open file")}</a> <button class="link-danger" onclick="removeMarketingAttachment()">Remove</button></div>`:`<div class="ref-note">No attachment selected.</div>`}<div class="ref-note"><b>${escapeHtml(subject)}</b><br><br><div style="white-space:pre-wrap">${escapeHtml(body)}</div><br><small>Powered by Slow Studio</small></div><button class="btn-primary" onclick="persistMarketingSettings().then(()=>alert('Marketing template saved.')).catch(e=>alert(e.message))">Save email template</button></section>
+  <section class="dashboard-card" style="padding:20px;margin-bottom:18px"><h2>WhatsApp template</h2><div class="field"><label>Message</label><textarea rows="9" oninput="onSettingsField('marketing_whatsapp_message',this.value)">${escapeHtml(whatsapp)}</textarea></div><div class="ref-note">Use <b>{customer_name}</b> to insert each customer’s name. Sending opens WhatsApp so you can review and press Send.</div><button class="btn-primary" onclick="persistMarketingSettings().then(()=>alert('WhatsApp template saved.')).catch(e=>alert(e.message))">Save WhatsApp template</button></section>
+  <section class="dashboard-card"><div class="dashboard-card-head"><div><h2>Marketing contacts</h2><span>${contacts.length} consented contact(s), newest consent kept</span></div><button class="btn-secondary" onclick="exportMarketingContacts()">Download CSV</button></div><div style="padding:14px 20px"><input placeholder="Search name, email or phone" value="${escapeHtml(astate.marketingSearch)}" oninput="astate.marketingSearch=this.value;render()"><div class="btn-row" style="margin-top:12px"><button class="btn-secondary" onclick="selectAllMarketing('email')">Select all email</button><button class="btn-secondary" onclick="selectAllMarketing('whatsapp')">Select all WhatsApp</button><button class="btn-primary" ${astate.marketingSendBusy?'disabled':''} onclick="sendSelectedMarketingEmails()">${astate.marketingSendBusy?escapeHtml(astate.marketingSendProgress):`Send email (${astate.marketingSelectedEmails.length})`}</button><button class="btn-primary" onclick="openSelectedMarketingWhatsapps()">Open WhatsApp (${astate.marketingSelectedPhones.length})</button></div></div>${contacts.map(o=>{const email=String(o.customer_email||"").trim().toLowerCase(),phone=String(o.customer_phone||"").replace(/\D/g,"");return `<div class="queue-row"><div class="queue-top"><div><b>${escapeHtml(o.customer_name||'Customer')}</b><div class="queue-name">${escapeHtml(o.customer_email||'No email')} · ${escapeHtml(o.customer_phone||'No phone')}</div></div><div style="display:flex;gap:12px;align-items:center">${o.marketing_email_opt_in&&/^\S+@\S+\.\S+$/.test(email)?`<label><input type="checkbox" style="width:auto" ${astate.marketingSelectedEmails.includes(email)?'checked':''} onchange="toggleMarketingEmail('${escapeHtml(email)}',this.checked)"> Email</label>`:''}${o.marketing_whatsapp_opt_in&&phone.length>=8?`<label><input type="checkbox" style="width:auto" ${astate.marketingSelectedPhones.includes(phone)?'checked':''} onchange="toggleMarketingPhone('${phone}',this.checked)"> WhatsApp</label>`:''}</div></div></div>`}).join('')||`<div class="dashboard-empty">No customers have opted in yet.</div>`}</section>`;
+}
 function renderDashboardTab() {
   const stats = dashboardStats();
   const workspaceName = astate.currentTeamMember?.display_name || "Ting";
