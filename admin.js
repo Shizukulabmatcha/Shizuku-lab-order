@@ -67,6 +67,11 @@ const astate = {
   recipeZeroCost: false,
   costingMarket: (() => { try { return localStorage.getItem("shizuku-costing-market") === "MY" ? "MY" : "SG"; } catch (_) { return "SG"; } })(),
   marketingSearch: "",
+  marketingSelectedEmails: [],
+  marketingSelectedPhones: [],
+  marketingSendBusy: false,
+  marketingSendProgress: "",
+  marketingAttachmentUploading: false,
   suppliers: [],
   wholesaleItems: [],
   inspirationIdeas: [],
@@ -127,6 +132,27 @@ const PAY_LABEL = { awaiting_payment: "Awaiting payment", submitted: "Payment se
 const PAY_COLOR = { awaiting_payment: "#B78A2E", submitted: "#B78A2E", rejected: "#B33333", paid: "#4B5D3A" };
 const ORDER_LABEL = { pending: "Pending", awaiting_confirmation: "Awaiting confirmation", confirmed: "Confirmed", preparing: "Preparing", ready: "Ready for collection", collected: "Collected", cancelled: "Cancelled" };
 const ORDER_COLOR = { cancelled: "#B33333", preparing: "#A36D1E", ready: "#267A47" };
+
+const DEFAULT_MARKETING_EMAIL_SUBJECT = "September Opening Dates + A Little Treat 🍵";
+const DEFAULT_MARKETING_EMAIL_BODY = `Hi there ♡
+
+Our September opening dates are here
+
+You can find our available collection dates and timings in the calendar attached. For the latest availability or any schedule updates, please refer to our ordering page.
+
+And a little update for this month — we’re retiring our previous promo code SHIZUKULABAUG and changing it to:
+FIRSTDROP
+
+Use FIRSTDROP to enjoy $1 OFF your order ✨
+Even if you’ve used SHIZUKULABAUG before, you can still use FIRSTDROP one more time.
+
+One-time use per customer.
+
+Thank you for supporting our little lab ♡
+See you this September!
+Shizuku Lab
+Crafted drop by drop.`;
+const DEFAULT_MARKETING_WHATSAPP_BODY = `Hi {customer_name} ♡\n\nOur September opening dates are here 🍵\n\nPlease check our ordering page for the latest collection dates and timings. Use FIRSTDROP to enjoy $1 OFF your order ✨\n\nOne-time use per customer.\n\nThank you for supporting our little lab ♡\nShizuku Lab · Crafted drop by drop.`;
 
 function localDateText(date) {
   const y = date.getFullYear(), m = String(date.getMonth() + 1).padStart(2, "0"), d = String(date.getDate()).padStart(2, "0");
@@ -503,6 +529,19 @@ function toggleOrderExpanded(id) {
   astate.expandedOrderIds = astate.expandedOrderIds.includes(key) ? astate.expandedOrderIds.filter((item) => item !== key) : [...astate.expandedOrderIds, key];
   render();
 }
+function openRelatedOrder(orderId, orderNumber = "") {
+  const order = astate.orders.find((item) => String(item.id) === String(orderId))
+    || astate.orders.find((item) => String(item.order_number) === String(orderNumber));
+  if (!order) { alert("This related order could not be found."); return; }
+  astate.orderFilter = "all";
+  astate.orderSearch = String(order.order_number || order.id || "");
+  astate.expandedOrderIds = [String(order.id)];
+  setTab("orders");
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const targets = [...document.querySelectorAll(`[data-order-id="${String(order.id).replace(/"/g, "\\\"")}"]`)];
+    (targets.find((element) => element.offsetParent !== null) || targets[0])?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }));
+}
 function toggleBulkOrderMode() { astate.bulkOrderMode = !astate.bulkOrderMode; if (!astate.bulkOrderMode) astate.selectedOrderIds = []; render(); }
 function toggleOrderSelected(id, checked) {
   const key = String(id);
@@ -545,6 +584,23 @@ async function cancelOrder(id) {
     const { error } = await db.from("orders").update({ order_status: "cancelled" }).eq("id", id);
     if (error) alert("Could not cancel order: " + error.message);
   }
+}
+async function deleteCancelledOrder(id) {
+  const order = astate.orders.find((item) => String(item.id) === String(id));
+  if (!order || order.order_status !== "cancelled") return alert("Only cancelled orders can be deleted.");
+  if (!confirm(`Permanently delete cancelled order ${order.order_number || order.id}?\n\nThis removes the order and its item details and cannot be undone.`)) return;
+  const { data, error } = await db.from("orders").delete().eq("id", id).eq("order_status", "cancelled").select("id");
+  if (error) return alert("Could not delete this cancelled order: " + error.message);
+  if (!(data || []).length) return alert("The order was not deleted. Refresh and confirm it is still cancelled.");
+  await Promise.all([
+    db.from("promo_redemptions").delete().eq("order_id", id),
+    db.from("order_messages").delete().eq("order_id", String(id)),
+  ]);
+  astate.orders = astate.orders.filter((item) => String(item.id) !== String(id));
+  astate.promoRedemptions = astate.promoRedemptions.filter((item) => String(item.order_id) !== String(id));
+  astate.messages = astate.messages.filter((item) => String(item.order_id) !== String(id));
+  astate.expandedOrderIds = astate.expandedOrderIds.filter((item) => item !== String(id));
+  render();
 }
 
 /* ---- menu (products) CRUD — unchanged from before ---- */
@@ -620,6 +676,29 @@ async function uploadStorefrontImage(input, target) {
   const { data } = db.storage.from("storefront-images").getPublicUrl(path);
   if (target === "products") astate.editing.image_url = data.publicUrl;
   else { astate.settingsDraft[target] = data.publicUrl; }
+  render();
+}
+async function uploadMarketingAttachment(input) {
+  const file = input?.files?.[0];
+  if (!file) return;
+  const allowed = file.type.startsWith("image/") || ["application/pdf","text/plain","text/csv","application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document","application/vnd.ms-excel","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"].includes(file.type);
+  if (!allowed) { alert("Please choose an image, PDF, Word, Excel, CSV or text file."); return; }
+  if (file.size > 8 * 1024 * 1024) { alert("Please use a file smaller than 8 MB."); return; }
+  astate.marketingAttachmentUploading = true; render();
+  const extension = (file.name.split(".").pop() || "file").replace(/[^a-z0-9]/gi, "");
+  const path = `marketing/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${extension}`;
+  const { error } = await db.storage.from("storefront-images").upload(path, file, { upsert:false, contentType:file.type || "application/octet-stream" });
+  if (error) { astate.marketingAttachmentUploading=false; alert("Could not upload attachment: " + error.message); render(); return; }
+  const { data } = db.storage.from("storefront-images").getPublicUrl(path);
+  astate.settingsDraft.marketing_attachment_url = data.publicUrl;
+  astate.settingsDraft.marketing_attachment_name = file.name;
+  astate.settingsDraft.marketing_attachment_type = file.type || "application/octet-stream";
+  astate.marketingAttachmentUploading = false; render();
+}
+function removeMarketingAttachment() {
+  astate.settingsDraft.marketing_attachment_url = null;
+  astate.settingsDraft.marketing_attachment_name = null;
+  astate.settingsDraft.marketing_attachment_type = null;
   render();
 }
 async function saveMenuItem() {
@@ -816,7 +895,8 @@ async function deleteDrinkOption(index) {
 async function saveDrinkOptions() {
   const rows = astate.options.filter((option) => String(option.name || "").trim());
   for (const option of rows) {
-    const fields = { option_group_id: option.option_group_id, name: String(option.name).trim(), price: Math.max(0, Number(option.price || 0)), is_available: option.is_available !== false };
+    const numericPrice = Number(option.price || 0);
+    const fields = { option_group_id: option.option_group_id, name: String(option.name).trim(), price: Number.isFinite(numericPrice) ? numericPrice : 0, is_available: option.is_available !== false };
     const query = option.id ? db.from("options").update(fields).eq("id", option.id).select().single() : db.from("options").insert(fields).select().single();
     const { data, error } = await query;
     if (error) { alert("Could not save drink choice: " + error.message); return; }
@@ -840,7 +920,7 @@ function renderDrinkOptionsManager() {
           <label style="font-size:12px;white-space:nowrap;"><input type="checkbox" style="width:auto;" ${group.is_visible !== false ? "checked" : ""} onchange="onDrinkOptionGroupField(${groupIndex},'is_visible',this.checked)"> Show</label>
           <button class="link-danger" style="font-size:12px;" onclick="deleteDrinkOptionGroup(${groupIndex})">Delete</button>
         </div>
-        ${group.id ? `<div style="margin-top:12px;">${choices.length ? choices.map(({ option, index }) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 100px auto auto;gap:9px;align-items:center;margin:8px 0;"><input value="${escapeHtml(option.name || "")}" placeholder="e.g. Less Ice" oninput="onDrinkOptionField(${index},'name',this.value)"><input type="number" min="0" step="0.10" value="${Number(option.price || 0)}" title="Extra price" oninput="onDrinkOptionField(${index},'price',this.value)"><label style="font-size:12px;white-space:nowrap;"><input type="checkbox" style="width:auto;" ${option.is_available !== false ? "checked" : ""} onchange="onDrinkOptionField(${index},'is_available',this.checked)"> Show</label><button class="link-danger" style="font-size:12px;" onclick="deleteDrinkOption(${index})">Delete</button></div>`).join("") : `<div class="hint" style="text-align:left;margin:6px 0;">No choices yet.</div>`}<button class="btn-secondary" style="margin-top:6px;" onclick="addDrinkOption('${group.id}')">+ Add choice</button></div>` : `<div class="hint" style="text-align:left;margin:10px 0 0;">Save this new group first, then add choices such as Normal Ice or Less Ice.</div>`}
+        ${group.id ? `<div style="margin-top:12px;">${choices.length ? choices.map(({ option, index }) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 110px auto auto;gap:9px;align-items:center;margin:8px 0;"><input value="${escapeHtml(option.name || "")}" placeholder="e.g. Less Ice" oninput="onDrinkOptionField(${index},'name',this.value)"><input type="number" step="0.10" value="${Number(option.price || 0)}" title="Price adjustment — use -1 for $1 off" aria-label="Price adjustment" oninput="onDrinkOptionField(${index},'price',this.value)"><label style="font-size:12px;white-space:nowrap;"><input type="checkbox" style="width:auto;" ${option.is_available !== false ? "checked" : ""} onchange="onDrinkOptionField(${index},'is_available',this.checked)"> Show</label><button class="link-danger" style="font-size:12px;" onclick="deleteDrinkOption(${index})">Delete</button></div>`).join("") : `<div class="hint" style="text-align:left;margin:6px 0;">No choices yet.</div>`}<div class="hint" style="text-align:left;margin:6px 0;">Price adjustment accepts additions and reductions, for example <b>1</b> adds $1 and <b>-1</b> deducts $1.</div><button class="btn-secondary" style="margin-top:6px;" onclick="addDrinkOption('${group.id}')">+ Add choice</button></div>` : `<div class="hint" style="text-align:left;margin:10px 0 0;">Save this new group first, then add choices such as Normal Ice or Less Ice.</div>`}
       </div></div>`;
     }).join("") : `<div class="dashboard-empty">No drink option groups yet. Add Ice or Sweetness below.</div>`}
     <div class="btn-row" style="margin-top:14px;"><button class="btn-secondary" onclick="addDrinkOptionGroup()">+ Add option group</button><button class="btn-primary" onclick="saveDrinkOptionGroups()">Save groups</button><button class="btn-primary" onclick="saveDrinkOptions()">Save choices</button></div>
@@ -1199,10 +1279,10 @@ function dashboardStats() {
   const now = new Date();
   const monthly = paid.filter((order) => { const d = new Date(order.created_at); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); });
   const monthlySales = monthly.filter((order) => order.counts_as_sale !== false);
+  const allSales = paid.filter((order) => order.counts_as_sale !== false);
   const customerKeys = new Set(marketOrders.map((order) => String(order.customer_phone || order.instagram || order.customer_name || "").trim()).filter(Boolean));
-  const revenue = monthlySales.reduce((sum, order) => sum + Number(order.total || 0), 0);
   const missingRecipeProducts = new Map();
-  const foodCost = monthlySales.reduce((orderSum, order) => orderSum + (order.order_items || []).reduce((itemSum, item) => {
+  const foodCostFor = (orders) => orders.reduce((orderSum, order) => orderSum + (order.order_items || []).reduce((itemSum, item) => {
     const recipeRows = AdminMarketRules.recipesForProductMarket(astate.recipes, item.product_id, DASHBOARD_MARKET);
     const product = astate.menu.find((row) => String(row.id) === String(item.product_id))
       || astate.menu.find((row) => String(row.name) === String(item.product_name));
@@ -1212,9 +1292,20 @@ function dashboardStats() {
     }
     return itemSum + savedProductFoodCost(item.product_id, DASHBOARD_MARKET) * Number(item.quantity || 0);
   }, 0), 0);
-  const grossProfit = revenue - foodCost;
-  const profitMargin = revenue > 0 ? grossProfit / revenue * 100 : 0;
-  return { revenue, foodCost, grossProfit, profitMargin, missingRecipeProducts: [...missingRecipeProducts.values()], orders: monthly.length, customers: customerKeys.size, paymentReview: marketOrders.filter(AdminOrderRules.isPaymentReviewOrder).length };
+  const monthlyRevenue = monthlySales.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const totalRevenue = allSales.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const monthlyFoodCost = foodCostFor(monthlySales);
+  const totalFoodCost = foodCostFor(allSales);
+  const monthlyGrossProfit = monthlyRevenue - monthlyFoodCost;
+  const totalGrossProfit = totalRevenue - totalFoodCost;
+  const monthlyProfitMargin = monthlyRevenue > 0 ? monthlyGrossProfit / monthlyRevenue * 100 : 0;
+  const totalProfitMargin = totalRevenue > 0 ? totalGrossProfit / totalRevenue * 100 : 0;
+  return {
+    revenue: monthlyRevenue, foodCost: monthlyFoodCost, grossProfit: monthlyGrossProfit, profitMargin: monthlyProfitMargin,
+    monthlyRevenue, totalRevenue, monthlyFoodCost, totalFoodCost, monthlyGrossProfit, totalGrossProfit, monthlyProfitMargin, totalProfitMargin,
+    missingRecipeProducts: [...missingRecipeProducts.values()], orders: monthlySales.length, totalOrders: allSales.length, totalPaidOrders: paid.length,
+    customers: customerKeys.size, paymentReview: marketOrders.filter(AdminOrderRules.isPaymentReviewOrder).length,
+  };
 }
 function salesPerformance() {
   const now = new Date();
@@ -1431,7 +1522,41 @@ function marketingContacts() {
   return [...map.values()].filter(o => !q || [o.customer_name,o.customer_email,o.customer_phone].some(v=>String(v||"").toLowerCase().includes(q)));
 }
 function exportMarketingContacts() { const rows=marketingContacts(); const csv=[["Name","Email","Phone","Email opt-in","WhatsApp opt-in","Consent date"],...rows.map(o=>[o.customer_name||"",o.customer_email||"",o.customer_phone||"",o.marketing_email_opt_in?"Yes":"No",o.marketing_whatsapp_opt_in?"Yes":"No",o.marketing_consent_at||o.created_at||""])].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n"); const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="shizuku-marketing-contacts.csv";a.click();URL.revokeObjectURL(a.href); }
-function renderMarketingTab() { const s=astate.settingsDraft||{}, contacts=marketingContacts(); return `<section class="dashboard-card" style="padding:20px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 16px"><div><h2>Checkout marketing consent</h2><span>Customers must actively tick this; it is never pre-selected</span></div><span>${s.marketing_opt_in_enabled===false?"Off":"On"}</span></div><label class="slot"><input type="checkbox" style="width:auto" ${s.marketing_opt_in_enabled===false?"":"checked"} onchange="onSettingsField('marketing_opt_in_enabled',this.checked);render()"><span><b>Show opt-in at checkout</b></span></label><div class="field"><label>Heading</label><input value="${escapeHtml(s.marketing_checkout_heading||"")}" oninput="onSettingsField('marketing_checkout_heading',this.value)"></div><div class="field"><label>Consent wording</label><textarea rows="3" oninput="onSettingsField('marketing_opt_in_label',this.value)">${escapeHtml(s.marketing_opt_in_label||"")}</textarea></div><div class="field"><label>Help text</label><textarea rows="2" oninput="onSettingsField('marketing_opt_in_help_text',this.value)">${escapeHtml(s.marketing_opt_in_help_text||"")}</textarea></div><label class="slot"><input type="checkbox" style="width:auto" ${s.marketing_email_enabled===false?"":"checked"} onchange="onSettingsField('marketing_email_enabled',this.checked)"><span>Email updates</span></label><label class="slot"><input type="checkbox" style="width:auto" ${s.marketing_whatsapp_enabled===true?"checked":""} onchange="onSettingsField('marketing_whatsapp_enabled',this.checked)"><span>WhatsApp updates (for later use)</span></label><button class="btn-primary" onclick="saveSettings()">Save marketing settings</button></section><section class="dashboard-card"><div class="dashboard-card-head"><div><h2>Marketing contacts</h2><span>${contacts.length} consented contact(s), newest consent kept</span></div><button class="btn-secondary" onclick="exportMarketingContacts()">Download CSV</button></div><div style="padding:14px 20px"><input placeholder="Search name, email or phone" value="${escapeHtml(astate.marketingSearch)}" oninput="astate.marketingSearch=this.value;render()"></div>${contacts.map(o=>`<div class="queue-row"><div class="queue-top"><div><b>${escapeHtml(o.customer_name||'Customer')}</b><div class="queue-name">${escapeHtml(o.customer_email||'No email')} · ${escapeHtml(o.customer_phone||'No phone')}</div></div><span class="queue-status">${[o.marketing_email_opt_in?'Email':'',o.marketing_whatsapp_opt_in?'WhatsApp':''].filter(Boolean).join(' + ')}</span></div></div>`).join('')||`<div class="dashboard-empty">No customers have opted in yet.</div>`}</section>`; }
+function marketingEmailContacts() { return marketingContacts().filter(o => o.marketing_email_opt_in && /^\S+@\S+\.\S+$/.test(String(o.customer_email||"").trim())); }
+function marketingWhatsappContacts() { return marketingContacts().filter(o => o.marketing_whatsapp_opt_in && String(o.customer_phone||"").replace(/\D/g,"").length >= 8); }
+function toggleMarketingEmail(email, checked) { const key=String(email||"").trim().toLowerCase(); astate.marketingSelectedEmails=checked?[...new Set([...astate.marketingSelectedEmails,key])]:astate.marketingSelectedEmails.filter(v=>v!==key); render(); }
+function toggleMarketingPhone(phone, checked) { const key=String(phone||"").replace(/\D/g,""); astate.marketingSelectedPhones=checked?[...new Set([...astate.marketingSelectedPhones,key])]:astate.marketingSelectedPhones.filter(v=>v!==key); render(); }
+function selectAllMarketing(channel) { if(channel==='email') astate.marketingSelectedEmails=marketingEmailContacts().map(o=>String(o.customer_email).trim().toLowerCase()); else astate.marketingSelectedPhones=marketingWhatsappContacts().map(o=>String(o.customer_phone).replace(/\D/g,"")); render(); }
+async function persistMarketingSettings() {
+  const { id,created_at,updated_at,...fields }=astate.settingsDraft;
+  const {error}=await db.from("store_settings").update(fields).eq("id",astate.settings.id);
+  if(error) throw error; astate.settings={...astate.settingsDraft};
+}
+async function sendSelectedMarketingEmails() {
+  const selected=marketingEmailContacts().filter(o=>astate.marketingSelectedEmails.includes(String(o.customer_email).trim().toLowerCase()));
+  if(!selected.length) return alert("Select at least one opted-in email contact.");
+  if(!confirm(`Send to ${selected.length} selected contacts?`)) return;
+  astate.marketingSendBusy=true; astate.marketingSendProgress=`Sending 0 of ${selected.length}…`; render();
+  try { await persistMarketingSettings(); let sent=0, failed=[];
+    for(const contact of selected) { const {error}=await db.rpc("send_marketing_campaign_email",{p_customer_email:contact.customer_email}); if(error) failed.push(contact.customer_email); else sent++; astate.marketingSendProgress=`Sending ${sent+failed.length} of ${selected.length}…`; render(); }
+    astate.marketingSelectedEmails=failed.map(v=>String(v).toLowerCase()); alert(failed.length?`${sent} sent. ${failed.length} failed: ${failed.join(", ")}`:`Sent to ${sent} selected contacts.`);
+  } catch(e) { alert("Could not send campaign: "+(e.message||e)); } finally { astate.marketingSendBusy=false; astate.marketingSendProgress=""; render(); }
+}
+function openSelectedMarketingWhatsapps() {
+  const selected=marketingWhatsappContacts().filter(o=>astate.marketingSelectedPhones.includes(String(o.customer_phone).replace(/\D/g,"")));
+  if(!selected.length) return alert("Select at least one opted-in WhatsApp contact.");
+  if(!confirm(`Open WhatsApp for ${selected.length} selected contacts?`)) return;
+  const template=String(astate.settingsDraft.marketing_whatsapp_message||DEFAULT_MARKETING_WHATSAPP_BODY);
+  selected.forEach((contact,index)=>setTimeout(()=>window.open(`https://wa.me/${String(contact.customer_phone).replace(/\D/g,"")}?text=${encodeURIComponent(template.replace(/\{customer_name\}/g,contact.customer_name||"there"))}`,"_blank"),index*350));
+}
+function renderMarketingTab() {
+  const s=astate.settingsDraft||{}, contacts=marketingContacts(), emails=marketingEmailContacts(), whatsapps=marketingWhatsappContacts();
+  const subject=s.marketing_email_subject||DEFAULT_MARKETING_EMAIL_SUBJECT, body=s.marketing_email_body||DEFAULT_MARKETING_EMAIL_BODY, whatsapp=s.marketing_whatsapp_message||DEFAULT_MARKETING_WHATSAPP_BODY;
+  return `<section class="dashboard-card" style="padding:20px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 16px"><div><h2>Checkout marketing consent</h2><span>Customers must actively tick this; it is never pre-selected</span></div><span>${s.marketing_opt_in_enabled===false?"Off":"On"}</span></div><label class="slot"><input type="checkbox" style="width:auto" ${s.marketing_opt_in_enabled===false?"":"checked"} onchange="onSettingsField('marketing_opt_in_enabled',this.checked);render()"><span><b>Show opt-in at checkout</b></span></label><div class="field"><label>Heading</label><input value="${escapeHtml(s.marketing_checkout_heading||"")}" oninput="onSettingsField('marketing_checkout_heading',this.value)"></div><div class="field"><label>Consent wording</label><textarea rows="3" oninput="onSettingsField('marketing_opt_in_label',this.value)">${escapeHtml(s.marketing_opt_in_label||"")}</textarea></div><div class="field"><label>Help text</label><textarea rows="2" oninput="onSettingsField('marketing_opt_in_help_text',this.value)">${escapeHtml(s.marketing_opt_in_help_text||"")}</textarea></div><label class="slot"><input type="checkbox" style="width:auto" ${s.marketing_email_enabled===false?"":"checked"} onchange="onSettingsField('marketing_email_enabled',this.checked)"><span>Email updates</span></label><label class="slot"><input type="checkbox" style="width:auto" ${s.marketing_whatsapp_enabled===true?"checked":""} onchange="onSettingsField('marketing_whatsapp_enabled',this.checked)"><span>WhatsApp updates</span></label><button class="btn-primary" onclick="saveSettings()">Save marketing settings</button></section>
+  <section class="dashboard-card" style="padding:20px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 16px"><div><h2>Marketing email template</h2><span>Edit, preview, attach and send to selected opted-in customers</span></div></div><div class="field"><label>Subject</label><input value="${escapeHtml(subject)}" oninput="onSettingsField('marketing_email_subject',this.value)"></div><div class="field"><label>Email message</label><textarea rows="14" oninput="onSettingsField('marketing_email_body',this.value)">${escapeHtml(body)}</textarea></div><div class="btn-row"><label class="btn-secondary">Take photo<input hidden type="file" accept="image/*" capture="environment" onchange="uploadMarketingAttachment(this)"></label><label class="btn-secondary">Photo library<input hidden type="file" accept="image/*" onchange="uploadMarketingAttachment(this)"></label><label class="btn-secondary">Upload file<input hidden type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt" onchange="uploadMarketingAttachment(this)"></label></div>${astate.marketingAttachmentUploading?`<div class="ref-note">Uploading…</div>`:s.marketing_attachment_url?`<div class="ref-note"><b>Attachment:</b> <a href="${escapeHtml(s.marketing_attachment_url)}" target="_blank">${escapeHtml(s.marketing_attachment_name||"Open file")}</a> <button class="link-danger" onclick="removeMarketingAttachment()">Remove</button></div>`:`<div class="ref-note">No attachment selected.</div>`}<div class="ref-note"><b>${escapeHtml(subject)}</b><br><br><div style="white-space:pre-wrap">${escapeHtml(body)}</div><br><small>Powered by Slow Studio</small></div><button class="btn-primary" onclick="persistMarketingSettings().then(()=>alert('Marketing template saved.')).catch(e=>alert(e.message))">Save email template</button></section>
+  <section class="dashboard-card" style="padding:20px;margin-bottom:18px"><h2>WhatsApp template</h2><div class="field"><label>Message</label><textarea rows="9" oninput="onSettingsField('marketing_whatsapp_message',this.value)">${escapeHtml(whatsapp)}</textarea></div><div class="ref-note">Use <b>{customer_name}</b> to insert each customer’s name. Sending opens WhatsApp so you can review and press Send.</div><button class="btn-primary" onclick="persistMarketingSettings().then(()=>alert('WhatsApp template saved.')).catch(e=>alert(e.message))">Save WhatsApp template</button></section>
+  <section class="dashboard-card"><div class="dashboard-card-head"><div><h2>Marketing contacts</h2><span>${contacts.length} consented contact(s), newest consent kept</span></div><button class="btn-secondary" onclick="exportMarketingContacts()">Download CSV</button></div><div style="padding:14px 20px"><input placeholder="Search name, email or phone" value="${escapeHtml(astate.marketingSearch)}" oninput="astate.marketingSearch=this.value;render()"><div class="btn-row" style="margin-top:12px"><button class="btn-secondary" onclick="selectAllMarketing('email')">Select all email</button><button class="btn-secondary" onclick="selectAllMarketing('whatsapp')">Select all WhatsApp</button><button class="btn-primary" ${astate.marketingSendBusy?'disabled':''} onclick="sendSelectedMarketingEmails()">${astate.marketingSendBusy?escapeHtml(astate.marketingSendProgress):`Send email (${astate.marketingSelectedEmails.length})`}</button><button class="btn-primary" onclick="openSelectedMarketingWhatsapps()">Open WhatsApp (${astate.marketingSelectedPhones.length})</button></div></div>${contacts.map(o=>{const email=String(o.customer_email||"").trim().toLowerCase(),phone=String(o.customer_phone||"").replace(/\D/g,"");return `<div class="queue-row"><div class="queue-top"><div><b>${escapeHtml(o.customer_name||'Customer')}</b><div class="queue-name">${escapeHtml(o.customer_email||'No email')} · ${escapeHtml(o.customer_phone||'No phone')}</div></div><div style="display:flex;gap:12px;align-items:center">${o.marketing_email_opt_in&&/^\S+@\S+\.\S+$/.test(email)?`<label><input type="checkbox" style="width:auto" ${astate.marketingSelectedEmails.includes(email)?'checked':''} onchange="toggleMarketingEmail('${escapeHtml(email)}',this.checked)"> Email</label>`:''}${o.marketing_whatsapp_opt_in&&phone.length>=8?`<label><input type="checkbox" style="width:auto" ${astate.marketingSelectedPhones.includes(phone)?'checked':''} onchange="toggleMarketingPhone('${phone}',this.checked)"> WhatsApp</label>`:''}</div></div></div>`}).join('')||`<div class="dashboard-empty">No customers have opted in yet.</div>`}</section>`;
+}
 function renderDashboardTab() {
   const stats = dashboardStats();
   const workspaceName = astate.currentTeamMember?.display_name || "Ting";
@@ -1448,14 +1573,15 @@ function renderDashboardTab() {
   return `
     <div class="admin-top"><div><div class="admin-eyebrow">Command center</div><h1 class="admin-title">Good day, ${escapeHtml(workspaceName)}</h1><div class="workspace-role-pill">${escapeHtml(workspaceRole)}</div><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><div class="dashboard-top-actions">${astate.settings?.show_dashboard_refresh !== false ? `<button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing ? "disabled" : ""}>${astate.dashboardRefreshing ? "Refreshing…" : "↻ Refresh"}</button><span class="dashboard-refresh-meta">Last updated: ${escapeHtml(updatedTime)}</span>` : ""}<a class="open-shop" href="order.html">Open customer shop ↗</a></div></div>
     <div class="stat-grid dashboard-summary-grid">
-      <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Singapore revenue this month</div><div class="stat-value">${money(stats.revenue)}</div><div class="stat-help">Singapore paid orders only</div></div>
-      <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Singapore non-cancelled paid orders this month</div><div class="stat-value">${stats.orders}</div><div class="stat-help">${stats.paymentReview ? `<button class="dashboard-warning-link" onclick="focusDashboardIssue('payment_review')">${stats.paymentReview} need payment review →</button>` : "Everything is up to date"}</div></div>
-      <div class="stat"><div class="stat-label"><span class="stat-icon">◉</span>Singapore customers</div><div class="stat-value">${stats.customers}</div><div class="stat-help">Across Singapore orders</div></div>
-      <div class="stat profit-stat"><div class="stat-label"><span class="stat-icon">$</span>Singapore gross profit this month</div><div class="stat-value">${money(stats.grossProfit)}</div><div class="stat-help">Sales ${money(stats.revenue)} − food cost ${money(stats.foodCost)} · ${stats.profitMargin.toFixed(1)}% margin${stats.missingRecipeProducts.length ? `<div class="dashboard-warning-list">${foodCostWarnings}</div>` : ""}</div></div>
+      <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Total sales</div><div class="stat-value">${money(stats.totalRevenue)}</div><div class="stat-help">${stats.totalOrders} Singapore paid sale${stats.totalOrders === 1 ? "" : "s"}</div></div>
+      <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Sales this month</div><div class="stat-value">${money(stats.monthlyRevenue)}</div><div class="stat-help">${stats.orders} paid order${stats.orders === 1 ? "" : "s"} this month</div></div>
+      <div class="stat profit-stat"><div class="stat-label"><span class="stat-icon">%</span>Margin this month</div><div class="stat-value">${money(stats.monthlyGrossProfit)}</div><div class="stat-help">${stats.monthlyProfitMargin.toFixed(1)}% · food cost ${money(stats.monthlyFoodCost)}</div></div>
+      <div class="stat profit-stat"><div class="stat-label"><span class="stat-icon">$</span>Total margin</div><div class="stat-value">${money(stats.totalGrossProfit)}</div><div class="stat-help">${stats.totalProfitMargin.toFixed(1)}% · total food cost ${money(stats.totalFoodCost)}${stats.missingRecipeProducts.length ? `<div class="dashboard-warning-list">${foodCostWarnings}</div>` : ""}</div></div>
     </div>
-    <div class="dashboard-grid"><section class="dashboard-card"><div class="dashboard-card-head"><h2>Order queue</h2><button class="link-btn" onclick="setTab('orders')">View all</button></div>${liveOrders.length ? liveOrders.map((order) => `<div class="queue-row" onclick="setTab('orders')"><div class="queue-top"><div class="queue-number">${escapeHtml(order.order_number || order.id)}</div><div class="queue-status">${escapeHtml(PAY_LABEL[order.payment_status] || order.payment_status || "Pending")}</div></div><div class="queue-top"><div class="queue-name">${escapeHtml(order.customer_name || "Customer")} · ${escapeHtml(order.collection_date || "Pickup date pending")}</div><div class="queue-amount">${money(order.total)}</div></div></div>`).join("") : `<div class="dashboard-empty">You’re all caught up — no active orders right now.</div>`}</section>
+    <section class="dashboard-card dashboard-consolidated-strip"><span><b>${stats.customers}</b> Singapore customers</span><span><b>${stats.totalPaidOrders}</b> total paid orders</span><span>${stats.paymentReview ? `<button class="dashboard-warning-link" onclick="focusDashboardIssue('payment_review')"><b>${stats.paymentReview}</b> need payment review →</button>` : "Payment reviews are up to date"}</span></section>
+    <div class="dashboard-grid"><section class="dashboard-card"><div class="dashboard-card-head"><h2>Order queue</h2><button class="link-btn" onclick="setTab('orders')">View all</button></div>${liveOrders.length ? liveOrders.map((order) => `<button type="button" class="queue-row queue-row-button" onclick="openRelatedOrder('${order.id}','${escapeHtml(order.order_number || "")}')"><div class="queue-top"><div class="queue-number">${escapeHtml(order.order_number || order.id)}</div><div class="queue-status">${escapeHtml(PAY_LABEL[order.payment_status] || order.payment_status || "Pending")}</div></div><div class="queue-top"><div class="queue-name">${escapeHtml(order.customer_name || "Customer")} · ${escapeHtml(order.collection_date || "Pickup date pending")}</div><div class="queue-amount">${money(order.total)}</div></div></button>`).join("") : `<div class="dashboard-empty">You’re all caught up — no active orders right now.</div>`}</section>
     <section class="dashboard-card"><div class="dashboard-card-head"><h2>Next steps</h2><span>Shop checklist</span></div><div class="action-list"><button class="action dashboard-action" onclick="focusDashboardIssue('payment_review')"><span class="action-icon">✓</span><span><strong>Review payment proofs</strong><p>${stats.paymentReview ? `${stats.paymentReview} customer payment${stats.paymentReview === 1 ? "" : "s"} waiting for confirmation.` : "No payment proof waiting right now."}</p></span></button><button class="action dashboard-action" onclick="setTab('availability')"><span class="action-icon">◷</span><span><strong>Set pickup availability</strong><p>Open or close special collection days in your calendar.</p></span></button><button class="action dashboard-action" onclick="setTab('menu')"><span class="action-icon">✦</span><span><strong>Keep your menu fresh</strong><p>Edit prices, availability and products whenever you need.</p></span></button></div></section></div>
-    <div style="margin-top:28px"><div class="admin-eyebrow">Next pickup production</div><section class="dashboard-card"><div class="dashboard-card-head"><h2>${production.date ? escapeHtml(production.date) : "No upcoming paid orders"}</h2><span>${production.orders.length ? `${production.orders.length} drink order${production.orders.length === 1 ? "" : "s"}` : "Your paid pickup orders will appear here"}</span></div>${production.orders.length ? production.orders.map((order) => `<div class="queue-row" onclick="setTab('orders')"><div class="queue-top"><div><div class="queue-number">${escapeHtml(order.collection_time || "Time pending")} · ${escapeHtml(order.customer_name || "Customer")}</div><div class="queue-name">${(order.order_items || []).map((item) => `${escapeHtml(item.product_name)} × ${item.quantity}`).join(" · ") || "Order items loading"}</div></div><div class="queue-status">${escapeHtml(ORDER_LABEL[order.order_status] || order.order_status)}</div></div></div>`).join("") : `<div class="dashboard-empty">When you confirm payment, the order will show here for its collection day.</div>`}</section></div>
+    <div style="margin-top:28px"><div class="admin-eyebrow">Next pickup production</div><section class="dashboard-card"><div class="dashboard-card-head"><h2>${production.date ? escapeHtml(production.date) : "No upcoming paid orders"}</h2><span>${production.orders.length ? `${production.orders.length} drink order${production.orders.length === 1 ? "" : "s"}` : "Your paid pickup orders will appear here"}</span></div>${production.orders.length ? production.orders.map((order) => `<button type="button" class="queue-row queue-row-button" onclick="openRelatedOrder('${order.id}','${escapeHtml(order.order_number || "")}')"><div class="queue-top"><div><div class="queue-number">${escapeHtml(order.collection_time || "Time pending")} · ${escapeHtml(order.customer_name || "Customer")}</div><div class="queue-name">${(order.order_items || []).map((item) => `${escapeHtml(item.product_name)} × ${item.quantity}`).join(" · ") || "Order items loading"}</div></div><div class="queue-status">${escapeHtml(ORDER_LABEL[order.order_status] || order.order_status)}</div></div></button>`).join("") : `<div class="dashboard-empty">When you confirm payment, the order will show here for its collection day.</div>`}</section></div>
     <div style="margin-top:28px"><div class="admin-eyebrow">Sales performance</div><div class="dashboard-grid"><section class="dashboard-card"><div class="dashboard-card-head"><h2>Last 7 days</h2><span>Paid sales only</span></div><div style="height:210px;padding:24px 20px 15px;display:flex;align-items:flex-end;gap:12px">${performance.days.map((day) => `<div style="height:100%;flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px"><div title="${money(day.total)}" style="width:min(44px,100%);height:${day.total ? Math.max(10, Math.round(day.total / highestDailySale * 145)) : 4}px;background:${day.total ? "#ef7138" : "#eee3d8"};border-radius:8px 8px 3px 3px"></div><div style="font-size:12px;font-weight:700;color:#756e64">${day.label}</div><div style="font-size:11px;color:#8a8177">${day.total ? money(day.total) : "—"}</div></div>`).join("")}</div></section>
     <section class="dashboard-card"><div class="dashboard-card-head"><h2>Top drinks this month</h2><span>By sales</span></div>${performance.topProducts.length ? performance.topProducts.map((product, index) => `<div class="queue-row"><div class="queue-top"><div><div class="queue-number">${index + 1}. ${escapeHtml(product.name)}</div><div class="queue-name">${product.quantity} cup${product.quantity === 1 ? "" : "s"} sold</div></div><div class="queue-amount">${money(product.revenue)}</div></div></div>`).join("") : `<div class="dashboard-empty">Your top drinks will appear here after paid orders come in.</div>`}</section></div></div>
     <div style="margin-top:28px"><div class="admin-eyebrow">Customer insights</div><div class="dashboard-grid"><section class="dashboard-card"><div class="dashboard-card-head"><h2>Customer snapshot</h2><button class="link-btn" onclick="setTab('customers')">View customers</button></div><div style="padding:20px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px"><div style="padding:16px;border-radius:14px;background:#f3efff"><div style="font-size:12px;font-weight:800;color:#756e64">REPEAT CUSTOMERS</div><div style="font:700 30px/1 Georgia,serif;margin-top:12px">${insights.repeat.length}</div><div class="queue-name">Ordered more than once</div></div><div style="padding:16px;border-radius:14px;background:#f0f7e8"><div style="font-size:12px;font-weight:800;color:#756e64">NEW THIS MONTH</div><div style="font:700 30px/1 Georgia,serif;margin-top:12px">${insights.newThisMonth.length}</div><div class="queue-name">First-time customers</div></div></div></section><section class="dashboard-card"><div class="dashboard-card-head"><h2>Top customer</h2><span>All paid orders</span></div>${insights.top ? `<div style="padding:24px 20px"><div style="font:700 26px/1.1 Georgia,serif">${escapeHtml(insights.top.name)}</div><div class="queue-name" style="margin-top:8px">${insights.top.orders.length} order${insights.top.orders.length === 1 ? "" : "s"} · ${escapeHtml(insights.top.phone || (insights.top.instagram ? `@${insights.top.instagram}` : "No contact detail"))}</div><div style="font:700 31px/1 Georgia,serif;color:#4d633d;margin-top:24px">${money(insights.top.spent)}</div><div class="queue-name">Total paid spend</div></div>` : `<div class="dashboard-empty">Your highest-spending customer will appear here after paid orders come in.</div>`}</section></div></div>`;
@@ -2144,7 +2270,7 @@ function renderOrders() {
     const customerEmailEnabled = astate.notificationSettings?.customer_email_enabled !== false;
     const canEmailCustomer = customerEmailEnabled && o.payment_status === "paid" && o.order_status !== "cancelled" && !!String(o.customer_email || "").trim();
     const emailSending = String(astate.customerEmailSendingId || "") === String(o.id);
-    return `<div class="order-expanded-detail">
+    return `<div class="order-expanded-detail" data-order-id="${escapeHtml(o.id)}">
       <div class="order-meta">Phone: ${escapeHtml(o.customer_phone || "—")}${o.instagram ? " · @" + escapeHtml(o.instagram) : ""}</div>
       <div class="order-meta">Collection point: <b>${escapeHtml(o.collection_point || "—")}</b></div>
       ${astate.customerNotes[customerKey(o)] ? `<div class="ref-note">Seller note: ${escapeHtml(astate.customerNotes[customerKey(o)])}</div>` : ""}
@@ -2171,6 +2297,7 @@ function renderOrders() {
         ${o.order_status !== "cancelled" && o.payment_status === "submitted" ? `<button class="link-danger" onclick="rejectPayment('${o.id}')">Reject proof</button>` : ""}
         ${o.payment_status === "awaiting_payment" ? `<span class="hint" style="margin:0;">Check the Instagram DM payment screenshot before confirming.</span>` : ""}
         ${o.order_status !== "cancelled" && o.order_status !== "collected" ? `<button class="link-danger" onclick="cancelOrder('${o.id}')">Cancel order</button>` : ""}
+        ${o.order_status === "cancelled" ? `<button class="link-danger delete-cancelled-order" onclick="deleteCancelledOrder('${o.id}')">Delete cancelled order</button>` : ""}
       </div>
     </div>`;
   };
@@ -2385,6 +2512,27 @@ function renderRewardsTab() {
   const settings = `<section class="dashboard-card" style="padding:20px;"><div class="dashboard-card-head" style="padding:0 0 16px;"><h2>Rewards programme</h2><span>${d.enabled ? "LIVE" : "OFF"}</span></div><label class="slot" style="cursor:pointer;gap:10px;margin:0 0 16px;"><input type="checkbox" style="width:auto;accent-color:#4B5D3A;" ${d.enabled ? "checked" : ""} onchange="onLoyaltyField('enabled',this.checked)"><span><b>Enable rewards</b><br><span class="hint">Choose one simple programme for customers.</span></span></label><div class="field"><label>Reward type</label><select onchange="onLoyaltyField('reward_type',this.value);render()"><option value="stamps" ${!points ? "selected" : ""}>Stamp card</option><option value="points" ${points ? "selected" : ""}>Points</option></select></div>${points ? `<div class="field"><label>Points earned per $1 spent</label><input type="number" min="0.01" step="0.1" value="${escapeHtml(d.points_per_dollar)}" oninput="onLoyaltyField('points_per_dollar',this.value)"></div><div class="field"><label>Points needed for a reward</label><input type="number" min="1" value="${escapeHtml(d.points_required)}" oninput="onLoyaltyField('points_required',this.value)"></div>` : `<div class="field"><label>Stamps to complete a card</label><input type="number" min="1" max="30" value="${escapeHtml(d.stamps_required)}" oninput="onLoyaltyField('stamps_required',this.value)"></div><div class="field"><label>Minimum spend per stamp ($)</label><input type="number" min="0" step="0.10" value="${escapeHtml(d.minimum_spend)}" oninput="onLoyaltyField('minimum_spend',this.value)"></div>`}<div class="field"><label>Reward message</label><textarea rows="3" oninput="onLoyaltyField('reward_description',this.value)">${escapeHtml(d.reward_description)}</textarea></div><button class="btn-primary" id="save-loyalty-settings" style="width:100%" onclick="saveLoyaltySettings()">Save rewards</button></section>`;
   const members = `<section class="dashboard-card">${preview}<div class="dashboard-card-head"><h2>${points ? "Points members" : "Stamp card members"}</h2><span>${customerRows.length} customers</span></div>${customerRows.length ? customerRows.map((customer) => { const balance = astate.customerLoyalty[customer.key] || {}; const value = Number(balance[points ? "points" : "stamps"] || 0); const history = astate.loyaltyTransactions.filter((item) => String(item.customer_key) === String(customer.key)).slice(0, 8); return `<div class="queue-row"><div class="queue-top"><div><b>${escapeHtml(customer.name)}</b><div class="queue-name">Current balance: <b>${value} ${points ? "points" : "stamps"}</b> · ${Number(balance.rewards_available || 0)} reward${Number(balance.rewards_available || 0) === 1 ? "" : "s"} ready</div></div><div style="display:flex;gap:7px"><button class="btn-secondary" data-key="${escapeHtml(customer.key)}" onclick="adjustReward(this.dataset.key,-1)">−1</button><button class="btn-primary" data-key="${escapeHtml(customer.key)}" onclick="adjustReward(this.dataset.key,1)">+1</button></div></div>${history.length ? `<div style="margin-top:12px;padding-top:9px;border-top:1px solid #eee3d8;">${history.map((item) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:12px;"><span><b>+${escapeHtml(item.amount)}</b> — Order ${escapeHtml(item.order_number)}</span><span class="hint" style="margin:0;white-space:nowrap;">${new Date(item.created_at).toLocaleDateString("en-SG", { day:"numeric", month:"short" })}</span></div>`).join("")}</div>` : `<div class="hint" style="text-align:left;margin:10px 0 0;">No automatic reward activity yet.</div>`}</div>`; }).join("") : `<div class="dashboard-empty">Customers appear after their first order.</div>`}</section>`;
   return `<div class="dashboard-grid" style="grid-template-columns:minmax(300px,.88fr) minmax(360px,1.12fr);align-items:start;">${settings}${members}</div>`;
+}
+
+function enhanceRewardOrderLinks() {
+  if (astate.tab !== "rewards") return;
+  document.querySelectorAll(".admin-content .queue-row span").forEach((element) => {
+    const match = String(element.textContent || "").match(/Order\s+(SL-[A-Z0-9]+)/i);
+    const target = element.parentElement || element;
+    if (!match || target.dataset.orderLinked === "true") return;
+    const orderNumber = match[1].toUpperCase();
+    const order = astate.orders.find((item) => String(item.order_number || "").toUpperCase() === orderNumber);
+    target.dataset.orderLinked = "true";
+    target.classList.add("reward-order-link");
+    target.setAttribute("role", "button");
+    target.setAttribute("tabindex", "0");
+    target.setAttribute("title", `Open ${orderNumber}`);
+    const open = () => openRelatedOrder(order?.id || "", orderNumber);
+    target.addEventListener("click", open);
+    target.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); }
+    });
+  });
 }
 
 function addFaq() {
@@ -2676,7 +2824,8 @@ const SYSTEM_THEMES = {
   japanese_paper:{label:"Japanese Paper",note:"Warm washi paper, black ink and restrained vermilion",primary:"#B94735",background:"#F3EBDD",card:"#FBF7EE",text:"#2E2A27",heading:"noto_serif_jp",body:"noto_sans_jp",menu:"list"},
   strawberry_milk:{label:"Strawberry Milk",note:"Soft blush, berry pink and extra-rounded friendly cards",primary:"#C64D68",background:"#FFF0F3",card:"#FFFBFB",text:"#552F39",heading:"fraunces",body:"work_sans",menu:"gallery"},
   midnight_studio:{label:"Midnight Studio",note:"Deep navy, champagne gold and softly illuminated panels",primary:"#E0BE74",background:"#111827",card:"#1D2738",text:"#F6EDD8",heading:"georgia",body:"work_sans",menu:"gallery"},
-  nordic_cafe:{label:"Nordic Café",note:"Soft grey, sage green and calm functional simplicity",primary:"#71836A",background:"#EEF0EB",card:"#FAFAF7",text:"#343B33",heading:"work_sans",body:"work_sans",menu:"list"}
+  nordic_cafe:{label:"Nordic Café",note:"Soft grey, sage green and calm functional simplicity",primary:"#71836A",background:"#EEF0EB",card:"#FAFAF7",text:"#343B33",heading:"work_sans",body:"work_sans",menu:"list"},
+  studio_grid:{label:"Studio Grid",note:"Compact modern catalogue with clean grouped cards and focused actions",primary:"#6D5CE7",background:"#F4F5F7",card:"#FFFFFF",text:"#18181C",heading:"work_sans",body:"work_sans",menu:"list"}
 };
 
 function applyOrderingTheme(name) {
@@ -2954,6 +3103,7 @@ function render() {
     adminLogo.before(badge);
   }
   decorateOrderEditorEmail();
+  enhanceRewardOrderLinks();
   if (astate.tab === "theme_design" && astate.designTopic === "customise") requestAnimationFrame(updateDesignPreview);
 }
 

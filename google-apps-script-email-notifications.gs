@@ -11,6 +11,8 @@ function doPost(e) {
     const suppliedSecret = payload.secret || (e && e.parameter && e.parameter.key) || "";
     if (suppliedSecret !== SHARED_SECRET) return jsonResponse({ ok: false, error: "Unauthorized" });
 
+    if (payload.event === "marketing_campaign") return sendMarketingCampaign(payload);
+
     const incomingEventName = payload.event || "payment_proof";
     const eventName = incomingEventName === "order_ready"
       ? "order_ready_for_collection"
@@ -141,6 +143,32 @@ function fillTemplate(template, values) {
   return String(template || "").replace(/\{(customer_name|order_number|date|time|collection_point|total)\}/g, function (_, key) {
     return String(values[key] == null ? "" : values[key]);
   });
+}
+
+function sendMarketingCampaign(payload) {
+  const customerEmail = String(payload.customer_email || "").trim();
+  if (!/^\S+@\S+\.\S+$/.test(customerEmail)) return jsonResponse({ ok:false, error:"Invalid customer email" });
+  const customerName = text(payload.customer_name || "there");
+  const subject = String(payload.marketing_email_subject || "Shizuku Lab update").replace(/\{customer_name\}/g, customerName);
+  const message = String(payload.marketing_email_body || "Thank you for supporting Shizuku Lab ♡").replace(/\{customer_name\}/g, customerName);
+  const attachments = [];
+  const attachmentUrl = String(payload.attachment_url || "").trim();
+  if (attachmentUrl) {
+    const response = UrlFetchApp.fetch(attachmentUrl, { muteHttpExceptions:true, followRedirects:true });
+    if (response.getResponseCode() >= 200 && response.getResponseCode() < 300) {
+      let blob = response.getBlob();
+      if (payload.attachment_name) blob = blob.setName(String(payload.attachment_name));
+      attachments.push(blob);
+    }
+  }
+  const paragraphs = message.split(/\n{2,}/).map(function (part) {
+    return '<p style="font-size:15px;line-height:1.65;color:#4f4a43;margin:0 0 18px">' + html(part).replace(/\n/g,"<br>") + '</p>';
+  }).join("");
+  const htmlBody = '<div style="margin:0;padding:28px 12px;background:#f5efe6;font-family:Arial,sans-serif;color:#28261f"><div style="max-width:580px;margin:0 auto;background:#fff;border:1px solid #e5d9ca;border-radius:20px;overflow:hidden"><div style="height:7px;background:#4B5D3A"></div><div style="padding:30px 28px"><div style="font-size:11px;font-weight:800;letter-spacing:.16em;color:#4B5D3A">SHIZUKU LAB</div><h1 style="font-family:Georgia,serif;font-size:27px;line-height:1.15;margin:12px 0 24px">' + html(subject) + '</h1>' + paragraphs + '</div><div style="padding:14px 28px;border-top:1px solid #eee5da;color:#8a8278;font-size:11px">Shizuku Lab · Crafted drop by drop<br>Powered by Slow Studio</div></div></div>';
+  const options = { name:"Shizuku Lab", htmlBody:htmlBody };
+  if (attachments.length) options.attachments = attachments;
+  GmailApp.sendEmail(customerEmail, subject, message + "\n\nPowered by Slow Studio", options);
+  return jsonResponse({ ok:true, event:"marketing_campaign" });
 }
 
 function orderRows(order, orderNumber, customerName, customerPhone, total) {
