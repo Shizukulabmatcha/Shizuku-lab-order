@@ -41,7 +41,7 @@
     const trackButton = app.querySelector(".welcome-track");
     const loyaltyButton = app.querySelector(".welcome-loyalty");
     const poweredBy = app.querySelector("#welcome-powered-by");
-    ["zen","korean","editorial","retro","threed","sakura","coastal","cocoa","matcha_modern","japanese_paper","strawberry_milk","midnight_studio","nordic_cafe"].forEach((name) => app.classList.toggle(`theme-${name}`, (data.ordering_theme || data.system_theme || "zen") === name));
+    ["zen","korean","editorial","retro","threed","sakura","coastal","cocoa","matcha_modern","japanese_paper","strawberry_milk","midnight_studio","nordic_cafe","studio_grid"].forEach((name) => app.classList.toggle(`theme-${name}`, (data.ordering_theme || data.system_theme || "zen") === name));
     app.style.fontFamily = fontStacks[data.welcome_body_font] || fontStacks.work_sans;
     title.style.fontFamily = fontStacks[data.welcome_title_font] || fontStacks.fraunces;
     title.style.fontSize = `${Math.max(28, Math.min(64, Number(data.welcome_title_size || 39)))}px`;

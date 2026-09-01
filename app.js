@@ -213,6 +213,12 @@ function money(n) {
   try { return new Intl.NumberFormat(locale, { style: "currency", currency }).format(Number(n || 0)); }
   catch (_) { return `${currency} ${Number(n || 0).toFixed(2)}`; }
 }
+function optionPriceLabel(value) {
+  const amount = Number(value || 0);
+  if (amount > 0) return `+${money(amount)}`;
+  if (amount < 0) return `−${money(Math.abs(amount))}`;
+  return "Included";
+}
 function themeFont(value, fallback) {
   return ({ fraunces: "'Fraunces',serif", noto_serif_jp: "'Noto Serif JP',serif", work_sans: "'Work Sans',sans-serif", noto_sans_jp: "'Noto Sans JP',sans-serif", georgia: "Georgia,serif" })[value] || fallback;
 }
@@ -360,7 +366,7 @@ function selectedBundlePrice(bundle, drink1, drink2, drink1Options = {}, drink2O
   let total = salePrice(bundle);
   if (drink1) total += bundleOptionPrice(bundle, drink1) + bundleOptionExtras(drink1Options);
   if (drink2) total += bundleOptionPrice(bundle, drink2) + bundleOptionExtras(drink2Options);
-  return Math.round(total * 100) / 100;
+  return Math.max(0, Math.round(total * 100) / 100);
 }
 
 function productStock(product) {
@@ -413,8 +419,9 @@ async function ensureCustomerSession() {
 
 /* ---------- pickup slots ---------- */
 function getWeeklyConfig() {
-  if (Array.isArray(state.store.weekly_pickup_schedule)) {
-    return state.store.weekly_pickup_schedule.map((item) => ({
+  const schedule = state.market === "MY" ? state.store.malaysia_weekly_pickup_schedule : state.store.weekly_pickup_schedule;
+  if (Array.isArray(schedule)) {
+    return schedule.map((item) => ({
       day: Number(item.day), label: String(item.label || "Collection"), is_open: item.is_open !== false,
       windows: (Array.isArray(item.windows) ? item.windows : []).filter((window) => String(window?.range || "").trim())
     }));
@@ -502,7 +509,8 @@ function timesFromRange(rangeText) {
     const times = String(range || "").split(/\s*[–-]\s*/);
     const start = pickupMinutesFromToken(times[0], times[1]);
     const end = pickupMinutesFromToken(times[1], times[0]);
-    const interval = Math.max(5, Math.min(120, Number(state.store.pickup_slot_interval_minutes || 30)));
+    const configuredInterval = state.market === "MY" ? state.store.malaysia_pickup_slot_interval_minutes : state.store.pickup_slot_interval_minutes;
+    const interval = Math.max(5, Math.min(120, Number(configuredInterval || 30)));
     if (start == null) return [];
     if (end == null || end < start) return [formatPickupTime(start)];
     const values = [];
@@ -514,8 +522,10 @@ function timesFromRange(rangeText) {
 function computeSlots() {
   const now = new Date();
   const weekly = new Map(getWeeklyConfig().map((item) => [item.day, item]));
-  const maxDays = Math.max(0, Math.min(60, Number(state.store.order_advance_days || 14)));
-  const noticeHours = Math.max(0, Number(state.store.minimum_order_notice_hours || 0));
+  const configuredAdvanceDays = state.market === "MY" ? state.store.malaysia_order_advance_days : state.store.order_advance_days;
+  const configuredNoticeHours = state.market === "MY" ? state.store.malaysia_minimum_order_notice_hours : state.store.minimum_order_notice_hours;
+  const maxDays = Math.max(0, Math.min(60, Number(configuredAdvanceDays ?? 14)));
+  const noticeHours = Math.max(0, Number(configuredNoticeHours ?? 0));
   const earliest = new Date(now.getTime() + noticeHours * 60 * 60 * 1000);
   const slots = [];
   for (let offset = 0; offset <= maxDays; offset++) {
@@ -524,7 +534,7 @@ function computeSlots() {
     date.setDate(date.getDate() + offset);
     const dateText = formatDateForDatabase(date);
     const weeklyConfig = weekly.get(date.getDay());
-    const override = state.openingOverrides.find((item) => item.collection_date === dateText);
+    const override = state.openingOverrides.find((item) => item.collection_date === dateText && String(item.market_code || "SG") === state.market);
     if (override && !override.is_open) continue;
     if (!override && (!weeklyConfig || !weeklyConfig.is_open)) continue;
     const windows = override
@@ -547,7 +557,7 @@ function nextCollectionSchedule(limit = 2) {
     date.setHours(0, 0, 0, 0);
     date.setDate(date.getDate() + offset);
     const dateText = formatDateForDatabase(date);
-    const override = state.openingOverrides.find((item) => item.collection_date === dateText);
+    const override = state.openingOverrides.find((item) => item.collection_date === dateText && String(item.market_code || "SG") === state.market);
     const weeklyConfig = weekly.get(date.getDay());
     if (override && !override.is_open) continue;
     if (!override && (!weeklyConfig || !weeklyConfig.is_open)) continue;
@@ -598,6 +608,8 @@ function setMarket(market) {
   clearSavedCart();
   state.promo = null;
   state.form.collectionPoint = "";
+  state.form.pickupDate = "";
+  state.form.slotId = "";
   applyMarketMenu();
   render();
 }
@@ -825,7 +837,7 @@ function renderProgressiveOptionGroups(product, selectedOptions, drinkNumber = n
       </div>
       <div>
         ${options.map((option) => `<button type="button" class="slot ${selected && String(selected.optionId) === String(option.id) ? "active" : ""}" onclick="${optionHandler(option.id)}">
-          <div><div class="slot-day">${escapeHtml(option.name)}</div><div class="slot-time">${Number(option.price || 0) > 0 ? `+${money(option.price)}` : "Included"}</div></div>
+          <div><div class="slot-day">${escapeHtml(option.name)}</div><div class="slot-time">${optionPriceLabel(option.price)}</div></div>
         </button>`).join("")}
         ${group.required ? "" : `<button type="button" class="option-skip ${selected?.skipped ? "active" : ""}" onclick="skipOptionStep('${scope}','${escapeHtml(group.id)}',${drinkNumber == null ? "null" : drinkNumber})">No thanks</button>`}
       </div>
@@ -845,7 +857,7 @@ function getSelectedOptionsForProduct(productId) {
 function calculateProductPrice(product) {
   let price = salePrice(product);
   getSelectedOptionsForProduct(product.id).forEach((selected) => { price += Number(selected.price || 0); });
-  return price;
+  return Math.max(0, Math.round(price * 100) / 100);
 }
 
 /* ---------- normal product ---------- */
@@ -1467,6 +1479,17 @@ async function submitReviewPortal() {
 function renderReviewPortal() {
   const p = state.reviewPortal;
   return `${header({ showHome: true })}<div class="screen review-portal"><button class="back-link" onclick="setScreen('menu')">${ICONS.back} ${escapeHtml(state.store.review_back_button_text || "Back to menu")}</button><div class="display review-portal-title">${escapeHtml(state.store.review_portal_title || "Share your Shizuku experience")}</div><p class="hint" style="text-align:left;line-height:1.55;">${escapeHtml(state.store.review_portal_intro || "Enter either your order number or phone number. We will show the drinks you collected — your order number will never be shown publicly.")}</p><div class="field"><label>${escapeHtml(state.store.review_lookup_label || "Order number or phone number")}</label><input value="${escapeHtml(p.lookup)}" oninput="state.reviewPortal.lookup=this.value" placeholder="${escapeHtml(state.store.review_lookup_placeholder || "SL-XXXXXX or 91234567")}"></div><button class="primary-btn" ${p.loading ? "disabled" : ""} onclick="findReviewableOrders()">${p.loading ? "Checking…" : escapeHtml(state.store.review_find_button_text || "Find my orders")}</button>${p.orders.length ? `<div class="review-order-list"><div class="bundle-heading">${escapeHtml(state.store.review_choose_order_text || "Choose the drinks to review")}</div>${p.orders.map((item) => `<button class="slot ${p.selected && String(p.selected.order_id) === String(item.order_id) ? "active" : ""}" ${item.already_reviewed ? "disabled" : ""} onclick="chooseReviewOrder('${escapeHtml(item.order_id)}')"><span><b>${escapeHtml(item.product_summary || "Shizuku drinks")}</b><br><span class="hint">Collected ${escapeHtml(item.collection_date || "")}${item.already_reviewed ? " · Review already submitted" : ""}</span></span></button>`).join("")}</div>` : ""}${p.selected && !p.selected.already_reviewed ? `<div class="summary-card review-write-card"><div class="field"><label>${escapeHtml(state.store.review_name_label || "Name shown with review")}</label><input value="${escapeHtml(p.name)}" placeholder="Your name" oninput="state.reviewPortal.name=this.value"></div><div class="field"><label>${escapeHtml(state.store.review_rating_label || "Rating")}</label><select onchange="state.reviewPortal.rating=Number(this.value)">${[5,4,3,2,1].map((rating) => `<option value="${rating}" ${p.rating===rating?"selected":""}>${rating} star${rating===1?"":"s"}</option>`).join("")}</select></div><div class="field"><label>${escapeHtml(state.store.review_experience_label || "Your experience")}</label><textarea rows="5" oninput="state.reviewPortal.text=this.value">${escapeHtml(p.text)}</textarea></div><button class="primary-btn" ${p.loading ? "disabled" : ""} onclick="submitReviewPortal()">${escapeHtml(state.store.review_submit_button_text || "Send my review")}</button></div>` : ""}${p.message ? `<div class="ref-note" role="status">${escapeHtml(p.message)}</div>` : ""}</div>`;
+}
+
+function decorateReviewPortalWithCommunity() {
+  if (state.screen !== "reviews" || state.store.reviews_enabled === false || !state.reviews.length) return;
+  const portal = document.querySelector(".review-portal");
+  const firstField = portal?.querySelector(".field");
+  if (!portal || !firstField || portal.querySelector(".review-community")) return;
+  const community = document.createElement("div");
+  community.className = "review-community";
+  community.innerHTML = renderReviews();
+  firstField.before(community);
 }
 
 /* ---------- FAQ ---------- */
@@ -2097,7 +2120,7 @@ function render() {
   app.classList.toggle("compact-product-options", state.store.product_option_compact !== false);
   app.classList.toggle("contain-product-image", state.store.product_detail_image_fit === "contain");
   app.classList.toggle("product-options-screen", state.screen === "options" || state.screen === "bundle");
-  ["zen","korean","editorial","retro","threed","sakura","coastal","cocoa","matcha_modern","japanese_paper","strawberry_milk","midnight_studio","nordic_cafe"].forEach((name) => app.classList.toggle(`theme-${name}`, (state.store.ordering_theme || state.store.system_theme || "zen") === name));
+  ["zen","korean","editorial","retro","threed","sakura","coastal","cocoa","matcha_modern","japanese_paper","strawberry_milk","midnight_studio","nordic_cafe","studio_grid"].forEach((name) => app.classList.toggle(`theme-${name}`, (state.store.ordering_theme || state.store.system_theme || "zen") === name));
   if (state.loading) { app.innerHTML = `<div class="loading">Loading Shizuku Lab…</div>`; return; }
   let html = "";
   if (state.screen === "menu") html = renderMenu();
@@ -2114,6 +2137,7 @@ function render() {
   else html = renderMenu();
   app.innerHTML = `${storefrontThemeStyle()}${html}${poweredByFooter()}`;
   applyCmsWording();
+  decorateReviewPortalWithCommunity();
   if (screenChanged) requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
   if (state.screen === "payment") startPaymentCountdown();
 }

@@ -44,6 +44,15 @@ test("Mix & Matcha follows option prices and updates selected total", () => {
   assert.equal(context.bundleStartingPrice(bundle), 11.8);
   assert.equal(context.selectedBundlePrice(bundle, drinks[0], drinks[1]), 13.4);
   assert.equal(context.selectedBundlePrice(bundle, drinks[1], drinks[1]), 15);
+  assert.equal(context.selectedBundlePrice(bundle, drinks[0], drinks[1], { milk: { price: -1 } }), 12.4);
+});
+
+test("negative option adjustments can reduce a bundle but never below zero", () => {
+  const drinks = [{ id: 1, name: "Matcha", price: 5, is_available: true, is_bundle: false }];
+  const bundle = { id: 28, name: "Mix & Matcha", price: 0, is_bundle: true, bundle_pricing_mode: "sum_selected", bundle_product_ids: ["1"] };
+  const context = pricingContext({ storewide_sale_enabled: false }, drinks);
+  assert.equal(context.selectedBundlePrice(bundle, drinks[0], drinks[0], { offer: { price: -1 } }), 9);
+  assert.equal(context.selectedBundlePrice(bundle, drinks[0], drinks[0], { offer: { price: -99 } }), 0);
 });
 
 test("Malaysia Mix & Match uses MYR prices without changing SGD prices", () => {
