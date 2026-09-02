@@ -39,10 +39,12 @@ function savePendingPayment() {
 }
 function clearPendingPayment() { try { localStorage.removeItem(PENDING_PAYMENT_STORAGE_KEY); } catch (error) { /* storage may be unavailable */ } }
 
+const ORDERING_MARKET = new URLSearchParams(window.location.search).get("market") === "MY" ? "MY" : "SG";
+
 const state = {
   menu: [],
   allMenu: [],
-  market: (() => { try { return localStorage.getItem("shizuku-market") === "MY" ? "MY" : "SG"; } catch (_) { return "SG"; } })(),
+  market: ORDERING_MARKET,
   stockLevels: {},
   cart: loadSavedCart(),
   cartNotice: "",
@@ -596,7 +598,6 @@ async function loadProducts() {
   applyMarketMenu();
 }
 function applyMarketMenu() {
-  if (state.market === "MY" && state.store.malaysia_enabled !== true) state.market = "SG";
   state.menu = state.allMenu.filter((item) => state.market !== "MY" || item.malaysia_available === true);
 }
 function setMarket(market) {
@@ -679,7 +680,6 @@ async function init() {
   try {
     await ensureCustomerSession();
     await loadStoreSettings();
-    if (state.market === "MY" && state.store.malaysia_enabled !== true) state.market = "SG";
     await loadOpeningOverrides();
     await Promise.all([loadFaq(), loadReviews()]);
     state.slots = computeSlots();
@@ -1357,7 +1357,7 @@ function header({ showCart = false, showHome = false } = {}) {
           <div class="brand-sub">${storeTagline}</div>
         </div>
         <div class="header-actions">
-          ${state.store.malaysia_enabled === true ? `<div class="header-market-switch" aria-label="Ordering country"><span>Country</span><button type="button" class="${state.market === "SG" ? "active" : ""}" onclick="setMarket('SG')">SG</button><button type="button" class="${state.market === "MY" ? "active" : ""}" onclick="setMarket('MY')">MY</button></div>` : ""}
+          <div class="header-market-switch" aria-label="Ordering workspace"><span>Store</span><button type="button" class="active" disabled>${state.market === "MY" ? "Malaysia · MYR" : "Singapore · SGD"}</button></div>
           ${showCart ? `
             <button class="cart-btn" onclick="setScreen('cart')" aria-label="Cart">
               ${ICONS.bag}
@@ -2122,6 +2122,13 @@ function render() {
   app.classList.toggle("product-options-screen", state.screen === "options" || state.screen === "bundle");
   ["zen","korean","editorial","retro","threed","sakura","coastal","cocoa","matcha_modern","japanese_paper","strawberry_milk","midnight_studio","nordic_cafe","studio_grid"].forEach((name) => app.classList.toggle(`theme-${name}`, (state.store.ordering_theme || state.store.system_theme || "zen") === name));
   if (state.loading) { app.innerHTML = `<div class="loading">Loading Shizuku Lab…</div>`; return; }
+  const websiteVisibility = state.market === "MY" ? state.store.malaysia_website_visibility : state.store.website_visibility;
+  if (websiteVisibility === "hidden") {
+    const hiddenTitle = state.market === "MY" ? state.store.malaysia_website_hidden_title : state.store.website_hidden_title;
+    const hiddenMessage = state.market === "MY" ? state.store.malaysia_website_hidden_message : state.store.website_hidden_message;
+    app.innerHTML = `<main style="min-height:100vh;display:grid;place-items:center;padding:24px;background:${escapeHtml(state.store.theme_primary_color || "#4B5D3A")};color:${escapeHtml(state.store.theme_background_color || "#F3EEE3")};text-align:center"><article style="max-width:580px"><div style="font-size:11px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;opacity:.75">${escapeHtml(state.store.store_name || "Shizuku Lab")} · ${state.market === "MY" ? "Malaysia" : "Singapore"}</div><h1 class="display" style="font-size:clamp(42px,8vw,72px);line-height:1.05;margin:18px 0">${escapeHtml(hiddenTitle || (state.market === "MY" ? "Malaysia ordering is coming soon." : "We’ll be back soon."))}</h1><p style="font-size:17px;line-height:1.7;opacity:.82">${escapeHtml(hiddenMessage || "We’re preparing our next opening. Please check back again soon.")}</p><div style="margin-top:32px;font-size:11px;letter-spacing:.08em;opacity:.6">Powered by Slow Studio</div></article></main>`;
+    return;
+  }
   let html = "";
   if (state.screen === "menu") html = renderMenu();
   else if (state.screen === "options") html = renderOptions();

@@ -18,7 +18,7 @@ window.SHIZUKU_DATA = {
     "forest": "#173e31",
     "paper": "#f4f0e7",
     "accent": "#8aa66b",
-    "orderUrl": "order/order.html",
+    "orderUrl": "/shop/shizuku-lab-sg",
     "instagramUrl": "https://www.instagram.com/shizukulab.matcha/"
   },
   "sectionStyles": {
