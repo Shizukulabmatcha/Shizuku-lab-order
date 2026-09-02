@@ -30,6 +30,12 @@
   try {
     const { data, error } = await db.from("store_settings").select("*").limit(1).maybeSingle();
     if (error || !data) return;
+    if (data.website_visibility === "hidden") {
+      const safe = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+      document.body.className = "";
+      document.body.innerHTML = `<main style="min-height:100vh;display:grid;place-items:center;padding:24px;background:${safe(data.theme_primary_color || "#4B5D3A")};color:${safe(data.theme_background_color || "#F3EEE3")};text-align:center;font-family:Work Sans,Arial,sans-serif"><article style="max-width:580px"><div style="font-size:11px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;opacity:.75">${safe(data.store_name || "Shizuku Lab")}</div><h1 style="font:700 clamp(42px,8vw,72px)/1.05 Fraunces,Georgia,serif;margin:18px 0">${safe(data.website_hidden_title || "We’ll be back soon.")}</h1><p style="font-size:17px;line-height:1.7;opacity:.82">${safe(data.website_hidden_message || "We’re preparing our next opening. Please check back again soon.")}</p><div style="margin-top:32px;font-size:11px;letter-spacing:.08em;opacity:.6">Powered by Slow Studio</div></article></main>`;
+      return;
+    }
     showBrowserNotice(data);
     const app = document.getElementById("welcome-app");
     const logoFrame = app.querySelector(".welcome-logo-frame");
