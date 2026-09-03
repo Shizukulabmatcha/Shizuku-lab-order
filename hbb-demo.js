@@ -3348,32 +3348,240 @@ const pageTitles = {
           </div>
 
 
-          <nav class="demo-nav">
+<nav class="demo-nav">
 
-            ${NAV
-              .map(
-                ([key, label]) => `
-                  <button
-                    class="${
-                      panel === key
-                        ? "active"
-                        : ""
-                    }"
+  <button
+    class="${
+      panel === "overview"
+        ? "active"
+        : ""
+    }"
+    onclick="
+      HBBDemo.setPanel(
+        'overview'
+      )
+    "
+  >
+    Home
+  </button>
 
-                    onclick="
-                      HBBDemo.setPanel(
-                        '${key}'
-                      )
-                    "
-                  >
-                    ${label}
-                  </button>
-                `
-              )
-              .join("")}
+  <button
+    class="${
+      panel === "orders"
+        ? "active"
+        : ""
+    }"
+    onclick="
+      HBBDemo.setPanel(
+        'orders'
+      )
+    "
+  >
+    Orders
+  </button>
 
-          </nav>
 
+  <details class="demo-nav-group" open>
+
+    <summary>
+      Store
+    </summary>
+
+    <button
+      class="${
+        panel === "products"
+          ? "active"
+          : ""
+      }"
+      onclick="
+        HBBDemo.setPanel(
+          'products'
+        )
+      "
+    >
+      My Store
+    </button>
+
+    <button
+      class="${
+        panel === "inventory"
+          ? "active"
+          : ""
+      }"
+      onclick="
+        HBBDemo.setPanel(
+          'inventory'
+        )
+      "
+    >
+      Inventory
+    </button>
+
+    <button
+      class="${
+        panel === "costing"
+          ? "active"
+          : ""
+      }"
+      onclick="
+        HBBDemo.setPanel(
+          'costing'
+        )
+      "
+    >
+      Costing
+    </button>
+
+  </details>
+
+
+  <details class="demo-nav-group">
+
+    <summary>
+      Marketing
+    </summary>
+
+    <button
+      class="${
+        panel === "reviews"
+          ? "active"
+          : ""
+      }"
+      onclick="
+        HBBDemo.setPanel(
+          'reviews'
+        )
+      "
+    >
+      Reviews
+    </button>
+
+    <button
+      class="${
+        panel === "promo"
+          ? "active"
+          : ""
+      }"
+      onclick="
+        HBBDemo.setPanel(
+          'promo'
+        )
+      "
+    >
+      Promo
+    </button>
+
+    <button
+      class="${
+        panel === "rewards"
+          ? "active"
+          : ""
+      }"
+      onclick="
+        HBBDemo.setPanel(
+          'rewards'
+        )
+      "
+    >
+      Rewards
+    </button>
+
+  </details>
+
+
+  <details class="demo-nav-group">
+
+    <summary>
+      Operations
+    </summary>
+
+    <button
+      class="${
+        panel === "availability"
+          ? "active"
+          : ""
+      }"
+      onclick="
+        HBBDemo.setPanel(
+          'availability'
+        )
+      "
+    >
+      Availability
+    </button>
+
+    <button
+      class="${
+        panel === "notifications"
+          ? "active"
+          : ""
+      }"
+      onclick="
+        HBBDemo.setPanel(
+          'notifications'
+        )
+      "
+    >
+      Notifications
+    </button>
+
+  </details>
+
+
+  <details class="demo-nav-group">
+
+    <summary>
+      Settings
+    </summary>
+
+    <button
+      class="${
+        panel === "store"
+          ? "active"
+          : ""
+      }"
+      onclick="
+        HBBDemo.setPanel(
+          'store'
+        )
+      "
+    >
+      Store Details
+    </button>
+
+    <button
+      class="${
+        panel === "design"
+          ? "active"
+          : ""
+      }"
+      onclick="
+        HBBDemo.setPanel(
+          'design'
+        )
+      "
+    >
+      Design
+    </button>
+
+    <button
+      class="${
+        panel === "help"
+          ? "active"
+          : ""
+      }"
+      onclick="
+        HBBDemo.setPanel(
+          'help'
+        )
+      "
+    >
+      Help & issues
+    </button>
+
+  </details>
+
+</nav>
 
           <div class="demo-side-bottom">
 
