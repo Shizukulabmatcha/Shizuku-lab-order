@@ -909,6 +909,7 @@ const productImageUrlCache =
 
   const NAV = [
     ["overview", "Home"],
+    ["orders", "Orders"],
     ["products", "My Store"],
     ["inventory", "Inventory"],
     ["costing", "Costing"],
@@ -2938,12 +2939,15 @@ async function uploadProductImage(
      19. TITLES
   ========================================================= */
 
-  const pageTitles = {
-    overview:
-      "Good day, demo owner.",
+const pageTitles = {
+  overview:
+    "Good day, demo owner.",
 
-    products:
-      "My Store",
+  orders:
+    "Orders",
+
+  products:
+    "My Store",
 
     inventory:
       "Inventory",
@@ -2980,6 +2984,9 @@ async function uploadProductImage(
   const pageDescriptions = {
     overview:
       "Try running a small home-based business workspace safely.",
+
+    orders:
+  "Manage demo orders and try each order status.",
 
     products:
       "Manage products, prices and customer visibility.",
