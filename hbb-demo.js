@@ -1242,6 +1242,143 @@ async function removeProductImage() {
     button.hidden = true;
   }
 }  
+
+async function uploadHeroImage(input) {
+  const file =
+    input?.files?.[0];
+
+  if (!file) {
+    return;
+  }
+
+  if (
+    !file.type.startsWith(
+      "image/"
+    )
+  ) {
+    input.value = "";
+
+    return alert(
+      "Please choose an image file."
+    );
+  }
+
+  if (
+    file.size >
+    12 * 1024 * 1024
+  ) {
+    input.value = "";
+
+    return alert(
+      "This photo is too large. Please choose an image smaller than 12MB."
+    );
+  }
+
+  try {
+    const blob =
+      await compressProductImage(
+        file
+      );
+
+    await saveProductImage(
+      "hero-banner",
+      blob
+    );
+
+    const preview =
+      document.getElementById(
+        "heroImagePreview"
+      );
+
+    const empty =
+      document.getElementById(
+        "heroImageEmpty"
+      );
+
+    const removeButton =
+      document.getElementById(
+        "removeHeroImageButton"
+      );
+
+    if (preview) {
+      preview.src =
+        URL.createObjectURL(blob);
+
+      preview.hidden =
+        false;
+    }
+
+    if (empty) {
+      empty.hidden = true;
+    }
+
+    if (removeButton) {
+      removeButton.hidden =
+        false;
+    }
+
+    activity(
+      "Homepage hero image updated"
+    );
+
+  } catch (error) {
+    console.error(
+      "Hero image error:",
+      error
+    );
+
+    alert(
+      "Could not save hero image."
+    );
+  }
+}
+
+
+async function removeHeroImage() {
+ try {
+    await deleteProductImage(
+      "hero-banner"
+    );
+
+    const preview =
+      document.getElementById(
+        "heroImagePreview"
+      );
+
+    const empty =
+      document.getElementById(
+        "heroImageEmpty"
+      );
+
+    const button =
+      document.getElementById(
+        "removeHeroImageButton"
+      );
+
+    if (preview) {
+      preview.src = "";
+      preview.hidden = true;
+    }
+
+    if (empty) {
+      empty.hidden = false;
+    }
+
+    if (button) {
+      button.hidden = true;
+    }
+
+    activity(
+      "Homepage hero image removed"
+    );
+
+  } catch (error) {
+    console.error(
+      "Could not remove hero image:",
+      error
+    );
+  }
+}  
   
   async function saveProduct() {
   if (
@@ -4718,12 +4855,98 @@ const pageTitles = {
                 </div>
 
 
-                <div
-                  class="
-                    demo-field
-                    wide
-                  "
-                >
+               <div
+  class="
+    demo-field
+    wide
+  "
+>
+
+  <label>
+    Hero Banner
+  </label>
+
+  <div
+    class="
+      demo-hero-image-editor
+    "
+  >
+
+    <div
+      class="
+        demo-hero-image-preview
+      "
+    >
+
+      <img
+        id="heroImagePreview"
+        alt="Homepage hero preview"
+        hidden
+      >
+
+      <div
+        id="heroImageEmpty"
+        class="
+          demo-hero-image-empty
+        "
+      >
+        No hero image yet
+      </div>
+
+    </div>
+
+
+    <div
+      class="demo-actions"
+    >
+
+      <label
+        class="
+          demo-btn
+          primary
+        "
+      >
+        Upload Hero
+
+        <input
+          type="file"
+          accept="image/*"
+          hidden
+          onchange="
+            HBBDemo.uploadHeroImage(
+              this
+            )
+          "
+        >
+      </label>
+
+
+      <button
+        id="removeHeroImageButton"
+        type="button"
+        class="
+          demo-btn
+          danger
+        "
+        hidden
+        onclick="
+          HBBDemo.removeHeroImage()
+        "
+      >
+        Remove
+      </button>
+
+    </div>
+
+    <small>
+      Recommended:
+      landscape image,
+      around 1600 × 800px.
+    </small>
+
+  </div>
+
+</div>
 
                   <label>
                     Collection note
@@ -5966,6 +6189,11 @@ window.HBBDemoContext = {
 
     uploadProductImage,
     removeProductImage,
+
+    uploadHeroImage,
+    removeHeroImage,
+
+    saveProduct,
 
     saveProduct,
     removeProduct,
