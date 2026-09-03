@@ -4611,146 +4611,377 @@ ${
             "
           >
 
-            <section class="demo-card">
+       <section class="demo-card">
 
-              <div class="demo-card-head">
+  <div class="demo-card-head">
 
-                <div>
-                  <h2>
-                    Ordering availability
-                  </h2>
+    <div>
 
-                  <p>
-                    Open or close ordering
-                    and control collection
-                    slots.
-                  </p>
-                </div>
+      <small>
+        Collection Calendar
+      </small>
 
+      <h2>
+        Availability
+      </h2>
 
-                <button
-                  class="
-                    demo-btn
-                    primary
-                  "
-                  onclick="
-                    HBBDemo.addSlot()
-                  "
-                >
-                  + Add slot
-                </button>
+      <p>
+        Choose your opening days
+        and collection times.
+      </p>
 
-              </div>
+    </div>
 
+    <button
+      class="
+        demo-btn
+        primary
+      "
+      onclick="
+        HBBDemo.addSlot()
+      "
+    >
+      + Add slot
+    </button>
 
-              <div class="demo-form-grid">
-
-                <div class="demo-field">
-
-                  <label>
-                    Ordering
-                  </label>
-
-                  <select
-                    onchange="
-                      HBBDemo.setAvailability(
-                        'orderingOpen',
-                        this.value
-                      )
-                    "
-                  >
-
-                    <option
-                      value="true"
-                      ${
-                        state.availability
-                          .orderingOpen
-                          ? "selected"
-                          : ""
-                      }
-                    >
-                      Open
-                    </option>
-
-                    <option
-                      value="false"
-                      ${
-                        !state.availability
-                          .orderingOpen
-                          ? "selected"
-                          : ""
-                      }
-                    >
-                      Closed
-                    </option>
-
-                  </select>
-
-                </div>
+  </div>
 
 
-                <div class="demo-field">
+  <div class="demo-calendar">
 
-                  <label>
-                    Pre-order window
-                  </label>
+    <div class="demo-calendar-header">
 
-                  <input
-                    type="number"
-                    min="0"
+      <button
+        type="button"
+        class="demo-btn"
+      >
+        ←
+      </button>
 
-                    value="${
-                      Number(
-                        state.availability
-                          .preorderDays
-                      )
-                    }"
+      <strong>
+        September 2026
+      </strong>
 
-                    onchange="
-                      HBBDemo.setAvailability(
-                        'preorderDays',
-                        this.value
-                      )
-                    "
-                  >
+      <button
+        type="button"
+        class="demo-btn"
+      >
+        →
+      </button>
 
-                </div>
+    </div>
 
 
-                <div class="demo-field">
+    <div class="demo-calendar-week">
 
-                  <label>
-                    Default slot capacity
-                  </label>
+      <span>Mon</span>
+      <span>Tue</span>
+      <span>Wed</span>
+      <span>Thu</span>
+      <span>Fri</span>
+      <span>Sat</span>
+      <span>Sun</span>
 
-                  <input
-                    type="number"
-                    min="1"
-
-                    value="${
-                      Number(
-                        state.availability
-                          .maxOrdersPerSlot
-                      )
-                    }"
-
-                    onchange="
-                      HBBDemo.setAvailability(
-                        'maxOrdersPerSlot',
-                        this.value
-                      )
-                    "
-                  >
-
-                </div>
-
-              </div>
-
-            </section>
+    </div>
 
 
-            ${slotCards()}
+    <div class="demo-calendar-grid">
 
+      <span></span>
+
+      <button class="demo-calendar-day open">
+        1
+      </button>
+
+      <button class="demo-calendar-day open">
+        2
+      </button>
+
+      <button class="demo-calendar-day closed">
+        3
+      </button>
+
+      <button class="demo-calendar-day open">
+        4
+      </button>
+
+      <button class="demo-calendar-day limited">
+        5
+      </button>
+
+      <button class="demo-calendar-day closed">
+        6
+      </button>
+
+      <button class="demo-calendar-day active open">
+        7
+      </button>
+
+      <button class="demo-calendar-day open">
+        8
+      </button>
+
+      <button class="demo-calendar-day open">
+        9
+      </button>
+
+      <button class="demo-calendar-day closed">
+        10
+      </button>
+
+      <button class="demo-calendar-day open">
+        11
+      </button>
+
+      <button class="demo-calendar-day limited">
+        12
+      </button>
+
+      <button class="demo-calendar-day closed">
+        13
+      </button>
+
+      <button class="demo-calendar-day open">
+        14
+      </button>
+
+      <button class="demo-calendar-day open">
+        15
+      </button>
+
+      <button class="demo-calendar-day open">
+        16
+      </button>
+
+      <button class="demo-calendar-day closed">
+        17
+      </button>
+
+      <button class="demo-calendar-day open">
+        18
+      </button>
+
+      <button class="demo-calendar-day limited">
+        19
+      </button>
+
+      <button class="demo-calendar-day closed">
+        20
+      </button>
+
+      <button class="demo-calendar-day open">
+        21
+      </button>
+
+      <button class="demo-calendar-day open">
+        22
+      </button>
+
+      <button class="demo-calendar-day open">
+        23
+      </button>
+
+      <button class="demo-calendar-day open">
+        24
+      </button>
+
+      <button class="demo-calendar-day limited">
+        25
+      </button>
+
+      <button class="demo-calendar-day closed">
+        26
+      </button>
+
+      <button class="demo-calendar-day closed">
+        27
+      </button>
+
+      <button class="demo-calendar-day open">
+        28
+      </button>
+
+      <button class="demo-calendar-day open">
+        29
+      </button>
+
+      <button class="demo-calendar-day open">
+        30
+      </button>
+
+    </div>
+
+  </div>
+
+
+  <div class="demo-calendar-legend">
+
+    <span>
+      <i class="open"></i>
+      Open
+    </span>
+
+    <span>
+      <i class="limited"></i>
+      Limited
+    </span>
+
+    <span>
+      <i class="closed"></i>
+      Closed
+    </span>
+
+  </div>
+
+</section>
+
+
+<section class="demo-card">
+
+  <div class="demo-card-head">
+
+    <div>
+
+      <small>
+        Selected date
+      </small>
+
+      <h2>
+        7 September 2026
+      </h2>
+
+    </div>
+
+  </div>
+
+
+  <div class="demo-form-grid">
+
+    <div class="demo-field">
+
+      <label>
+        Ordering
+      </label>
+
+      <select
+        onchange="
+          HBBDemo.setAvailability(
+            'orderingOpen',
+            this.value
+          )
+        "
+      >
+
+        <option
+          value="true"
+          ${
+            state.availability
+              .orderingOpen
+              ? "selected"
+              : ""
+          }
+        >
+          Open
+        </option>
+
+        <option
+          value="false"
+          ${
+            !state.availability
+              .orderingOpen
+              ? "selected"
+              : ""
+          }
+        >
+          Closed
+        </option>
+
+      </select>
+
+    </div>
+
+
+    <div class="demo-field">
+
+      <label>
+        Pre-order window
+      </label>
+
+      <input
+        type="number"
+        min="0"
+
+        value="${
+          Number(
+            state.availability
+              .preorderDays
+          )
+        }"
+
+        onchange="
+          HBBDemo.setAvailability(
+            'preorderDays',
+            this.value
+          )
+        "
+      >
+
+    </div>
+
+
+    <div class="demo-field">
+
+      <label>
+        Default slot capacity
+      </label>
+
+      <input
+        type="number"
+        min="1"
+
+        value="${
+          Number(
+            state.availability
+              .maxOrdersPerSlot
+          )
+        }"
+
+        onchange="
+          HBBDemo.setAvailability(
+            'maxOrdersPerSlot',
+            this.value
+          )
+        "
+      >
+
+    </div>
+
+  </div>
+
+</section>
+
+
+<section>
+
+  <div class="demo-card-head">
+
+    <div>
+
+      <small>
+        Collection Times
+      </small>
+
+      <h2>
+        Available slots
+      </h2>
+
+    </div>
+
+  </div>
+
+  ${slotCards()}
+
+</section>
           </section>
 
 
