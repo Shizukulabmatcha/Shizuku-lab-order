@@ -283,6 +283,7 @@
     font-weight:700;
     color:var(--brand-dark);
 }
+
 /* ==========================================
    CUSTOMER ORDERING PORTAL
 ========================================== */
@@ -917,4 +918,42 @@
     padding:28px 20px;
   }
 
+}
+
+/* ==========================================
+   PRODUCT IMAGE UPLOAD
+========================================== */
+
+.demo-product-image-editor{
+  display:grid;
+  gap:12px;
+}
+
+.demo-product-image-preview{
+  width:100%;
+  min-height:220px;
+  border:1px dashed var(--line);
+  border-radius:12px;
+  overflow:hidden;
+  background:#f7f4ee;
+  display:grid;
+  place-items:center;
+}
+
+.demo-product-image-preview img{
+  display:block;
+  width:100%;
+  max-height:360px;
+  object-fit:cover;
+}
+
+.demo-product-image-empty{
+  padding:40px;
+  text-align:center;
+  color:var(--muted);
+  font-size:12px;
+}
+
+.demo-product-image-editor small{
+  color:var(--muted);
 }
