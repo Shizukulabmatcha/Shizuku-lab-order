@@ -470,23 +470,32 @@ ${new Date(order.createdAt).toLocaleString()}
   </span>
 
   <button
-  class="demo-btn"
-  onclick="
-    document
-      .getElementById('communicationDialog')
-      .showModal()
-  "
+class="demo-btn"
+
+onclick="
+HBBDemoOrders.openCommunication(
+'whatsapp'
+)
+"
+
 >
 
-  <button
-  class="demo-btn"
-  onclick="
-    document
-      .getElementById('communicationDialog')
-      .showModal()
-  "
+WhatsApp Customer
+
+<button
+class="demo-btn"
+
+onclick="
+HBBDemoOrders.openCommunication(
+'email'
+)
+"
+
 >
 
+Email Customer
+
+</button>
 
           <div class="demo-table-wrap">
 
@@ -592,6 +601,7 @@ Cancel
 </button>
 
 <button
+id="communicationPrimary"
 class="demo-btn primary"
 >
 
@@ -608,6 +618,25 @@ Open WhatsApp
     `;
   }
 
+function openCommunication(type){
+
+  document
+    .getElementById(
+      "communicationPrimary"
+    )
+    .textContent =
+      type === "email"
+        ? "Open Email"
+        : "Open WhatsApp";
+
+  document
+    .getElementById(
+      "communicationDialog"
+    )
+    .showModal();
+
+}
+  
   /* =========================================================
      PUBLIC API
   ========================================================= */
@@ -622,6 +651,7 @@ Open WhatsApp
     addDemoOrder,
     removeOrder,
     orderRows,
-    panelHtml
+    panelHtml,
+    openCommunication
   };
 })();
