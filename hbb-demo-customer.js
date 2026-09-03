@@ -4,14 +4,17 @@
   ========================================================= */
 
   const params =
-    new URLSearchParams(location.search);
+    new URLSearchParams(
+      location.search
+    );
 
   const path =
     location.pathname.toLowerCase();
 
   const MARKET =
-    String(params.get("market") || "")
-      .toUpperCase() === "MY" ||
+    String(
+      params.get("market") || ""
+    ).toUpperCase() === "MY" ||
     path.includes("/malaysia")
       ? "MY"
       : "SG";
@@ -36,9 +39,10 @@
           cartKey:
             "slow-studio-customer-cart-v1-sg"
         };
-  
+
   let appliedPromoCode = "";
   let checkoutSubmitting = false;
+
 
   /* =========================================================
      HELPERS
@@ -56,7 +60,8 @@
   function money(value) {
     return (
       CONFIG.symbol +
-      Number(value || 0).toFixed(2)
+      Number(value || 0)
+        .toFixed(2)
     );
   }
 
@@ -88,15 +93,15 @@
 
   function loadCart() {
     try {
-      const data =
+      const cart =
         JSON.parse(
           localStorage.getItem(
             CONFIG.cartKey
           ) || "[]"
         );
 
-      return Array.isArray(data)
-        ? data
+      return Array.isArray(cart)
+        ? cart
         : [];
     } catch (_) {
       return [];
@@ -116,6 +121,15 @@
     );
   }
 
+  function cartCount(cart) {
+    return cart.reduce(
+      (sum, item) =>
+        sum +
+        Number(item.qty || 0),
+      0
+    );
+  }
+
   function cartSubtotal(cart) {
     return cart.reduce(
       (sum, item) =>
@@ -126,18 +140,9 @@
     );
   }
 
-  function cartCount(cart) {
-    return cart.reduce(
-      (sum, item) =>
-        sum +
-        Number(item.qty || 0),
-      0
-    );
-  }
-
 
   /* =========================================================
-     PRODUCT IMAGES
+     IMAGE STORAGE
   ========================================================= */
 
   function openImageDb() {
@@ -164,16 +169,9 @@
     );
   }
 
-  async function loadImages() {
-    const elements =
-      document.querySelectorAll(
-        "[data-product-image]"
-      );
-
-    if (!elements.length) {
-      return;
-    }
-
+  async function getStoredImage(
+    key
+  ) {
     try {
       const db =
         await openImageDb();
@@ -184,15 +182,11 @@
             "productImages"
           )
       ) {
-        return;
+        return null;
       }
 
-      elements.forEach(
-        element => {
-          const id =
-            element.dataset
-              .productImage;
-
+      return await new Promise(
+        resolve => {
           const tx =
             db.transaction(
               "productImages",
@@ -204,41 +198,96 @@
               .objectStore(
                 "productImages"
               )
-              .get(id);
+              .get(key);
 
           request.onsuccess =
-            () => {
-              if (
-                !request.result
-              ) {
-                return;
-              }
+            () =>
+              resolve(
+                request.result ||
+                null
+              );
 
-              const url =
-                URL.createObjectURL(
-                  request.result
-                );
-
-              element.innerHTML = `
-                <img
-                  src="${url}"
-                  alt=""
-                  style="
-                    width:100%;
-                    height:100%;
-                    object-fit:cover;
-                  "
-                >
-              `;
-            };
+          request.onerror =
+            () =>
+              resolve(null);
         }
       );
-    } catch (error) {
-      console.warn(
-        "Images unavailable",
-        error
-      );
+    } catch (_) {
+      return null;
     }
+  }
+
+  async function loadProductImages() {
+    const elements =
+      document.querySelectorAll(
+        "[data-product-image]"
+      );
+
+    for (
+      const element of elements
+    ) {
+      const id =
+        element.dataset
+          .productImage;
+
+      const blob =
+        await getStoredImage(id);
+
+      if (!blob) {
+        continue;
+      }
+
+      const url =
+        URL.createObjectURL(blob);
+
+      element.innerHTML = `
+        <img
+          src="${url}"
+          alt=""
+        >
+      `;
+    }
+  }
+
+  async function loadHeroImage() {
+    const hero =
+      document.getElementById(
+        "customerHero"
+      );
+
+    if (!hero) {
+      return;
+    }
+
+    /*
+      Later Admin Hero Upload
+      will save using this key.
+    */
+
+    const blob =
+      await getStoredImage(
+        "hero-banner"
+      );
+
+    if (!blob) {
+      return;
+    }
+
+    const url =
+      URL.createObjectURL(blob);
+
+    hero.style.backgroundImage =
+      `
+        linear-gradient(
+          rgba(20,20,20,.28),
+          rgba(20,20,20,.38)
+        ),
+        url("${url}")
+      `;
+
+    hero.classList.add(
+      "has-image"
+    );
   }
 
 
@@ -250,20 +299,29 @@
     const state =
       loadState();
 
-    const cart =
-      loadCart();
-
     const product =
       (
         state.products || []
       ).find(
         item =>
-          item.id === productId
+          item.id ===
+          productId
       );
 
     if (!product) {
       return;
     }
+
+    if (
+      Number(
+        product.stock || 0
+      ) <= 0
+    ) {
+      return;
+    }
+
+    const cart =
+      loadCart();
 
     const existing =
       cart.find(
@@ -317,7 +375,8 @@
         state.products || []
       ).find(
         item =>
-          item.id === productId
+          item.id ===
+          productId
       );
 
     const item =
@@ -328,8 +387,8 @@
       );
 
     if (
-      !item ||
-      !product
+      !product ||
+      !item
     ) {
       return;
     }
@@ -384,7 +443,9 @@
         "customerStore"
       );
 
-    if (!root) return;
+    if (!root) {
+      return;
+    }
 
     const state =
       loadState();
@@ -395,6 +456,10 @@
     const cart =
       loadCart();
 
+    const orderingOpen =
+      state.availability
+        ?.orderingOpen !== false;
+
     const products =
       (
         state.products || []
@@ -403,15 +468,31 @@
           product.visible
       );
 
-    const orderingOpen =
-      state.availability
-        ?.orderingOpen !== false;
-
     root.innerHTML = `
 
-      <header class="customer-top">
+      ${
+        store.announcement
+          ? `
+            <div
+              class="
+                customer-announcement-bar
+              "
+            >
+              ${esc(
+                store.announcement
+              )}
+            </div>
+          `
+          : ""
+      }
+
+
+      <header
+        class="customer-top"
+      >
 
         <div>
+
           <small>
             ${CONFIG.country}
           </small>
@@ -422,45 +503,77 @@
               "Demo Store"
             )}
           </strong>
+
         </div>
 
+
         <a
-          class="customer-cart-link"
+          class="
+            customer-cart-link
+          "
           href="${withMarket(
             "hbb-demo-cart.html"
           )}"
         >
           Cart
+
           <span>
-            ${cartCount(
-              cart
-            )}
+            ${cartCount(cart)}
           </span>
         </a>
 
       </header>
 
 
-      <main class="customer-main">
+      <main
+        class="customer-main"
+      >
 
-        <section class="customer-hero">
+        <section
+          id="customerHero"
+          class="customer-hero"
+        >
 
-          <small>
-            ORDER ONLINE
-          </small>
+          <div
+            class="
+              customer-hero-content
+            "
+          >
 
-          <h1>
-            ${esc(
-              store.name ||
-              "Demo Store"
-            )}
-          </h1>
+            <small>
+              ORDER ONLINE
+            </small>
 
-          <p>
-            ${esc(
-              store.tagline || ""
-            )}
-          </p>
+            <h1>
+              ${esc(
+                store.bannerHeading ||
+                store.name ||
+                "Demo Store"
+              )}
+            </h1>
+
+            <p>
+              ${esc(
+                store.bannerSubtitle ||
+                store.tagline ||
+                ""
+              )}
+            </p>
+
+            <a
+              class="
+                customer-primary
+                customer-hero-button
+              "
+              href="#customerProducts"
+            >
+              ${esc(
+                store.bannerButton ||
+                "Shop Now"
+              )}
+            </a>
+
+          </div>
 
         </section>
 
@@ -468,125 +581,155 @@
         ${
           !orderingOpen
             ? `
-              <div class="customer-alert">
-                Ordering is currently closed.
+              <div
+                class="
+                  customer-alert
+                "
+              >
+                Ordering is
+                currently closed.
               </div>
             `
             : ""
         }
 
 
-        <section class="customer-products">
+        <section
+          id="customerProducts"
+          class="customer-products"
+        >
 
-          ${products
-            .map(
-              product => `
-                <article
-                  class="customer-product"
-                >
-
-                  <div
-                    class="customer-product-image"
-                    data-product-image="${esc(
-                      product.id
-                    )}"
-                  >
-                    ${esc(
-                      product.name
-                        .slice(
-                          0,
-                          1
-                        )
-                    )}
-                  </div>
-
-
-                  <div
-                    class="customer-product-copy"
-                  >
-
-                    <small>
-                      ${esc(
-                        product.category ||
-                        ""
-                      )}
-                    </small>
-
-                    <h2>
-                      ${esc(
-                        product.name
-                      )}
-                    </h2>
-
-                    <p>
-                      ${
-                        Number(
-                          product.stock ||
-                          0
-                        )
-                      }
-                      available
-                    </p>
-
-
-                    <div
-                      class="customer-product-footer"
+          ${products.length
+            ? products
+                .map(
+                  product => `
+                    <article
+                      class="
+                        customer-product
+                      "
                     >
 
-                      <strong>
-                        ${money(
-                          product.price
-                        )}
-                      </strong>
-
-                      <button
-                        onclick="
-                          HBBCustomer.add(
-                            '${esc(
-                              product.id
-                            )}'
-                          )
+                      <div
+                        class="
+                          customer-product-image
                         "
-                        ${
-                          !orderingOpen ||
-                          Number(
-                            product.stock ||
-                            0
-                          ) <= 0
-                            ? "disabled"
-                            : ""
-                        }
+                        data-product-image="${esc(
+                          product.id
+                        )}"
                       >
-                        ${
-                          Number(
+                        ${esc(
+                          product.name
+                            .slice(
+                              0,
+                              1
+                            )
+                        )}
+                      </div>
+
+
+                      <div
+                        class="
+                          customer-product-copy
+                        "
+                      >
+
+                        <small>
+                          ${esc(
+                            product.category ||
+                            ""
+                          )}
+                        </small>
+
+                        <h2>
+                          ${esc(
+                            product.name
+                          )}
+                        </h2>
+
+                        <p>
+                          ${Number(
                             product.stock ||
                             0
-                          ) <= 0
-                            ? "Sold out"
-                            : "Add"
-                        }
-                      </button>
+                          )}
+                          available
+                        </p>
 
-                    </div>
 
-                  </div>
+                        <div
+                          class="
+                            customer-product-footer
+                          "
+                        >
 
-                </article>
-              `
-            )
-            .join("")}
+                          <strong>
+                            ${money(
+                              product.price
+                            )}
+                          </strong>
+
+                          <button
+                            type="button"
+                            onclick="
+                              HBBCustomer.add(
+                                '${esc(
+                                  product.id
+                                )}'
+                              )
+                            "
+                            ${
+                              !orderingOpen ||
+                              Number(
+                                product.stock ||
+                                0
+                              ) <= 0
+                                ? "disabled"
+                                : ""
+                            }
+                          >
+                            ${
+                              Number(
+                                product.stock ||
+                                0
+                              ) <= 0
+                                ? "Sold out"
+                                : "Add"
+                            }
+                          </button>
+
+                        </div>
+
+                      </div>
+
+                    </article>
+                  `
+                )
+                .join("")
+            : `
+              <div
+                class="
+                  customer-empty
+                "
+              >
+                <h2>
+                  No products
+                  available.
+                </h2>
+              </div>
+            `
+          }
 
         </section>
 
       </main>
     `;
 
-    loadImages();
+    loadProductImages();
+    loadHeroImage();
   }
 
 
   /* =========================================================
-     CART PAGE
+     CART
   ========================================================= */
 
   function renderCart() {
@@ -595,14 +738,18 @@
         "customerCart"
       );
 
-    if (!root) return;
+    if (!root) {
+      return;
+    }
 
     const cart =
       loadCart();
 
     root.innerHTML = `
 
-      <header class="customer-top">
+      <header
+        class="customer-top"
+      >
 
         <a
           class="customer-back"
@@ -622,14 +769,18 @@
       </header>
 
 
-      <main class="
-        customer-main
-        customer-narrow
-      ">
+      <main
+        class="
+          customer-main
+          customer-narrow
+        "
+      >
 
-        <section class="
-          customer-page-title
-        ">
+        <section
+          class="
+            customer-page-title
+          "
+        >
 
           <small>
             YOUR ORDER
@@ -640,9 +791,7 @@
           </h1>
 
           <p>
-            ${cartCount(
-              cart
-            )}
+            ${cartCount(cart)}
             item${
               cartCount(cart) === 1
                 ? ""
@@ -657,7 +806,9 @@
           cart.length
             ? `
               <section
-                class="customer-cart-list"
+                class="
+                  customer-cart-list
+                "
               >
 
                 ${cart
@@ -670,6 +821,7 @@
                       >
 
                         <div>
+
                           <h3>
                             ${esc(
                               item.name
@@ -684,6 +836,7 @@
                           </p>
 
                           <button
+                            type="button"
                             class="
                               customer-remove
                             "
@@ -698,6 +851,7 @@
                           >
                             Remove
                           </button>
+
                         </div>
 
 
@@ -721,6 +875,7 @@
                           >
 
                             <button
+                              type="button"
                               onclick="
                                 HBBCustomer
                                   .changeQty(
@@ -739,6 +894,7 @@
                             </span>
 
                             <button
+                              type="button"
                               onclick="
                                 HBBCustomer
                                   .changeQty(
@@ -771,6 +927,7 @@
               >
 
                 <div>
+
                   <span>
                     Subtotal
                   </span>
@@ -782,11 +939,13 @@
                       )
                     )}
                   </strong>
+
                 </div>
 
                 <small>
-                  Discounts will be applied
-                  during checkout.
+                  Discounts are
+                  applied during
+                  checkout.
                 </small>
 
                 <a
@@ -870,6 +1029,36 @@
       return 0;
     }
 
+    if (
+      subtotal <
+      Number(
+        promo.minimumSpend ||
+        0
+      )
+    ) {
+      return 0;
+    }
+
+    if (
+      promo.type ===
+      "percentage"
+    ) {
+      return (
+        subtotal *
+        Number(
+          promo.value || 0
+        )
+      ) / 100;
+    }
+
+    return Math.min(
+      subtotal,
+      Number(
+        promo.value || 0
+      )
+    );
+  }
+
   function checkoutTotals() {
     const state =
       loadState();
@@ -904,36 +1093,6 @@
       discount,
       total
     };
-  }    
-    
-    if (
-      subtotal <
-      Number(
-        promo.minimumSpend ||
-        0
-      )
-    ) {
-      return 0;
-    }
-
-    if (
-      promo.type ===
-      "percentage"
-    ) {
-      return (
-        subtotal *
-        Number(
-          promo.value || 0
-        )
-      ) / 100;
-    }
-
-    return Math.min(
-      subtotal,
-      Number(
-        promo.value || 0
-      )
-    );
   }
 
 
@@ -942,293 +1101,305 @@
   ========================================================= */
 
   function renderCheckout() {
-  const root =
-    document.getElementById(
-      "customerCheckout"
-    );
-
-  if (!root) return;
-
-  const state =
-    loadState();
-
-  const cart =
-    loadCart();
-
-  if (!cart.length) {
-    location.href =
-      withMarket(
-        "hbb-demo-cart.html"
+    const root =
+      document.getElementById(
+        "customerCheckout"
       );
 
-    return;
-  }
+    if (!root) {
+      return;
+    }
 
-  const slots =
-    (
-      state.availability
-        ?.slots || []
-    ).filter(
-      slot =>
-        slot.enabled
-    );
+    const state =
+      loadState();
 
-  const payments =
-    state.store
-      ?.paymentMethods || [];
+    const cart =
+      loadCart();
 
-  const totals =
-    checkoutTotals();
-
-  root.innerHTML = `
-
-    <header class="customer-top">
-
-      <a
-        class="customer-back"
-        href="${withMarket(
+    if (!cart.length) {
+      location.href =
+        withMarket(
           "hbb-demo-cart.html"
-        )}"
+        );
+
+      return;
+    }
+
+    const slots =
+      (
+        state.availability
+          ?.slots || []
+      ).filter(
+        slot =>
+          slot.enabled
+      );
+
+    const payments =
+      state.store
+        ?.paymentMethods || [];
+
+    const totals =
+      checkoutTotals();
+
+
+    root.innerHTML = `
+
+      <header
+        class="customer-top"
       >
-        ← Cart
-      </a>
 
-      <strong>
-        Checkout
-      </strong>
-
-      <span></span>
-
-    </header>
-
-    <main class="
-      customer-main
-      customer-checkout-layout
-    ">
-
-      <section>
-
-        <div class="
-          customer-page-title
-        ">
-
-          <small>
-            ALMOST THERE
-          </small>
-
-          <h1>
-            Checkout
-          </h1>
-
-        </div>
-
-        <form
-          id="checkoutForm"
-          class="
-            customer-checkout-form
-          "
-          onsubmit="
-            HBBCustomer.placeOrder(
-              event
-            )
-          "
+        <a
+          class="customer-back"
+          href="${withMarket(
+            "hbb-demo-cart.html"
+          )}"
         >
+          ← Cart
+        </a>
 
-          <!-- CUSTOMER -->
+        <strong>
+          Checkout
+        </strong>
 
-          <section
+        <span></span>
+
+      </header>
+
+
+      <main
+        class="
+          customer-main
+          customer-checkout-layout
+        "
+      >
+
+        <section>
+
+          <div
             class="
-              customer-form-section
+              customer-page-title
             "
           >
 
-            <h2>
-              Your details
-            </h2>
+            <small>
+              ALMOST THERE
+            </small>
 
-            <label>
-              Name *
+            <h1>
+              Checkout
+            </h1>
 
-              <input
-                name="name"
-                required
-                autocomplete="name"
-              >
-            </label>
+          </div>
 
-            <label>
-              Email *
 
-              <input
-                name="email"
-                type="email"
-                required
-                autocomplete="email"
-              >
-            </label>
-
-            <label>
-              Phone *
-
-              <input
-                name="phone"
-                required
-                autocomplete="tel"
-              >
-            </label>
-
-          </section>
-
-          <!-- COLLECTION -->
-
-          <section
+          <form
+            id="checkoutForm"
             class="
-              customer-form-section
+              customer-checkout-form
+            "
+            onsubmit="
+              HBBCustomer.placeOrder(
+                event
+              )
             "
           >
 
-            <h2>
-              Collection
-            </h2>
+            <!-- CUSTOMER DETAILS -->
 
-            ${
-              slots.length
-                ? `
-                  <div
-                    class="
-                      customer-choice-list
-                    "
-                  >
-
-                    ${slots
-                      .map(
-                        (
-                          slot,
-                          index
-                        ) => `
-
-                          <label
-                            class="
-                              customer-choice
-                            "
-                          >
-
-                            <input
-                              type="radio"
-                              name="collection"
-                              value="${esc(
-                                slot.id
-                              )}"
-                              ${
-                                index === 0
-                                  ? "required"
-                                  : ""
-                              }
-                            >
-
-                            <span
-                              class="
-                                customer-choice-dot
-                              "
-                            ></span>
-
-                            <span
-                              class="
-                                customer-choice-copy
-                              "
-                            >
-
-                              <strong>
-                                ${esc(
-                                  slot.label ||
-                                  "Collection"
-                                )}
-                              </strong>
-
-                              <small>
-                                ${
-                                  slot.date
-                                    ? `${esc(
-                                        slot.date
-                                      )} · `
-                                    : ""
-                                }
-
-                                ${esc(
-                                  slot.time ||
-                                  ""
-                                )}
-                              </small>
-
-                            </span>
-
-                          </label>
-
-                        `
-                      )
-                      .join("")}
-
-                  </div>
-                `
-                : `
-                  <div
-                    class="
-                      customer-alert
-                    "
-                  >
-                    No collection slots
-                    are available.
-                  </div>
-                `
-            }
-
-          </section>
-
-              <!-- PROMO -->
-
-          <section
-            class="
-              customer-form-section
-            "
-          >
-
-            <h2>
-              Promo
-            </h2>
-
-            <div
+            <section
               class="
-                customer-promo-row
+                customer-form-section
               "
             >
 
-              <input
-                id="promoInput"
-                name="promo"
-                value="${esc(
-                  appliedPromoCode
-                )}"
-                placeholder="FIRSTDROP"
-              >
+              <h2>
+                Your details
+              </h2>
 
-              <button
-                type="button"
-                class="
-                  customer-secondary
-                "
-                onclick="
-                  HBBCustomer
-                    .previewPromo()
-                "
-              >
-                Apply
-              </button>
+              <label>
+                Name *
 
-            </div>
+                <input
+                  name="name"
+                  required
+                  autocomplete="name"
+                >
+              </label>
 
-            <div
-              id="promoMessage"
+              <label>
+                Email *
+
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  autocomplete="email"
+                >
+              </label>
+
+              <label>
+                Phone *
+
+                <input
+                  name="phone"
+                  required
+                  autocomplete="tel"
+                >
+              </label>
+
+            </section>
+
+
+            <!-- COLLECTION -->
+
+            <section
+              class="
+                customer-form-section
+              "
             >
+
+              <h2>
+                Collection
+              </h2>
+
+              ${
+                slots.length
+                  ? `
+                    <div
+                      class="
+                        customer-choice-list
+                      "
+                    >
+
+                      ${slots
+                        .map(
+                          (
+                            slot,
+                            index
+                          ) => `
+                            <label
+                              class="
+                                customer-choice
+                              "
+                            >
+
+                              <input
+                                type="radio"
+                                name="collection"
+                                value="${esc(
+                                  slot.id
+                                )}"
+                                ${
+                                  index === 0
+                                    ? "required"
+                                    : ""
+                                }
+                              >
+
+                              <span
+                                class="
+                                  customer-choice-dot
+                                "
+                              ></span>
+
+                              <span
+                                class="
+                                  customer-choice-copy
+                                "
+                              >
+
+                                <strong>
+                                  ${esc(
+                                    slot.label ||
+                                    "Collection"
+                                  )}
+                                </strong>
+
+                                <small>
+
+                                  ${
+                                    slot.date
+                                      ? `
+                                        ${esc(
+                                          slot.date
+                                        )}
+                                        ·
+                                      `
+                                      : ""
+                                  }
+
+                                  ${esc(
+                                    slot.time ||
+                                    ""
+                                  )}
+
+                                </small>
+
+                              </span>
+
+                            </label>
+                          `
+                        )
+                        .join("")}
+
+                    </div>
+                  `
+                  : `
+                    <div
+                      class="
+                        customer-alert
+                      "
+                    >
+                      No collection
+                      slots available.
+                    </div>
+                  `
+              }
+
+            </section>
+
+
+            <!-- PROMO -->
+
+            <section
+              class="
+                customer-form-section
+              "
+            >
+
+              <h2>
+                Promo
+              </h2>
+
+              <div
+                class="
+                  customer-promo-row
+                "
+              >
+
+                <input
+                  id="promoInput"
+                  value="${esc(
+                    appliedPromoCode
+                  )}"
+                  placeholder="FIRSTDROP"
+                >
+
+                <button
+                  type="button"
+                  class="
+                    customer-secondary
+                  "
+                  onclick="
+                    HBBCustomer
+                      .previewPromo()
+                  "
+                >
+                  Apply
+                </button>
+
+              </div>
+
 
               ${
                 totals.promo &&
@@ -1255,279 +1426,10 @@
                   : ""
               }
 
-            </div>
-
-          </section>
-
-          <!-- PAYMENT -->
-
-          <section
-            class="
-              customer-form-section
-            "
-          >
-
-            <h2>
-              Payment
-            </h2>
-
-            <div
-              class="
-                customer-choice-list
-              "
-            >
-
-              ${payments
-                .map(
-                  (
-                    method,
-                    index
-                  ) => `
-
-                    <label
-                      class="
-                        customer-choice
-                      "
-                    >
-
-                      <input
-                        type="radio"
-                        name="payment"
-                        value="${esc(
-                          method
-                        )}"
-                        ${
-                          index === 0
-                            ? "required"
-                            : ""
-                        }
-                      >
-
-                      <span
-                        class="
-                          customer-choice-dot
-                        "
-                      ></span>
-
-                      <span
-                        class="
-                          customer-choice-copy
-                        "
-                      >
-
-                        <strong>
-                          ${esc(
-                            method
-                          )}
-                        </strong>
-
-                      </span>
-
-                    </label>
-
-                  `
-                )
-                .join("")}
-
-            </div>
-
-            <p
-              class="
-                customer-muted
-              "
-            >
-              Demo checkout only.
-              No real payment will
-              be collected.
-            </p>
-
-          </section>
-
-          <!-- NOTE -->
-
-          <section
-            class="
-              customer-form-section
-            "
-          >
-
-            <h2>
-              Order note
-            </h2>
-
-            <textarea
-              name="note"
-              rows="3"
-              placeholder="Any special request?"
-            ></textarea>
-
-          </section>
-
-          <button
-            id="placeOrderButton"
-            type="submit"
-            class="
-              customer-primary
-              customer-place-order
-            "
-            ${
-              checkoutSubmitting
-                ? "disabled"
-                : ""
-            }
-          >
-            ${
-              checkoutSubmitting
-                ? "Placing order..."
-                : `Place order · ${money(
-                    totals.total
-                  )}`
-            }
-          </button>
-
-        </form>
-
-      </section>
-
-      <!-- ORDER SUMMARY -->
-
-      <aside
-        class="
-          customer-order-summary
-        "
-      >
-
-        <h2>
-          Order summary
-        </h2>
-
-        ${cart
-          .map(
-            item => `
-              <div
-                class="
-                  customer-summary-item
-                "
-              >
-
-                <span>
-                  ${item.qty}
-                  ×
-                  ${esc(
-                    item.name
-                  )}
-                </span>
-
-                <strong>
-                  ${money(
-                    item.price *
-                    item.qty
-                  )}
-                </strong>
-
-              </div>
-            `
-          )
-          .join("")}
-                customer-form-section
-              "
-            >
-
-              <h2>
-                Collection
-              </h2>
-
-              <label>
-                Collection slot *
-
-                <select
-                  name="collection"
-                  required
-                >
-
-                  <option value="">
-                    Select a slot
-                  </option>
-
-                  ${slots
-                    .map(
-                      slot => `
-                        <option
-                          value="${esc(
-                            slot.id
-                          )}"
-                        >
-                          ${
-                            slot.date
-                              ? esc(
-                                  slot.date
-                                ) +
-                                " · "
-                              : ""
-                          }
-
-                          ${esc(
-                            slot.label ||
-                            ""
-                          )}
-
-                          ·
-
-                          ${esc(
-                            slot.time ||
-                            ""
-                          )}
-                        </option>
-                      `
-                    )
-                    .join("")}
-
-                </select>
-
-              </label>
-
             </section>
 
 
-            <section
-              class="
-                customer-form-section
-              "
-            >
-
-              <h2>
-                Promo
-              </h2>
-
-              <label>
-                Promo code
-
-                <input
-                  id="promoInput"
-                  name="promo"
-                  placeholder="FIRSTDROP"
-                >
-              </label>
-
-              <button
-                type="button"
-                class="
-                  customer-secondary
-                "
-                onclick="
-                  HBBCustomer
-                    .previewPromo()
-                "
-              >
-                Apply promo
-              </button>
-
-              <div
-                id="promoMessage"
-              ></div>
-
-            </section>
-
+            <!-- PAYMENT -->
 
             <section
               class="
@@ -1539,109 +1441,266 @@
                 Payment
               </h2>
 
-              <label>
-                Payment method *
+              ${
+                payments.length
+                  ? `
+                    <div
+                      class="
+                        customer-choice-list
+                      "
+                    >
 
-                <select
-                  name="payment"
-                  required
-                >
+                      ${payments
+                        .map(
+                          (
+                            method,
+                            index
+                          ) => `
+                            <label
+                              class="
+                                customer-choice
+                              "
+                            >
 
-                  <option value="">
-                    Select payment
-                  </option>
+                              <input
+                                type="radio"
+                                name="payment"
+                                value="${esc(
+                                  method
+                                )}"
+                                ${
+                                  index === 0
+                                    ? "required"
+                                    : ""
+                                }
+                              >
 
-                  ${payments
-                    .map(
-                      method => `
-                        <option
-                          value="${esc(
-                            method
-                          )}"
-                        >
-                          ${esc(
-                            method
-                          )}
-                        </option>
-                      `
-                    )
-                    .join("")}
+                              <span
+                                class="
+                                  customer-choice-dot
+                                "
+                              ></span>
 
-                      <div
-          class="
-            customer-summary-line
-          "
-        >
+                              <span
+                                class="
+                                  customer-choice-copy
+                                "
+                              >
 
-          <span>
-            Subtotal
-          </span>
+                                <strong>
+                                  ${esc(
+                                    method
+                                  )}
+                                </strong>
 
-          <strong>
-            ${money(
-              totals.subtotal
-            )}
-          </strong>
+                              </span>
 
-        </div>
+                            </label>
+                          `
+                        )
+                        .join("")}
 
-        ${
-          totals.discount > 0
-            ? `
-              <div
+                    </div>
+                  `
+                  : `
+                    <div
+                      class="
+                        customer-alert
+                      "
+                    >
+                      No payment
+                      method available.
+                    </div>
+                  `
+              }
+
+              <p
                 class="
-                  customer-summary-line
-                  discount
+                  customer-muted
                 "
               >
+                Demo checkout only.
+                No real payment
+                will be collected.
+              </p>
 
-                <span>
-                  ${
-                    totals.promo
-                      ? esc(
-                          totals.promo.code
-                        )
-                      : "Discount"
-                  }
-                </span>
+            </section>
 
-                <strong>
-                  −${money(
-                    totals.discount
-                  )}
-                </strong>
 
-              </div>
-            `
-            : ""
-        }
+            <!-- NOTE -->
 
-        <div
+            <section
+              class="
+                customer-form-section
+              "
+            >
+
+              <h2>
+                Order note
+              </h2>
+
+              <textarea
+                name="note"
+                rows="3"
+                placeholder="Any special request?"
+              ></textarea>
+
+            </section>
+
+
+            <button
+              id="placeOrderButton"
+              type="submit"
+              class="
+                customer-primary
+                customer-place-order
+              "
+              ${
+                checkoutSubmitting
+                  ? "disabled"
+                  : ""
+              }
+            >
+              ${
+                checkoutSubmitting
+                  ? "Placing order..."
+                  : `
+                    Place order ·
+                    ${money(
+                      totals.total
+                    )}
+                  `
+              }
+            </button>
+
+          </form>
+
+        </section>
+
+
+        <!-- SUMMARY -->
+
+        <aside
           class="
-            customer-summary-total
+            customer-order-summary
           "
         >
 
-          <span>
-            Total
-          </span>
+          <h2>
+            Order summary
+          </h2>
 
-          <strong>
-            ${money(
-              totals.total
-            )}
-          </strong>
+          ${cart
+            .map(
+              item => `
+                <div
+                  class="
+                    customer-summary-item
+                  "
+                >
 
-        </div>
+                  <span>
+                    ${item.qty}
+                    ×
+                    ${esc(
+                      item.name
+                    )}
+                  </span>
 
-      </aside>
+                  <strong>
+                    ${money(
+                      item.price *
+                      item.qty
+                    )}
+                  </strong>
 
-    </main>
+                </div>
+              `
+            )
+            .join("")}
 
-  `;
-}
 
-    function previewPromo() {
+          <div
+            class="
+              customer-summary-line
+            "
+          >
+
+            <span>
+              Subtotal
+            </span>
+
+            <strong>
+              ${money(
+                totals.subtotal
+              )}
+            </strong>
+
+          </div>
+
+
+          ${
+            totals.discount > 0
+              ? `
+                <div
+                  class="
+                    customer-summary-line
+                    discount
+                  "
+                >
+
+                  <span>
+                    ${
+                      totals.promo
+                        ? esc(
+                            totals.promo.code
+                          )
+                        : "Discount"
+                    }
+                  </span>
+
+                  <strong>
+                    −${money(
+                      totals.discount
+                    )}
+                  </strong>
+
+                </div>
+              `
+              : ""
+          }
+
+
+          <div
+            class="
+              customer-summary-total
+            "
+          >
+
+            <span>
+              Total
+            </span>
+
+            <strong>
+              ${money(
+                totals.total
+              )}
+            </strong>
+
+          </div>
+
+        </aside>
+
+      </main>
+    `;
+  }
+
+
+  /* =========================================================
+     APPLY PROMO
+  ========================================================= */
+
+  function previewPromo() {
     const state =
       loadState();
 
@@ -1679,34 +1738,32 @@
       );
 
     if (!promo) {
-      appliedPromoCode = "";
-
       alert(
         "Promo code not found."
       );
+
+      appliedPromoCode = "";
 
       renderCheckout();
 
       return;
     }
 
-    const subtotal =
-      cartSubtotal(cart);
-
     const discount =
       discountAmount(
         promo,
-        subtotal
+        cartSubtotal(cart)
       );
 
     if (discount <= 0) {
-      appliedPromoCode = "";
-
       alert(
         `Minimum spend is ${money(
-          promo.minimumSpend || 0
+          promo.minimumSpend ||
+          0
         )}.`
       );
+
+      appliedPromoCode = "";
 
       renderCheckout();
 
@@ -1725,24 +1782,11 @@
   ========================================================= */
 
   function placeOrder(event) {
-  event.preventDefault();
+    event.preventDefault();
 
-  if (checkoutSubmitting) {
-    return;
-  }
-
-  checkoutSubmitting = true;
-
-  const button =
-    document.getElementById(
-      "placeOrderButton"
-    );
-
-  if (button) {
-    button.disabled = true;
-    button.textContent =
-      "Placing order...";
-  }
+    if (checkoutSubmitting) {
+      return;
+    }
 
     const state =
       loadState();
@@ -1791,9 +1835,6 @@
         ) || ""
       );
 
-    const promoCode =
-  appliedPromoCode;
-
     const note =
       String(
         data.get("note") ||
@@ -1814,13 +1855,69 @@
       return;
     }
 
+    checkoutSubmitting = true;
+
+    const button =
+      document.getElementById(
+        "placeOrderButton"
+      );
+
+    if (button) {
+      button.disabled = true;
+
+      button.textContent =
+        "Placing order...";
+    }
+
+
+    /* CHECK STOCK AGAIN */
+
+    for (
+      const cartItem of cart
+    ) {
+      const product =
+        (
+          state.products || []
+        ).find(
+          item =>
+            item.id ===
+            cartItem.productId
+        );
+
+      if (
+        !product ||
+        Number(
+          product.stock || 0
+        ) <
+        Number(
+          cartItem.qty || 0
+        )
+      ) {
+        checkoutSubmitting = false;
+
+        alert(
+          `${cartItem.name} no longer has enough stock. Please return to your cart.`
+        );
+
+        if (button) {
+          button.disabled = false;
+
+          button.textContent =
+            "Place order";
+        }
+
+        return;
+      }
+    }
+
+
     const subtotal =
       cartSubtotal(cart);
 
     const promo =
       promoFromCode(
         state,
-        promoCode
+        appliedPromoCode
       );
 
     const discount =
@@ -1855,9 +1952,14 @@
     const order = {
       id: orderId,
 
-      customerName: name,
-      customerEmail: email,
-      customerPhone: phone,
+      customerName:
+        name,
+
+      customerEmail:
+        email,
+
+      customerPhone:
+        phone,
 
       email,
       phone,
@@ -1908,6 +2010,7 @@
           .toISOString()
     };
 
+
     if (
       !Array.isArray(
         state.orders
@@ -1921,7 +2024,7 @@
     );
 
 
-    /* reduce stock */
+    /* REDUCE STOCK */
 
     cart.forEach(
       cartItem => {
@@ -1954,6 +2057,8 @@
     );
 
 
+    /* ACTIVITY */
+
     if (
       !Array.isArray(
         state.activity
@@ -1973,6 +2078,7 @@
 
 
     saveState(state);
+
 
     sessionStorage.setItem(
       "slow-studio-last-order",
@@ -1998,7 +2104,9 @@
         "customerSuccess"
       );
 
-    if (!root) return;
+    if (!root) {
+      return;
+    }
 
     let order = null;
 
@@ -2013,17 +2121,20 @@
 
     if (!order) {
       root.innerHTML = `
+
         <main
           class="
             customer-main
             customer-narrow
           "
         >
+
           <section
             class="
               customer-empty
             "
           >
+
             <h1>
               No recent order.
             </h1>
@@ -2038,7 +2149,9 @@
             >
               Back to shop
             </a>
+
           </section>
+
         </main>
       `;
 
@@ -2047,9 +2160,11 @@
 
     root.innerHTML = `
 
-      <main class="
-        customer-success-page
-      ">
+      <main
+        class="
+          customer-success-page
+        "
+      >
 
         <section
           class="
@@ -2107,6 +2222,7 @@
           >
 
             <div>
+
               <span>
                 Total
               </span>
@@ -2116,9 +2232,12 @@
                   order.total
                 )}
               </strong>
+
             </div>
 
+
             <div>
+
               <span>
                 Collection
               </span>
@@ -2129,9 +2248,12 @@
                   "Selected collection slot"
                 )}
               </strong>
+
             </div>
 
+
             <div>
+
               <span>
                 Payment
               </span>
@@ -2141,6 +2263,7 @@
                   order.paymentMethod
                 )}
               </strong>
+
             </div>
 
           </div>
@@ -2151,8 +2274,11 @@
               customer-muted
             "
           >
-            This is a demo order.
-            No real payment has been made.
+            Your order is waiting
+            for confirmation.
+
+            This demo does not
+            collect real payment.
           </p>
 
 
@@ -2175,7 +2301,7 @@
 
 
   /* =========================================================
-     START
+     PUBLIC
   ========================================================= */
 
   window.HBBCustomer = {
@@ -2185,6 +2311,11 @@
     previewPromo,
     placeOrder
   };
+
+
+  /* =========================================================
+     START
+  ========================================================= */
 
   renderStore();
   renderCart();
