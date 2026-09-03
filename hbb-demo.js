@@ -868,11 +868,13 @@ async function compressProductImage(
 
   let panel = "overview";
 
+  let workspaceOverviewOpen = false;
+
   let productDraft = null;
 
 let pendingProductImage = null;
 
-let pendingProductImageUrl = "";
+let pendingProductImageUrl = null";
 
 const productImageUrlCache =
   new Map();
