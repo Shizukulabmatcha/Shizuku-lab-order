@@ -10,6 +10,23 @@
 <body>
   <div id="demoApp"></div>
   <script src="hbb-demo.js?v=2"></script>
+  <script src="hbb-demo.js?v=2"></script>
+
+<script src="hbb-demo-product-images.js?v=1"></script>
+<script src="hbb-demo-orders.js?v=1"></script>
+<script src="hbb-demo-dashboard.js?v=1"></script>
+<script src="hbb-demo-costing.js?v=1"></script>
+<script src="hbb-demo-customers.js?v=1"></script>
+<script src="hbb-demo-email.js?v=1"></script>
+
+<script>
+  if (new URLSearchParams(location.search).get("market") === "MY") {
+    document.title = "Malaysia HBB · Slow Studio Demo";
+    document.querySelectorAll('a[href="hbb-demo-store.html"]').forEach((link) => {
+      link.href = "hbb-demo-store.html?market=MY";
+    });
+  }
+
   <script>
     if (new URLSearchParams(location.search).get("market") === "MY") {
       document.title = "Malaysia HBB · Slow Studio Demo";
