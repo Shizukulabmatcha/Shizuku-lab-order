@@ -430,6 +430,318 @@
 
 
   /* =========================================================
+   PRODUCT IMAGE STORAGE
+   IndexedDB · browser only
+========================================================= */
+
+const IMAGE_DB_NAME =
+  `slow-studio-demo-images-${DEMO_MARKET.toLowerCase()}`;
+
+const IMAGE_DB_VERSION = 1;
+
+const IMAGE_STORE_NAME = "productImages";
+
+let imageDbPromise = null;
+
+
+/* -------------------------
+   OPEN IMAGE DATABASE
+------------------------- */
+
+function openImageDB() {
+  if (imageDbPromise) {
+    return imageDbPromise;
+  }
+
+  imageDbPromise = new Promise((resolve, reject) => {
+    const request =
+      indexedDB.open(
+        IMAGE_DB_NAME,
+        IMAGE_DB_VERSION
+      );
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+
+      if (
+        !db.objectStoreNames.contains(
+          IMAGE_STORE_NAME
+        )
+      ) {
+        db.createObjectStore(
+          IMAGE_STORE_NAME
+        );
+      }
+    };
+
+    request.onsuccess = () => {
+      resolve(request.result);
+    };
+
+    request.onerror = () => {
+      reject(request.error);
+    };
+  });
+
+  return imageDbPromise;
+}
+
+
+/* -------------------------
+   SAVE PRODUCT IMAGE
+------------------------- */
+
+async function saveProductImage(
+  productId,
+  blob
+) {
+  if (!productId || !blob) {
+    return;
+  }
+
+  const db =
+    await openImageDB();
+
+  return new Promise(
+    (resolve, reject) => {
+      const transaction =
+        db.transaction(
+          IMAGE_STORE_NAME,
+          "readwrite"
+        );
+
+      const store =
+        transaction.objectStore(
+          IMAGE_STORE_NAME
+        );
+
+      store.put(
+        blob,
+        productId
+      );
+
+      transaction.oncomplete =
+        () => resolve();
+
+      transaction.onerror =
+        () =>
+          reject(
+            transaction.error
+          );
+    }
+  );
+}
+
+
+/* -------------------------
+   GET PRODUCT IMAGE
+------------------------- */
+
+async function getProductImage(
+  productId
+) {
+  if (!productId) {
+    return null;
+  }
+
+  const db =
+    await openImageDB();
+
+  return new Promise(
+    (resolve, reject) => {
+      const transaction =
+        db.transaction(
+          IMAGE_STORE_NAME,
+          "readonly"
+        );
+
+      const store =
+        transaction.objectStore(
+          IMAGE_STORE_NAME
+        );
+
+      const request =
+        store.get(productId);
+
+      request.onsuccess =
+        () =>
+          resolve(
+            request.result ||
+            null
+          );
+
+      request.onerror =
+        () =>
+          reject(
+            request.error
+          );
+    }
+  );
+}
+
+
+/* -------------------------
+   DELETE PRODUCT IMAGE
+------------------------- */
+
+async function deleteProductImage(
+  productId
+) {
+  if (!productId) {
+    return;
+  }
+
+  const db =
+    await openImageDB();
+
+  return new Promise(
+    (resolve, reject) => {
+      const transaction =
+        db.transaction(
+          IMAGE_STORE_NAME,
+          "readwrite"
+        );
+
+      transaction
+        .objectStore(
+          IMAGE_STORE_NAME
+        )
+        .delete(productId);
+
+      transaction.oncomplete =
+        () => resolve();
+
+      transaction.onerror =
+        () =>
+          reject(
+            transaction.error
+          );
+    }
+  );
+}
+
+
+/* -------------------------
+   CLEAR ALL PRODUCT IMAGES
+   FOR CURRENT MARKET
+------------------------- */
+
+async function clearProductImages() {
+  const db =
+    await openImageDB();
+
+  return new Promise(
+    (resolve, reject) => {
+      const transaction =
+        db.transaction(
+          IMAGE_STORE_NAME,
+          "readwrite"
+        );
+
+      transaction
+        .objectStore(
+          IMAGE_STORE_NAME
+        )
+        .clear();
+
+      transaction.oncomplete =
+        () => resolve();
+
+      transaction.onerror =
+        () =>
+          reject(
+            transaction.error
+          );
+    }
+  );
+}
+
+
+/* =========================================================
+   IMAGE COMPRESSION
+
+   Mobile camera photos can be huge.
+   Resize before storing them in IndexedDB.
+========================================================= */
+
+async function compressProductImage(
+  file
+) {
+  const MAX_SIZE = 1400;
+  const QUALITY = 0.82;
+
+  const image =
+    await createImageBitmap(file);
+
+  let width =
+    image.width;
+
+  let height =
+    image.height;
+
+  if (
+    width > MAX_SIZE ||
+    height > MAX_SIZE
+  ) {
+    const scale =
+      Math.min(
+        MAX_SIZE / width,
+        MAX_SIZE / height
+      );
+
+    width =
+      Math.round(
+        width * scale
+      );
+
+    height =
+      Math.round(
+        height * scale
+      );
+  }
+
+  const canvas =
+    document.createElement(
+      "canvas"
+    );
+
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx =
+    canvas.getContext("2d");
+
+  ctx.drawImage(
+    image,
+    0,
+    0,
+    width,
+    height
+  );
+
+  image.close?.();
+
+  const blob =
+    await new Promise(
+      (resolve) => {
+        canvas.toBlob(
+          resolve,
+          "image/jpeg",
+          QUALITY
+        );
+      }
+    );
+
+  if (!blob) {
+    throw new Error(
+      "Could not prepare image."
+    );
+  }
+
+  return blob;
+}
+
+  /* =========================================================
      5. LOAD + OLD DEMO MIGRATION
   ========================================================= */
 
