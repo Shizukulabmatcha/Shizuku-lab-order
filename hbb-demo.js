@@ -3247,6 +3247,20 @@ const pageTitles = {
             "
           >
 
+ ${
+    window.HBBDemoDashboard
+      ? window.HBBDemoDashboard.panelHtml()
+      : `
+        <section class="demo-card">
+          <p>
+            Dashboard is loading...
+          </p>
+        </section>
+      `
+  }
+
+</section>
+
             <div class="demo-kpis">
 
               <div class="demo-kpi">
