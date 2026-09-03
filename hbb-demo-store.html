@@ -8,13 +8,21 @@
   <link rel="stylesheet" href="hbb-demo.css?v=1">
 </head>
 <body class="demo-store-body">
+
   <div id="demoStore"></div>
+
   <script src="hbb-demo.js?v=2"></script>
+  <script src="hbb-demo-store.js?v=1"></script>
+
   <script>
     if (new URLSearchParams(location.search).get("market") === "MY") {
       document.title = "Malaysia HBB · Demo shop";
-      document.querySelectorAll('a[href="hbb-demo.html"]').forEach((link) => link.href = "hbb-demo.html?market=MY");
+      document
+        .querySelectorAll('a[href="hbb-demo.html"]')
+        .forEach(link => {
+          link.href = "hbb-demo.html?market=MY";
+        });
     }
   </script>
+
 </body>
-</html>
