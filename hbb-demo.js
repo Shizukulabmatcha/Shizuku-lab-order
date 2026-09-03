@@ -866,6 +866,13 @@ async function compressProductImage(
 
   let productDraft = null;
 
+let pendingProductImage = null;
+
+let pendingProductImageUrl = "";
+
+const productImageUrlCache =
+  new Map();
+  
 
   function save() {
     localStorage.setItem(
@@ -1039,6 +1046,134 @@ async function compressProductImage(
       value;
   }
 
+  /* =========================================================
+   PRODUCT IMAGE UPLOAD
+========================================================= */
+
+async function uploadProductImage(
+  input
+) {
+  const file =
+    input?.files?.[0];
+
+  if (!file) {
+    return;
+  }
+
+
+  if (
+    !file.type.startsWith(
+      "image/"
+    )
+  ) {
+    input.value = "";
+
+    return alert(
+      "Please choose an image file."
+    );
+  }
+
+
+  /*
+   12MB limit before compression
+  */
+
+  if (
+    file.size >
+    12 * 1024 * 1024
+  ) {
+    input.value = "";
+
+    return alert(
+      "This photo is too large. Please choose an image smaller than 12MB."
+    );
+  }
+
+
+  try {
+    const blob =
+      await compressProductImage(
+        file
+      );
+
+
+    pendingProductImage =
+      blob;
+
+
+    /*
+     Clear previous preview URL
+    */
+
+    if (
+      pendingProductImageUrl
+    ) {
+      URL.revokeObjectURL(
+        pendingProductImageUrl
+      );
+    }
+
+
+    pendingProductImageUrl =
+      URL.createObjectURL(
+        blob
+      );
+
+
+    /*
+     Part 1B will contain this preview element.
+    */
+
+    const preview =
+      document.getElementById(
+        "productImagePreview"
+      );
+
+
+    if (preview) {
+      preview.src =
+        pendingProductImageUrl;
+
+      preview.hidden =
+        false;
+    }
+
+
+    const empty =
+      document.getElementById(
+        "productImageEmpty"
+      );
+
+
+    if (empty) {
+      empty.hidden =
+        true;
+    }
+
+
+    const removeButton =
+      document.getElementById(
+        "removeProductImageButton"
+      );
+
+
+    if (removeButton) {
+      removeButton.hidden =
+        false;
+    }
+
+  } catch (error) {
+    console.error(
+      "Product image error:",
+      error
+    );
+
+
+    alert(
+      "Could not prepare this photo. Please try another image."
+    );
+  }
+}
 
   function saveProduct() {
     if (
