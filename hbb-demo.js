@@ -5869,13 +5869,6 @@ const pageTitles = {
               next opening.
             </p>
 
-            <a
-              class="demo-btn"
-              href="${adminHref}"
-            >
-              Return to demo admin
-            </a>
-
           </article>
 
         </main>
