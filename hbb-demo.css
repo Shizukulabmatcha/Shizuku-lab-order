@@ -79,3 +79,66 @@
     }
 
 }
+/* ==========================================
+   Orders
+========================================== */
+
+.demo-order-status{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:5px 10px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:700;
+    white-space:nowrap;
+}
+
+.demo-order-status.waiting{
+    background:#FFF4D7;
+    color:#8B6A16;
+}
+
+.demo-order-status.confirmed{
+    background:#EAF2FF;
+    color:#3B63B5;
+}
+
+.demo-order-status.ready{
+    background:#E8F7EB;
+    color:#2E7D4A;
+}
+
+.demo-order-status.completed{
+    background:#ECECEC;
+    color:#555;
+}
+
+.demo-order-status.cancelled{
+    background:#FFE8E8;
+    color:#B63D3D;
+}
+
+.demo-order-select{
+    width:100%;
+    min-width:170px;
+    padding:9px 12px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+    color:var(--ink);
+}
+
+.demo-order-id{
+    font-weight:700;
+}
+
+.demo-order-email{
+    color:var(--muted);
+    font-size:12px;
+}
+
+.demo-order-total{
+    font-weight:700;
+    color:var(--brand-dark);
+}
