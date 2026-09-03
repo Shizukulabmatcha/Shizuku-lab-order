@@ -317,14 +317,30 @@
           <tr>
 
             <td>
-              <div>
-                <b>${order.id}</b>
-                <br>
-                <small>
-                  ${new Date(order.createdAt).toLocaleString()}
-                </small>
-              </div>
-            </td>
+
+            <label
+            class="demo-order-check"
+            >
+
+            <input
+            type="checkbox"
+            >
+
+<div>
+
+            <b>${order.id}</b>
+            <br>
+            <small>
+
+${new Date(order.createdAt).toLocaleString()}
+
+</small>
+
+</div>
+
+</label>
+
+</td>
 
             <td>
               <b>${order.customerName}</b>
@@ -447,7 +463,43 @@
 
         </div>
 
-        <div class="demo-table-wrap">
+<div class="demo-bulk-actions">
+
+  <span>
+    0 Selected
+  </span>
+
+  <button class="demo-btn">
+    WhatsApp Customer
+  </button>
+
+  <button class="demo-btn">
+    Email Customer
+  </button>
+
+</div>
+
+        <div class="demo-bulk-actions">
+
+  <span>
+    0 Selected
+  </span>
+
+  <button
+    class="demo-btn"
+  >
+    WhatsApp Customer
+  </button>
+
+  <button
+    class="demo-btn"
+  >
+    Email Customer
+  </button>
+
+</div>
+
+          <div class="demo-table-wrap">
 
           <table class="demo-table">
 
@@ -473,6 +525,97 @@
         </div>
 
       </section>
+
+<dialog
+id="communicationDialog"
+>
+
+<div class="demo-dialog">
+
+<h2>
+
+Customer Communication
+
+</h2>
+
+<label>
+
+Template
+
+<select>
+
+<option>
+
+Order Ready
+
+</option>
+
+<option>
+
+Order Confirmed
+
+</option>
+
+<option>
+
+Collection Reminder
+
+</option>
+
+</select>
+
+</label>
+
+<label>
+
+Preview
+
+<textarea
+rows="8"
+readonly
+>
+
+Hi {{customer_name}}
+
+Your order is ready.
+
+Collection:
+
+{{collection_date}}
+
+{{collection_time}}
+
+</textarea>
+
+</label>
+
+<div class="demo-actions">
+
+<button
+class="demo-btn"
+onclick="
+this.closest('dialog').close()
+"
+>
+
+Cancel
+
+</button>
+
+<button
+class="demo-btn primary"
+>
+
+Open WhatsApp
+
+</button>
+
+</div>
+
+</div>
+
+</dialog>
+
     `;
   }
 
