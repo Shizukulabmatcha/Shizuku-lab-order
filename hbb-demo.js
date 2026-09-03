@@ -3461,6 +3461,33 @@ const pageTitles = {
 
 
           <!-- ==========================================
+               ORDERS
+          =========================================== -->
+
+          <section
+            class="
+              demo-panel
+              ${
+                panel === "orders"
+                  ? "active"
+                  : ""
+              }
+            "
+          >
+            ${
+              window.HBBDemoOrders
+                ? window.HBBDemoOrders.panelHtml()
+                : `
+                  <section class="demo-card">
+                    <p>Orders module is loading...</p>
+                  </section>
+                `
+            }
+          </section>
+
+
+
+          <!-- ==========================================
                PRODUCTS
           =========================================== -->
 
