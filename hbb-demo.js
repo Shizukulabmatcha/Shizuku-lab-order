@@ -5595,6 +5595,58 @@ async function uploadProductImage(
      22. PUBLIC FUNCTIONS
   ========================================================= */
 
+ /* =========================================================
+   DEMO MODULE BRIDGE
+   Shared by SG + MY external modules
+========================================================= */
+
+window.HBBDemoContext = {
+  get market() {
+    return DEMO_MARKET;
+  },
+
+  get marketConfig() {
+    return MARKET;
+  },
+
+  get state() {
+    return state;
+  },
+
+  save() {
+    save();
+  },
+
+  money(value) {
+    return money(value);
+  },
+
+  uid(prefix) {
+    return uid(prefix);
+  },
+
+  activity(text) {
+    activity(text);
+  },
+
+  refresh() {
+    renderAdmin();
+    renderStore();
+  },
+
+  refreshAdmin() {
+    renderAdmin();
+  },
+
+  refreshStore() {
+    renderStore();
+  },
+
+  get storageKey() {
+    return KEY;
+  }
+}; 
+  
   window.HBBDemo = {
     setPanel,
 
