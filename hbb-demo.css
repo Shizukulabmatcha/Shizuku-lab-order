@@ -1025,3 +1025,116 @@
   margin-top: 4px;
   padding-left: 28px;
 }
+
+/* ==========================================
+   AVAILABILITY CALENDAR
+========================================== */
+
+.demo-calendar{
+  margin-top:20px;
+}
+
+.demo-calendar-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:20px;
+}
+
+.demo-calendar-header strong{
+  font-size:18px;
+}
+
+.demo-calendar-week,
+.demo-calendar-grid{
+  display:grid;
+  grid-template-columns:repeat(7,1fr);
+  gap:8px;
+}
+
+.demo-calendar-week{
+  margin-bottom:8px;
+}
+
+.demo-calendar-week span{
+  text-align:center;
+  font-size:12px;
+  font-weight:600;
+  opacity:.55;
+}
+
+.demo-calendar-day{
+  aspect-ratio:1;
+  min-height:48px;
+  border:1px solid rgba(0,0,0,.08);
+  border-radius:14px;
+  background:#fff;
+  cursor:pointer;
+  font-weight:600;
+}
+
+.demo-calendar-day.open{
+  background:#e9f6ec;
+}
+
+.demo-calendar-day.limited{
+  background:#fff3d4;
+}
+
+.demo-calendar-day.closed{
+  background:#f8e6e6;
+  opacity:.65;
+}
+
+.demo-calendar-day.active{
+  outline:2px solid #333;
+  outline-offset:2px;
+}
+
+.demo-calendar-legend{
+  display:flex;
+  flex-wrap:wrap;
+  gap:16px;
+  margin-top:18px;
+  font-size:13px;
+}
+
+.demo-calendar-legend span{
+  display:flex;
+  align-items:center;
+  gap:7px;
+}
+
+.demo-calendar-legend i{
+  width:10px;
+  height:10px;
+  border-radius:999px;
+  display:block;
+}
+
+.demo-calendar-legend i.open{
+  background:#8fc99a;
+}
+
+.demo-calendar-legend i.limited{
+  background:#e2bd5b;
+}
+
+.demo-calendar-legend i.closed{
+  background:#d79a9a;
+}
+
+@media (max-width:700px){
+
+  .demo-calendar-week,
+  .demo-calendar-grid{
+    gap:5px;
+  }
+
+  .demo-calendar-day{
+    min-height:40px;
+    border-radius:10px;
+    font-size:12px;
+  }
+}
