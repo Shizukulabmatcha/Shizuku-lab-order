@@ -94,6 +94,147 @@
     white-space:nowrap;
 }
 
+/* ==========================================
+   Dashboard
+========================================== */
+
+.demo-dashboard-range{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-bottom:18px;
+}
+
+.demo-dashboard-kpis{
+  display:grid;
+  grid-template-columns:
+    repeat(5,minmax(0,1fr));
+  gap:14px;
+  margin-bottom:20px;
+}
+
+.demo-dashboard-grid{
+  display:grid;
+  grid-template-columns:
+    minmax(0,1.5fr)
+    minmax(280px,.8fr);
+  gap:18px;
+}
+
+.demo-sales-chart{
+  height:280px;
+  display:flex;
+  align-items:flex-end;
+  gap:12px;
+  padding-top:28px;
+}
+
+.demo-sales-column{
+  flex:1;
+  min-width:38px;
+  height:100%;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-end;
+  align-items:center;
+  gap:7px;
+}
+
+.demo-sales-value{
+  font-size:10px;
+  font-weight:700;
+  white-space:nowrap;
+}
+
+.demo-sales-bar-wrap{
+  width:100%;
+  height:190px;
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  border-bottom:
+    1px solid var(--line);
+}
+
+.demo-sales-bar{
+  width:min(44px,70%);
+  min-height:8px;
+  background:var(--brand);
+  border-radius:8px 8px 3px 3px;
+}
+
+.demo-sales-column small{
+  color:var(--muted);
+  font-size:10px;
+  white-space:nowrap;
+}
+
+.demo-dashboard-product{
+  display:grid;
+  grid-template-columns:
+    32px 1fr auto;
+  gap:10px;
+  align-items:center;
+  padding:13px 0;
+  border-top:
+    1px solid var(--line);
+}
+
+.demo-dashboard-rank{
+  width:28px;
+  height:28px;
+  border-radius:50%;
+  display:grid;
+  place-items:center;
+  background:var(--sand);
+  font-size:11px;
+  font-weight:800;
+}
+
+.demo-dashboard-product small{
+  display:block;
+  color:var(--muted);
+  margin-top:2px;
+}
+
+@media(max-width:1100px){
+
+  .demo-dashboard-kpis{
+    grid-template-columns:
+      repeat(3,minmax(0,1fr));
+  }
+
+}
+
+@media(max-width:800px){
+
+  .demo-dashboard-kpis{
+    grid-template-columns:
+      1fr 1fr;
+  }
+
+  .demo-dashboard-grid{
+    grid-template-columns:1fr;
+  }
+
+}
+
+@media(max-width:520px){
+
+  .demo-dashboard-kpis{
+    grid-template-columns:1fr;
+  }
+
+  .demo-sales-chart{
+    overflow-x:auto;
+  }
+
+  .demo-sales-column{
+    min-width:58px;
+  }
+
+}
+
 .demo-order-status.waiting{
     background:#FFF4D7;
     color:#8B6A16;
