@@ -103,6 +103,10 @@
 
       theme: "warm",
       font: "clean",
+      bannerHeading: "Welcome to our store",
+      bannerSubtitle: "",
+      bannerButton: "Shop Now",
+      announcement: "",
     },
 
 
@@ -4856,6 +4860,86 @@ const pageTitles = {
 
                   <textarea
                     rows="3"
+                    
+<hr>                  
+
+<h3>Homepage</h3>
+
+<div class="demo-form-grid">
+
+  <div class="demo-field wide">
+
+    <label>
+      Homepage Heading
+    </label>
+
+    <input
+      value="${esc(state.store.bannerHeading || '')}"
+      onchange="
+        HBBDemo.setStore(
+          'bannerHeading',
+          this.value
+        )
+      "
+    >
+
+  </div>
+
+  <div class="demo-field wide">
+
+    <label>
+      Homepage Subtitle
+    </label>
+
+    <textarea
+      rows="2"
+      onchange="
+        HBBDemo.setStore(
+          'bannerSubtitle',
+          this.value
+        )
+      "
+    >${esc(state.store.bannerSubtitle || '')}</textarea>
+
+  </div>
+
+  <div class="demo-field">
+
+    <label>
+      Button Text
+    </label>
+
+    <input
+      value="${esc(state.store.bannerButton || '')}"
+      onchange="
+        HBBDemo.setStore(
+          'bannerButton',
+          this.value
+        )
+      "
+    >
+
+  </div>
+
+  <div class="demo-field">
+
+    <label>
+      Announcement
+    </label>
+
+    <input
+      value="${esc(state.store.announcement || '')}"
+      onchange="
+        HBBDemo.setStore(
+          'announcement',
+          this.value
+        )
+      "
+    >
+
+  </div>
+
+</div>
 
                     onchange="
                       HBBDemo.setStore(
