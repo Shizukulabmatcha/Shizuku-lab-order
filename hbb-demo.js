@@ -1176,68 +1176,161 @@ async function uploadProductImage(
   }
 }
 
-  function saveProduct() {
-    if (
-      !productDraft ||
-      !String(
-        productDraft.name || ""
-      ).trim()
-    ) {
-      return alert(
-        "Enter a product name."
-      );
-    }
+async function removeProductImage() {
+  if (!productDraft) {
+    return;
+  }
 
+  pendingProductImage = null;
 
-    if (productDraft.id) {
-      const index =
-        state.products.findIndex(
-          (item) =>
-            item.id ===
-            productDraft.id
-        );
-
-
-      if (index >= 0) {
-        state.products[index] =
-          clone(productDraft);
-      }
-
-    } else {
-      productDraft.id =
-        uid("product");
-
-
-      state.products.push(
-        clone(productDraft)
-      );
-
-
-      state.costing.push({
-        id:
-          uid("cost"),
-
-        productId:
-          productDraft.id,
-
-        ingredientCost: 0,
-        packagingCost: 0,
-        labourCost: 0,
-      });
-    }
-
-
-    activity(
-      `${productDraft.name} saved`
+  if (
+    pendingProductImageUrl
+  ) {
+    URL.revokeObjectURL(
+      pendingProductImageUrl
     );
 
-
-    productDraft = null;
-
-    renderAdmin();
-
-    renderStore();
+    pendingProductImageUrl = "";
   }
+
+  if (productDraft.id) {
+    try {
+      await deleteProductImage(
+        productDraft.id
+      );
+
+      productImageUrlCache.delete(
+        productDraft.id
+      );
+    } catch (error) {
+      console.error(
+        "Could not remove image:",
+        error
+      );
+    }
+  }
+
+  const preview =
+    document.getElementById(
+      "productImagePreview"
+    );
+
+  const empty =
+    document.getElementById(
+      "productImageEmpty"
+    );
+
+  const button =
+    document.getElementById(
+      "removeProductImageButton"
+    );
+
+  if (preview) {
+    preview.src = "";
+    preview.hidden = true;
+  }
+
+  if (empty) {
+    empty.hidden = false;
+  }
+
+  if (button) {
+    button.hidden = true;
+  }
+}  
+  
+  async function saveProduct() {
+  if (
+    !productDraft ||
+    !String(
+      productDraft.name || ""
+    ).trim()
+  ) {
+    return alert(
+      "Enter a product name."
+    );
+  }
+
+  let isNew = false;
+
+  if (productDraft.id) {
+    const index =
+      state.products.findIndex(
+        item =>
+          item.id ===
+          productDraft.id
+      );
+
+    if (index >= 0) {
+      state.products[index] =
+        clone(productDraft);
+    }
+  } else {
+    isNew = true;
+
+    productDraft.id =
+      uid("product");
+
+    state.products.push(
+      clone(productDraft)
+    );
+
+    state.costing.push({
+      id: uid("cost"),
+      productId:
+        productDraft.id,
+      ingredientCost: 0,
+      packagingCost: 0,
+      labourCost: 0,
+    });
+  }
+
+  const productId =
+    productDraft.id;
+
+  if (pendingProductImage) {
+    try {
+      await saveProductImage(
+        productId,
+        pendingProductImage
+      );
+
+      productImageUrlCache.delete(
+        productId
+      );
+    } catch (error) {
+      console.error(
+        "Could not save product image:",
+        error
+      );
+
+      return alert(
+        "Product details were prepared, but the photo could not be saved."
+      );
+    }
+  }
+
+  activity(
+    `${productDraft.name} saved`
+  );
+
+  if (
+    pendingProductImageUrl
+  ) {
+    URL.revokeObjectURL(
+      pendingProductImageUrl
+    );
+  }
+
+  pendingProductImage = null;
+  pendingProductImageUrl = "";
+  productDraft = null;
+
+  save();
+
+  renderAdmin();
+  renderStore();
+}
 
 
   function removeProduct(id) {
@@ -5020,12 +5113,95 @@ const pageTitles = {
 
           <div class="demo-form-grid">
 
-            <div
-              class="
-                demo-field
-                wide
-              "
-            >
+           <div
+  class="
+    demo-field
+    wide
+  "
+>
+
+  <label>
+    Product photo
+  </label>
+
+  <div
+    class="
+      demo-product-image-editor
+    "
+  >
+
+    <div
+      class="
+        demo-product-image-preview
+      "
+    >
+
+      <img
+        id="productImagePreview"
+        alt="Product preview"
+        hidden
+      >
+
+      <div
+        id="productImageEmpty"
+        class="
+          demo-product-image-empty
+        "
+      >
+        No photo yet
+      </div>
+
+    </div>
+
+    <div
+      class="demo-actions"
+    >
+
+      <label
+        class="
+          demo-btn
+          primary
+        "
+      >
+        Upload photo
+
+        <input
+          type="file"
+          accept="image/*"
+          hidden
+          onchange="
+            HBBDemo.uploadProductImage(
+              this
+            )
+          "
+        >
+      </label>
+
+      <button
+        id="removeProductImageButton"
+        type="button"
+        class="
+          demo-btn
+          danger
+        "
+        hidden
+        onclick="
+          HBBDemo.removeProductImage()
+        "
+      >
+        Remove photo
+      </button>
+
+    </div>
+
+    <small>
+      JPG, PNG or mobile photo.
+      Maximum 12MB.
+    </small>
+
+  </div>
+
+</div>
 
               <label>
                 Product name
@@ -5703,6 +5879,10 @@ window.HBBDemoContext = {
 
     openProduct,
     productDraftField,
+
+    uploadProductImage,
+    removeProductImage,
+
     saveProduct,
     removeProduct,
 
