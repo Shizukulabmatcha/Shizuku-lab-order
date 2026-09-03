@@ -988,3 +988,40 @@
   color:var(--muted);
   font-size:12px;
 }
+
+/* ==========================================
+   COLLAPSIBLE SIDEBAR GROUPS
+========================================== */
+
+.demo-nav-group {
+  margin-top: 8px;
+}
+
+.demo-nav-group summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 16px;
+  font-weight: 700;
+  color: #5f5a54;
+  border-radius: 12px;
+}
+
+.demo-nav-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.demo-nav-group summary::after {
+  content: "›";
+  float: right;
+  transition: transform .2s ease;
+}
+
+.demo-nav-group[open] summary::after {
+  transform: rotate(90deg);
+}
+
+.demo-nav-group button {
+  width: 100%;
+  margin-top: 4px;
+  padding-left: 28px;
+}
