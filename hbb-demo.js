@@ -3578,53 +3578,73 @@ const pageTitles = {
 
             <section class="demo-card">
 
-              <div class="demo-card-head">
+             <div
+  class="
+    demo-card-head
+    demo-collapse-header
+  "
+  onclick="
+    HBBDemo.toggleWorkspaceOverview()
+  "
+>
 
-                <div>
+  <div>
 
-                  <h2>
-                    Workspace overview
-                  </h2>
+    <h2>
+      Workspace overview
+    </h2>
 
-                  <p>
-                    Try each area exactly
-                    like an HBB owner.
-                  </p>
+    <p>
+      Try each area exactly
+      like an HBB owner.
+    </p>
 
-                </div>
+  </div>
 
-              </div>
-
-
-              <div class="demo-permission-grid">
-
-              ${[
-                    "My Store",
-                    "Inventory",
-                    "Costing",
-                    "Reviews",
-                    "Promo",
-                    "Rewards",
-                    "Availability",
-                    "Notifications",
-                ]
-    .map(
-      (title) => `
-        <article
-          class="demo-permission"
-        >
-
-          <h3>
-            ${title}
-          </h3>
-
-        </article>
-      `
-    )
-    .join("")}
+  <span>
+    ${
+      workspaceOverviewOpen
+        ? "▼"
+        : "▶"
+    }
+  </span>
 
 </div>
 
+${
+  workspaceOverviewOpen
+    ? `
+      <div class="demo-permission-grid">
+
+        ${[
+          "My Store",
+          "Inventory",
+          "Costing",
+          "Reviews",
+          "Promo",
+          "Rewards",
+          "Availability",
+          "Notifications",
+        ]
+          .map(
+            (title) => `
+              <article
+                class="demo-permission"
+              >
+
+                <h3>
+                  ${title}
+                </h3>
+
+              </article>
+            `
+          )
+          .join("")}
+
+      </div>
+    `
+    : ""
+}
             </section>
 
 
@@ -6137,11 +6157,21 @@ window.HBBDemoContext = {
     return KEY;
   }
 }; 
+
+function toggleWorkspaceOverview() {
+
+  workspaceOverviewOpen =
+    !workspaceOverviewOpen;
+
+  renderAdmin();
+
+}  
   
   window.HBBDemo = {
     setPanel,
 
     setStore,
+    toggleWorkspaceOverview,
     togglePayment,
 
     openProduct,
