@@ -874,7 +874,7 @@ async function compressProductImage(
 
 let pendingProductImage = null;
 
-let pendingProductImageUrl = null";
+let pendingProductImageUrl = "";
 
 const productImageUrlCache =
   new Map();
