@@ -3601,43 +3601,13 @@ const pageTitles = {
                 ${[
                   [
                     "My Store",
-                    "Products, prices and visibility",
-                  ],
-
-                  [
-                    "Inventory",
-                    "Stock and low-stock levels",
-                  ],
-
-                  [
-                    "Costing",
-                    "Costs, profit and margin",
-                  ],
-
-                  [
-                    "Reviews",
-                    "Reply and manage feedback",
-                  ],
-
-                  [
-                    "Promo",
-                    "Discount codes and campaigns",
-                  ],
-
-                  [
-                    "Rewards",
-                    "Stamps, points and redemption",
-                  ],
-
-                  [
+                    "Inventory,
+                    "Costing"，
+                    "Reviews"，
+                    "Promo"，
+                    "Rewards"，
                     "Availability",
-                    "Ordering and collection slots",
-                  ],
-
-                  [
-                    "Notifications",
-                    "Business alerts",
-                  ],
+                    "Notifications"，
                 ]
                   .map(
                     ([title, text]) => `
