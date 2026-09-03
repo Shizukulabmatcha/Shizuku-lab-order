@@ -2687,27 +2687,21 @@
 
           <div class="demo-side-bottom">
 
-            <a
-              class="demo-btn"
-              href="slow-studio.html"
-            >
-              ← Slow Studio owner
-            </a>
+  <button
+    class="demo-btn"
+    onclick="HBBDemo.reportIssue()"
+  >
+    Need Help?
+  </button>
 
+  <button
+    class="demo-btn danger"
+    onclick="HBBDemo.reset()"
+  >
+    Reset Demo
+  </button>
 
-            <button
-              class="
-                demo-btn
-                danger
-              "
-              onclick="
-                HBBDemo.reset()
-              "
-            >
-              Reset demo
-            </button>
-
-          </div>
+</div>
 
         </aside>
 
@@ -4484,11 +4478,7 @@
                   </h2>
 
                   <p>
-                    Send demo feedback
-                    directly into the
-                    Slow Studio owner
-                    issue inbox on this
-                    device.
+                   Send feedback directly to the Slow Studio support team.
                   </p>
                 </div>
 
