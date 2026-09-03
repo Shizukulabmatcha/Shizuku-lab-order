@@ -3598,35 +3598,32 @@ const pageTitles = {
 
               <div class="demo-permission-grid">
 
-                ${[
-                  [
+              ${[
                     "My Store",
-                    "Inventory,
-                    "Costing"，
-                    "Reviews"，
-                    "Promo"，
-                    "Rewards"，
+                    "Inventory",
+                    "Costing",
+                    "Reviews",
+                    "Promo",
+                    "Rewards",
                     "Availability",
-                    "Notifications"，
+                    "Notifications",
                 ]
-                  .map(
-                    ([title, text]) => `
-                      <article
-                        class="demo-permission"
-                      >
-                        <h3>
-                          ${title}
-                        </h3>
+    .map(
+      (title) => `
+        <article
+          class="demo-permission"
+        >
 
-                        <p>
-                          ${text}
-                        </p>
-                      </article>
-                    `
-                  )
-                  .join("")}
+          <h3>
+            ${title}
+          </h3>
 
-              </div>
+        </article>
+      `
+    )
+    .join("")}
+
+</div>
 
             </section>
 
