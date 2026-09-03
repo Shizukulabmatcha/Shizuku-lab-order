@@ -957,3 +957,34 @@
 .demo-product-image-editor small{
   color:var(--muted);
 }
+
+/* ==========================================
+   HERO IMAGE EDITOR
+========================================== */
+
+.demo-hero-image-editor{
+  display:grid;
+  gap:12px;
+}
+
+.demo-hero-image-preview{
+  width:100%;
+  aspect-ratio:2/1;
+  overflow:hidden;
+  display:grid;
+  place-items:center;
+  border:1px dashed var(--line);
+  border-radius:12px;
+  background:#f7f4ee;
+}
+
+.demo-hero-image-preview img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+
+.demo-hero-image-empty{
+  color:var(--muted);
+  font-size:12px;
+}
