@@ -560,19 +560,27 @@
               )}
             </p>
 
-            <a
-              class="
-                customer-primary
-                customer-hero-button
-              "
-              href="#customerProducts"
-            >
-              ${esc(
-                store.bannerButton ||
-                "Shop Now"
-              )}
-            </a>
-
+            <button
+  type="button"
+  class="
+    customer-primary
+    customer-hero-button
+  "
+  onclick="
+    document
+      .getElementById(
+        'customerProducts'
+      )
+      ?.scrollIntoView({
+        behavior: 'smooth'
+      })
+  "
+>
+  ${esc(
+    store.bannerButton ||
+    "Shop Now"
+  )}
+</button>
           </div>
 
         </section>
