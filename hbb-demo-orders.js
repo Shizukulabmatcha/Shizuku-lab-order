@@ -469,35 +469,24 @@ ${new Date(order.createdAt).toLocaleString()}
     0 Selected
   </span>
 
-  <button class="demo-btn">
-    WhatsApp Customer
-  </button>
-
-  <button class="demo-btn">
-    Email Customer
-  </button>
-
-</div>
-
-        <div class="demo-bulk-actions">
-
-  <span>
-    0 Selected
-  </span>
+  <button
+  class="demo-btn"
+  onclick="
+    document
+      .getElementById('communicationDialog')
+      .showModal()
+  "
+>
 
   <button
-    class="demo-btn"
-  >
-    WhatsApp Customer
-  </button>
+  class="demo-btn"
+  onclick="
+    document
+      .getElementById('communicationDialog')
+      .showModal()
+  "
+>
 
-  <button
-    class="demo-btn"
-  >
-    Email Customer
-  </button>
-
-</div>
 
           <div class="demo-table-wrap">
 
