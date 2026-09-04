@@ -914,20 +914,82 @@ const productImageUrlCache =
 
 
   const NAV = [
-    ["overview", "Home"],
-    ["orders", "Orders"],
-    ["products", "My Store"],
-    ["inventory", "Inventory"],
-    ["costing", "Costing"],
-    ["reviews", "Reviews"],
-    ["promo", "Promo"],
-    ["rewards", "Rewards"],
-    ["availability", "Availability"],
-    ["notifications", "Notifications"],
-    ["store", "Store Details"],
-    ["design", "Design"],
-    ["help", "Help & issues"],
-  ];
+
+  {
+
+    title: "MAIN MENU",
+
+    items: [
+
+      ["overview","Home"]
+
+    ]
+
+  },
+
+  {
+
+    title: "MY STORE",
+
+    items: [
+
+      ["products","Products"],
+
+      ["orders","Orders"],
+
+      ["promo","Promo"],
+
+      ["rewards","Rewards"],
+
+      ["inventory","Inventory & Cost"],
+
+      ["availability","Availability"]
+
+    ]
+
+  },
+
+  {
+
+    title: "CUSTOMERS & SERVICE",
+
+    items: [
+
+      ["reviews","Reviews"],
+
+      ["notifications","Notifications"]
+
+    ]
+
+  },
+
+  {
+
+    title: "DESIGN",
+
+    items: [
+
+      ["design","Customer Page"],
+
+      ["store","Store Details"]
+
+    ]
+
+  },
+
+  {
+
+    title: "BUSINESS TOOLS",
+
+    items: [
+
+      ["help","Help & Issues"]
+
+    ]
+
+  }
+
+];
 
 
   /* =========================================================
@@ -3350,236 +3412,678 @@ const pageTitles = {
 
 <nav class="demo-nav">
 
+  <!-- HOME -->
   <button
-    class="${
-      panel === "overview"
-        ? "active"
-        : ""
-    }"
+    class="
+      demo-nav-root
+      ${
+        panel === "overview"
+          ? "active"
+          : ""
+      }
+    "
     onclick="
       HBBDemo.setPanel(
         'overview'
       )
     "
   >
-    Home
+    <span class="nav-icon">
+      ⌂
+    </span>
+
+    <span class="nav-text">
+      Home
+    </span>
   </button>
+
+
+  <!-- ==========================================
+       MY STORE
+  =========================================== -->
+
+  <details
+    class="demo-nav-group"
+    open
+  >
+
+    <summary
+      class="demo-nav-group-toggle"
+    >
+
+      <span class="nav-icon">
+        ▣
+      </span>
+
+      <span class="nav-text">
+        My Store
+      </span>
+
+    </summary>
+
+
+    <div class="demo-nav-children">
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "products"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'products'
+          )
+        "
+      >
+        <span class="nav-icon">
+          □
+        </span>
+
+        Products
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "orders"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'orders'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ☷
+        </span>
+
+        Orders
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "promo"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'promo'
+          )
+        "
+      >
+        <span class="nav-icon">
+          %
+        </span>
+
+        Promos
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "rewards"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'rewards'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ☆
+        </span>
+
+        Rewards
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "inventory" ||
+            panel === "costing"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'inventory'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ◫
+        </span>
+
+        Inventory & cost
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "preparation"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'preparation'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ✓
+        </span>
+
+        Today's prep
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "availability"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'availability'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ◷
+        </span>
+
+        Availability
+      </button>
+
+    </div>
+
+  </details>
+
+
+  <!-- ==========================================
+       CUSTOMERS & SERVICE
+  =========================================== -->
+
+  <details class="demo-nav-group">
+
+    <summary
+      class="demo-nav-group-toggle"
+    >
+
+      <span class="nav-icon">
+        ♙
+      </span>
+
+      <span class="nav-text">
+        Customers & service
+      </span>
+
+    </summary>
+
+
+    <div class="demo-nav-children">
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "customers"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'customers'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ♙
+        </span>
+
+        Customers
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "messages"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'messages'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ☏
+        </span>
+
+        Messages
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "notifications"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'notifications'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ◉
+        </span>
+
+        Notifications
+      </button>
+
+    </div>
+
+  </details>
+
+
+  <!-- ==========================================
+       MARKETING
+  =========================================== -->
+
+  <details class="demo-nav-group">
+
+    <summary
+      class="demo-nav-group-toggle"
+    >
+
+      <span class="nav-icon">
+        ✦
+      </span>
+
+      <span class="nav-text">
+        Marketing
+      </span>
+
+    </summary>
+
+
+    <div class="demo-nav-children">
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "marketing"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'marketing'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ✉
+        </span>
+
+        Campaigns & contacts
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "reviews"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'reviews'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ★
+        </span>
+
+        Reviews
+      </button>
+
+    </div>
+
+  </details>
+
+
+  <!-- ==========================================
+       DESIGN
+  =========================================== -->
+
+  <details class="demo-nav-group">
+
+    <summary
+      class="demo-nav-group-toggle"
+    >
+
+      <span class="nav-icon">
+        ◈
+      </span>
+
+      <span class="nav-text">
+        Design
+      </span>
+
+    </summary>
+
+
+    <div class="demo-nav-children">
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "theme_design"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'theme_design'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ◈
+        </span>
+
+        Theme & layout
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "wording"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'wording'
+          )
+        "
+      >
+        <span class="nav-icon">
+          Aa
+        </span>
+
+        Fonts & wording
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "design"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'design'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ☏
+        </span>
+
+        Customer page
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "faq"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'faq'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ?
+        </span>
+
+        FAQ
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "store"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'store'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ⚙
+        </span>
+
+        Store details
+      </button>
+
+    </div>
+
+  </details>
+
+
+  <!-- ==========================================
+       BUSINESS TOOLS
+  =========================================== -->
+
+  <details class="demo-nav-group">
+
+    <summary
+      class="demo-nav-group-toggle"
+    >
+
+      <span class="nav-icon">
+        ◇
+      </span>
+
+      <span class="nav-text">
+        Business tools
+      </span>
+
+    </summary>
+
+
+    <div class="demo-nav-children">
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "wholesale"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'wholesale'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ◇
+        </span>
+
+        Wholesale / B2B
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "inspiration"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'inspiration'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ✎
+        </span>
+
+        Inspiration
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "team"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          HBBDemo.setPanel(
+            'team'
+          )
+        "
+      >
+        <span class="nav-icon">
+          ♙
+        </span>
+
+        Team & activity
+      </button>
+
+
+      <button
+        class="
+          demo-nav-child
+          ${
+            panel === "malaysia"
+              ? "active"
+              : ""
+          }
+        "
+        onclick="
+          window.location.href =
+            '/demo/malaysia'
+        "
+      >
+        <span class="nav-icon">
+          MY
+        </span>
+
+        Malaysia workspace
+      </button>
+
+    </div>
+
+  </details>
+
+
+  <!-- HELP -->
 
   <button
-    class="${
-      panel === "orders"
-        ? "active"
-        : ""
-    }"
-    onclick="
-      HBBDemo.setPanel(
-        'orders'
-      )
-    "
-  >
-    Orders
-  </button>
-
-
-  <details class="demo-nav-group" open>
-
-    <summary>
-      Store
-    </summary>
-
-    <button
-      class="${
-        panel === "products"
-          ? "active"
-          : ""
-      }"
-      onclick="
-        HBBDemo.setPanel(
-          'products'
-        )
-      "
-    >
-      My Store
-    </button>
-
-    <button
-      class="${
-        panel === "inventory"
-          ? "active"
-          : ""
-      }"
-      onclick="
-        HBBDemo.setPanel(
-          'inventory'
-        )
-      "
-    >
-      Inventory
-    </button>
-
-    <button
-      class="${
-        panel === "costing"
-          ? "active"
-          : ""
-      }"
-      onclick="
-        HBBDemo.setPanel(
-          'costing'
-        )
-      "
-    >
-      Costing
-    </button>
-
-  </details>
-
-
-  <details class="demo-nav-group">
-
-    <summary>
-      Marketing
-    </summary>
-
-    <button
-      class="${
-        panel === "reviews"
-          ? "active"
-          : ""
-      }"
-      onclick="
-        HBBDemo.setPanel(
-          'reviews'
-        )
-      "
-    >
-      Reviews
-    </button>
-
-    <button
-      class="${
-        panel === "promo"
-          ? "active"
-          : ""
-      }"
-      onclick="
-        HBBDemo.setPanel(
-          'promo'
-        )
-      "
-    >
-      Promo
-    </button>
-
-    <button
-      class="${
-        panel === "rewards"
-          ? "active"
-          : ""
-      }"
-      onclick="
-        HBBDemo.setPanel(
-          'rewards'
-        )
-      "
-    >
-      Rewards
-    </button>
-
-  </details>
-
-
-  <details class="demo-nav-group">
-
-    <summary>
-      Operations
-    </summary>
-
-    <button
-      class="${
-        panel === "availability"
-          ? "active"
-          : ""
-      }"
-      onclick="
-        HBBDemo.setPanel(
-          'availability'
-        )
-      "
-    >
-      Availability
-    </button>
-
-    <button
-      class="${
-        panel === "notifications"
-          ? "active"
-          : ""
-      }"
-      onclick="
-        HBBDemo.setPanel(
-          'notifications'
-        )
-      "
-    >
-      Notifications
-    </button>
-
-  </details>
-
-
-  <details class="demo-nav-group">
-
-    <summary>
-      Settings
-    </summary>
-
-    <button
-      class="${
-        panel === "store"
-          ? "active"
-          : ""
-      }"
-      onclick="
-        HBBDemo.setPanel(
-          'store'
-        )
-      "
-    >
-      Store Details
-    </button>
-
-    <button
-      class="${
-        panel === "design"
-          ? "active"
-          : ""
-      }"
-      onclick="
-        HBBDemo.setPanel(
-          'design'
-        )
-      "
-    >
-      Design
-    </button>
-
-    <button
-      class="${
+    class="
+      demo-nav-root
+      ${
         panel === "help"
           ? "active"
           : ""
-      }"
-      onclick="
-        HBBDemo.setPanel(
-          'help'
-        )
-      "
-    >
-      Help & issues
-    </button>
+      }
+    "
+    onclick="
+      HBBDemo.setPanel(
+        'help'
+      )
+    "
+  >
+    <span class="nav-icon">
+      ?
+    </span>
 
-  </details>
+    <span class="nav-text">
+      Help & issues
+    </span>
+  </button>
 
 </nav>
 
