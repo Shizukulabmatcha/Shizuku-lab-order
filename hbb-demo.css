@@ -1138,3 +1138,524 @@
     font-size:12px;
   }
 }
+/* =========================================================
+   SLOW STUDIO DEMO — ADMIN SIDEBAR
+========================================================= */
+
+.demo-sidebar,
+.demo-side {
+  width: 248px;
+  flex: 0 0 248px;
+
+  min-height: 100vh;
+  height: 100vh;
+
+  padding: 26px 16px;
+
+  background: #ffffff;
+
+  border-right: 1px solid #e9e4f2;
+
+  position: sticky;
+  top: 0;
+
+  display: flex;
+  flex-direction: column;
+
+  overflow: hidden;
+}
+
+
+/* =========================
+   BRAND
+========================= */
+
+.demo-logo,
+.demo-side h1 {
+  margin: 0 8px;
+
+  font-size: 26px;
+  font-weight: 800;
+
+  color: #262335;
+
+  line-height: 1.05;
+}
+
+.demo-side small,
+.demo-sidebar-header small {
+  display: block;
+
+  margin: 7px 8px 24px;
+
+  font-size: 12px;
+
+  color: #8a8498;
+}
+
+
+/* =========================
+   NAV AREA
+========================= */
+
+.demo-nav {
+  display: grid;
+
+  gap: 5px;
+
+  flex: 1;
+
+  min-height: 0;
+
+  overflow-y: auto;
+
+  align-content: start;
+
+  padding: 2px 4px 10px 0;
+}
+
+
+/* hide scrollbar but keep scrolling */
+
+.demo-nav {
+  scrollbar-width: thin;
+  scrollbar-color:
+    #ddd7eb
+    transparent;
+}
+
+
+/* =========================
+   BUTTON BASE
+========================= */
+
+.demo-nav button {
+
+  appearance: none;
+
+  width: 100%;
+
+  border: 0;
+
+  border-radius: 12px;
+
+  background: transparent;
+
+  padding: 12px 13px;
+
+  color: #55515f;
+
+  font-family: inherit;
+
+  font-size: 14px;
+
+  font-weight: 650;
+
+  text-align: left;
+
+  cursor: pointer;
+
+  transition:
+    background .16s ease,
+    color .16s ease,
+    transform .16s ease;
+}
+
+.demo-nav button:hover {
+  background: #f5f2fb;
+}
+
+
+/* =========================
+   HOME / ROOT BUTTON
+========================= */
+
+.demo-nav-root {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 8px;
+}
+
+
+/* =========================
+   ACTIVE
+========================= */
+
+.demo-nav button.active {
+
+  background: #6f5de7;
+
+  color: #ffffff;
+
+  box-shadow:
+    0 8px 22px
+    rgba(111, 93, 231, .18);
+}
+
+.demo-nav button.active .nav-icon {
+  color: #ffffff;
+}
+
+
+/* =========================
+   ICONS
+========================= */
+
+.demo-nav .nav-icon {
+
+  display: inline-flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  flex: 0 0 24px;
+
+  width: 24px;
+
+  min-width: 24px;
+
+  color: #8a78e8;
+
+  font-size: 15px;
+
+  text-align: center;
+}
+
+.demo-nav .nav-text {
+  min-width: 0;
+}
+
+
+/* =========================================================
+   COLLAPSIBLE GROUPS
+========================================================= */
+
+.demo-nav-group {
+
+  margin: 2px 0;
+
+  border-radius: 14px;
+}
+
+
+/* remove native marker */
+
+.demo-nav-group summary {
+
+  list-style: none;
+}
+
+.demo-nav-group summary::-webkit-details-marker {
+
+  display: none;
+}
+
+
+/* GROUP HEADING */
+
+.demo-nav-group-toggle {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 8px;
+
+  width: 100%;
+
+  padding: 12px 13px;
+
+  border-radius: 12px;
+
+  color: #55515f;
+
+  font-size: 14px;
+
+  font-weight: 750;
+
+  cursor: pointer;
+
+  user-select: none;
+
+  transition:
+    background .16s ease,
+    color .16s ease;
+}
+
+.demo-nav-group-toggle:hover {
+
+  background: #f5f2fb;
+}
+
+
+/* arrow */
+
+.demo-nav-group-toggle::after {
+
+  content: "⌄";
+
+  margin-left: auto;
+
+  color: #9992a6;
+
+  font-size: 13px;
+
+  transition:
+    transform .18s ease;
+}
+
+
+/* collapsed arrow */
+
+.demo-nav-group:not([open])
+.demo-nav-group-toggle::after {
+
+  transform:
+    rotate(-90deg);
+}
+
+
+/* =========================
+   CHILD NAV
+========================= */
+
+.demo-nav-children {
+
+  display: grid;
+
+  gap: 2px;
+
+  margin:
+    2px
+    0
+    8px
+    20px;
+
+  padding-left: 11px;
+
+  border-left:
+    1px solid
+    #e7e1f0;
+}
+
+
+.demo-nav-child {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 5px;
+
+  padding:
+    9px 10px
+    !important;
+
+  border-radius:
+    9px
+    !important;
+
+  font-size:
+    13px
+    !important;
+
+  font-weight:
+    600
+    !important;
+}
+
+
+.demo-nav-child .nav-icon {
+
+  width:
+    20px
+    !important;
+
+  min-width:
+    20px
+    !important;
+
+  flex-basis:
+    20px;
+
+  font-size:
+    12px
+    !important;
+}
+
+
+/* active child */
+
+.demo-nav-child.active {
+
+  background:
+    #eeeaff
+    !important;
+
+  color:
+    #654fd7
+    !important;
+
+  box-shadow:
+    none
+    !important;
+
+  font-weight:
+    750
+    !important;
+}
+
+.demo-nav-child.active .nav-icon {
+
+  color:
+    #654fd7
+    !important;
+}
+
+
+/* =========================================================
+   SIDEBAR BOTTOM
+========================================================= */
+
+.demo-side-bottom,
+.demo-sidebar-bottom {
+
+  flex: 0 0 auto;
+
+  margin:
+    14px
+    8px
+    0;
+
+  padding-top:
+    16px;
+
+  border-top:
+    1px solid
+    #e9e4f2;
+
+  display: grid;
+
+  gap: 8px;
+}
+
+.demo-side-bottom .demo-btn,
+.demo-sidebar-bottom .demo-btn {
+
+  width: 100%;
+}
+
+
+/* =========================================================
+   MAIN CONTENT
+========================================================= */
+
+.demo-main {
+
+  flex: 1;
+
+  min-width: 0;
+
+  background:
+    #f5f2fb;
+
+  padding:
+    34px
+    38px
+    60px;
+}
+
+
+/* =========================================================
+   APP LAYOUT
+========================================================= */
+
+.demo-shell,
+.demo-app {
+
+  min-height: 100vh;
+
+  display: flex;
+
+  background: #f5f2fb;
+}
+
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+
+@media (
+  max-width: 900px
+) {
+
+  .demo-sidebar,
+  .demo-side {
+
+    width: 210px;
+
+    flex-basis: 210px;
+
+    padding:
+      22px
+      11px;
+  }
+
+  .demo-main {
+
+    padding:
+      25px
+      20px
+      50px;
+  }
+
+}
+
+
+@media (
+  max-width: 700px
+) {
+
+  .demo-shell,
+  .demo-app {
+
+    display: block;
+  }
+
+  .demo-sidebar,
+  .demo-side {
+
+    position: relative;
+
+    width: 100%;
+
+    height: auto;
+
+    min-height: 0;
+
+    border-right: 0;
+
+    border-bottom:
+      1px solid
+      #e9e4f2;
+  }
+
+  .demo-nav {
+
+    max-height:
+      440px;
+  }
+
+  .demo-main {
+
+    padding:
+      22px
+      16px
+      45px;
+  }
+
+}
