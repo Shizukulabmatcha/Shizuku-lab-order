@@ -6684,19 +6684,22 @@ ${
               <select id="issuePage">
 
                 ${NAV
-                  .filter(
-                    ([key]) =>
-                      key !==
-                      "overview"
-                  )
-                  .map(
-                    ([, label]) => `
-                      <option>
-                        ${label}
-                      </option>
-                    `
-                  )
-                  .join("")}
+  .flatMap(
+    (group) =>
+      group.items || []
+  )
+  .filter(
+    ([key]) =>
+      key !== "overview"
+  )
+  .map(
+    ([, label]) => `
+      <option>
+        ${label}
+      </option>
+    `
+  )
+  .join("")}
 
               </select>
 
