@@ -1,0 +1,9 @@
+*.sql
+*.gs
+*.txt
+*.md
+*.test.js
+vercel.json
+wrangler.jsonc
+_headers
+_redirects
