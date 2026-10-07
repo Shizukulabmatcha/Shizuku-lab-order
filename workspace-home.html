@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Shizuku Lab · Workspace</title>
+  <link rel="icon" type="image/png" href="/shizuku-tab-icon.png">
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;background:#f3eee3;color:#243b2e;font:400 15px/1.55 'Work Sans',system-ui,sans-serif}
+    main{max-width:1040px;margin:auto;padding:38px 24px 58px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:20px}
+    .brand{display:flex;align-items:center;gap:14px}.brand img{width:58px;height:58px;border-radius:18px;object-fit:contain;background:#fff;border:1px solid #d7d6c8;padding:5px}
+    small{display:block;font-size:10px;font-weight:650;letter-spacing:.12em;text-transform:uppercase;color:#6e7c61}
+    h1{font:500 34px/1.12 Georgia,serif;margin:5px 0}.intro{color:#68645d;margin:18px 0 0;max-width:680px}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:25px 0}
+    .card{display:flex;min-height:166px;flex-direction:column;background:#fffdf7;border:1px solid #ddd7ca;border-radius:17px;padding:20px;box-shadow:0 7px 20px rgba(42,42,34,.035)}
+    .card-market{font-size:9.5px;font-weight:650;letter-spacing:.12em;text-transform:uppercase;color:#75845d}
+    .card h2{font:500 20px/1.2 Georgia,serif;margin:9px 0 6px}.card p{margin:0 0 17px;color:#706b63;font-size:13.5px}
+    .open{display:inline-flex;align-items:center;justify-content:center;margin-top:auto;min-height:40px;background:#425b3d;color:white;padding:8px 16px;border-radius:999px;text-decoration:none;font-weight:600;font-size:13px}
+    .open:hover{background:#2f4630}
+    @media(max-width:760px){main{padding:28px 18px 48px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:520px){.grid{grid-template-columns:1fr}h1{font-size:29px}.brand img{width:52px;height:52px}.card{min-height:150px}}
+  </style>
+</head>
+<body>
+  <main>
+    <header><div class="brand"><img src="/logo.png" alt="Shizuku Lab logo"><div><small>Shizuku Lab</small><h1>Your workspace</h1></div></div></header>
+    <p class="intro">Open each market’s Admin or customer store, visit the brand website, or use the safe local demos.</p>
+    <section id="entries" class="grid" aria-label="Workspace destinations"></section>
+  </main>
+  <script src="workspace-home.js?v=3"></script>
+</body>
+</html>

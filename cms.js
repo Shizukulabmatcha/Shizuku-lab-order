@@ -49,7 +49,7 @@ function updateHeaders(){const current=mode==='website'?websiteSections.find(x=>
 function renderAll(){renderNav();renderWebsitePanels();renderOrderPanels();updateHeaders();bindImageMiniButtons()}
 function preview(){if(mode==='website')frame.contentWindow.postMessage({type:'SHIZUKU_PREVIEW',data:website},'*');else frame.contentWindow.postMessage({type:'ORDER_PREVIEW',data:order},'*')}
 function navigate(){if(mode==='website'){const target=websiteSections.find(x=>x[1]===activeWebsite)?.[2];setTimeout(()=>frame.contentWindow.postMessage({type:'SHIZUKU_NAVIGATE',target},'*'),80)}else{const target=orderSections.find(x=>x[1]===activeOrder)?.[2];setTimeout(()=>frame.contentWindow.postMessage({type:'ORDER_NAVIGATE',target},'*'),80)}}
-function switchMode(next){mode=next;shell.classList.toggle('order-mode',mode==='ordering');document.querySelectorAll('.mode-tabs button').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));frame.src=mode==='website'?'index.html?cms=1':'order-preview.html?cms=1';updateHeaders();frame.onload=()=>{preview();navigate()}}
+function switchMode(next){mode=next;shell.classList.toggle('order-mode',mode==='ordering');document.querySelectorAll('.mode-tabs button').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));frame.src=mode==='website'?'shizuku-website.html?cms=1':'order-preview.html?cms=1';updateHeaders();frame.onload=()=>{preview();navigate()}}
 document.querySelector('.mode-tabs').onclick=e=>{const b=e.target.closest('[data-mode]');if(b)switchMode(b.dataset.mode)};
 $('#websiteNav').onclick=e=>{const b=e.target.closest('[data-web-panel]');if(!b)return;activeWebsite=b.dataset.webPanel;renderAll();navigate()};$('#orderNav').onclick=e=>{const b=e.target.closest('[data-order-panel]');if(!b)return;activeOrder=b.dataset.orderPanel;renderAll();navigate()};
 function dirty(){saveStatus.textContent='Unsaved changes';saveStatus.style.background='#fff1d8'}
@@ -110,7 +110,7 @@ let previewDevice='desktop',previewScale='actual';function sizePreview(){const w
 
 function setUnifiedWorkspace(which){
  document.querySelectorAll('[data-workspace]').forEach(b=>b.classList.toggle('active',b.dataset.workspace===which));
- if(which==='preview'){window.open('order/order.html','_blank');setUnifiedWorkspace('website');return}
+ if(which==='preview'){window.open('/','_blank');setUnifiedWorkspace('website');return}
  if(which==='website'){shell.classList.remove('external-mode');$('#orderWorkspace').hidden=true;sizePreview();return}
  shell.classList.add('external-mode');$('#orderWorkspace').hidden=false;
  const f=$('#orderAdminFrame');

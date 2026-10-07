@@ -23,6 +23,7 @@
     if (filter === "payment") return isPaymentReviewOrder(order);
     if (filter === "awaiting") return order.payment_status === "awaiting_payment";
     if (filter === "paid") return order.payment_status === "paid" && order.order_status === "confirmed";
+    if (["on_the_way","delivered","completed"].includes(filter)) return order.is_b2b === true && order.order_status === filter;
     if (filter === "preparing") return order.order_status === "preparing";
     if (filter === "ready") return order.order_status === "ready";
     if (filter === "collected") return order.order_status === "collected";

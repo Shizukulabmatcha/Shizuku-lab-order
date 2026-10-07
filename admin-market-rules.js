@@ -41,10 +41,19 @@
   function savedProductFoodCost(options) {
     const input = options || {};
     const unitCost = typeof input.unitCost === "function" ? input.unitCost : function () { return 0; };
-    return recipesForProductMarket(input.recipes, input.productId, input.market).reduce(function (sum, row) {
-      const ingredient = findInventoryItemForMarket(input.inventory, row.inventory_item_id, input.market);
-      return ingredient ? sum + Number(row.quantity_used || 0) * Number(unitCost(ingredient) || 0) : sum;
-    }, 0);
+    const visit = function (productId, ancestors) {
+      const key = String(productId);
+      if (ancestors.has(key)) return 0;
+      const nextAncestors = new Set(ancestors);
+      nextAncestors.add(key);
+      return recipesForProductMarket(input.recipes, productId, input.market).reduce(function (sum, row) {
+        const quantity = Number(row.quantity_used || 0);
+        if (row.component_product_id) return sum + quantity * visit(row.component_product_id, nextAncestors);
+        const ingredient = findInventoryItemForMarket(input.inventory, row.inventory_item_id, input.market);
+        return ingredient ? sum + quantity * Number(unitCost(ingredient) || 0) : sum;
+      }, 0);
+    };
+    return visit(input.productId, new Set());
   }
 
   function productsForCostingMarket(menu, market) {

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>OneTouch Studio · Account</title>
+  <link rel="icon" type="image/png" href="/lumi-slow-studio.png">
+  <link rel="stylesheet" href="/shizuku-auth.css?v=1">
+</head>
+<body>
+  <main class="slow-auth slow-auth--form-page">
+    <header class="slow-auth__header"><a class="slow-auth__brand" href="/">OneTouch Studio</a><p>Less busy. More you.</p></header>
+    <section class="slow-auth__panel" aria-labelledby="accountTitle">
+      <a class="slow-auth__back" href="/shizuku-access.html">← Back to account dial</a>
+      <p class="slow-auth__kicker" id="accountKicker">OneTouch Studio</p>
+      <h1 id="accountTitle">Welcome back</h1>
+      <p class="slow-auth__intro" id="accountIntro">Sign in to your Shizuku Lab workspace.</p>
+      <form class="slow-auth__form" id="accountForm">
+        <label class="field"><span>Email</span><input name="email" type="email" autocomplete="email" required></label>
+        <label class="field"><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
+        <label class="field" id="confirmField" hidden><span>Confirm password</span><input name="confirm" type="password" autocomplete="new-password"></label>
+        <button class="slow-auth__submit" id="accountSubmit" type="submit">LOG IN</button>
+      </form>
+      <p class="slow-auth__message" id="accountMessage" hidden></p>
+      <button class="slow-auth__switch" id="modeSwitch" type="button">Invited to Shizuku Lab? Create account</button>
+    </section>
+    <footer class="slow-auth__footer">Passwords are handled by secure authentication and are never stored by OneTouch Studio.</footer>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/supabase-config.js"></script>
+  <script src="/shizuku-account.js?v=43"></script>
+</body>
+</html>

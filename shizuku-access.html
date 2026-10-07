@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>OneTouch Studio · Shizuku Lab</title>
+  <link rel="icon" type="image/png" href="/lumi-slow-studio.png">
+  <link rel="stylesheet" href="/shizuku-auth.css?v=1">
+</head>
+<body>
+  <main class="slow-auth slow-auth--selector">
+    <header class="slow-auth__header"><a class="slow-auth__brand" href="/">OneTouch Studio</a><p>Less busy. More you.</p></header>
+    <section class="slow-auth__selector" aria-labelledby="selector-heading">
+      <p class="slow-auth__kicker">WELCOME TO YOUR WORKSPACE</p>
+      <h1 id="selector-heading">Choose where to begin.</h1>
+      <div class="slow-auth__console">
+        <button class="slow-auth__option" id="createOption" type="button"><span>JOIN YOUR TEAM</span><strong>CREATE ACCOUNT</strong></button>
+        <div class="slow-auth__rotary-wrap">
+          <div class="slow-auth__ticks" id="dialTicks" aria-hidden="true"></div>
+          <div class="slow-auth__knob" id="dial" role="slider" tabindex="0" aria-label="Turn left to create an account, or right to log in" aria-valuemin="-40" aria-valuemax="40" aria-valuenow="0" aria-valuetext="Neutral"><span class="slow-auth__indicator"></span><span class="slow-auth__knob-core"></span></div>
+          <button class="slow-auth__status" id="dialStatus" type="button" disabled>TURN TO BEGIN</button>
+        </div>
+        <button class="slow-auth__option" id="loginOption" type="button"><span>WELCOME BACK</span><strong>LOG IN</strong></button>
+      </div>
+      <p class="slow-auth__hint">Drag the dial, tap an option, or use your keyboard arrows.</p>
+    </section>
+    <footer class="slow-auth__footer">Less busy. More you.</footer>
+  </main>
+  <script src="/shizuku-access.js?v=1"></script>
+</body>
+</html>
