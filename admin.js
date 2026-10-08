@@ -4671,6 +4671,9 @@ async function saveEventPackage() {
   if(Number(d.pax)<0||Number(d.price_per_pax)<0||Number(d.flat_fee)<0||Number(d.amount_paid)<0||EVENT_COST_FIELDS.some(([k])=>Number(d.costs?.[k]||0)<0))return alert("Amounts cannot be negative.");
   const n=eventNumbers(d);
   if(Number(d.amount_paid)>n.revenue)return alert("Amount received cannot exceed package revenue.");
+  if(d.payment_status==="paid"&&n.balance>0)return alert("Paid status requires the full amount received.");
+  if(d.payment_status==="unpaid"&&Number(d.amount_paid)>0)return alert("Choose Part-paid or Paid when an amount has been received.");
+  if(d.payment_status==="partial"&&(Number(d.amount_paid)<=0||n.balance<=0))return alert("Part-paid requires an amount received and a remaining balance.");
   const payload={market_code:DASHBOARD_MARKET,event_name:String(d.event_name||"").trim(),partner_name:String(d.partner_name||"").trim(),partner_email:String(d.partner_email||"").trim(),package_name:String(d.package_name||"").trim(),package_includes:String(d.package_includes||"").trim(),event_date:d.event_date||null,venue:String(d.venue||"").trim(),event_type:d.event_type||"workshop",status:d.status||"draft",payment_status:d.payment_status||"unpaid",payment_instructions:String(d.payment_instructions||"").trim(),amount_paid:Number(d.amount_paid)||0,pax:Number(d.pax)||0,price_per_pax:Number(d.price_per_pax)||0,flat_fee:Number(d.flat_fee)||0,matcha_quantity:String(d.matcha_quantity||"").trim(),costs:d.costs||{},notes:String(d.notes||"").trim(),total_revenue:n.revenue,total_cost:n.cost,gross_profit:n.profit};
   astate.eventSaving=true;
   try {
