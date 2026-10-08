@@ -36,6 +36,10 @@ const astate = {
   openActionMenu: "",
   notificationSection: "seller",
   marketingSection: "contacts",
+  eventPackages: [],
+  eventDraft: null,
+  eventSaving: false,
+  eventLoadError: "",
   designColourScope: "admin",
   faqEditingIndex: null,
   orders: [],
@@ -327,6 +331,7 @@ async function clearAvailabilityOverride() {
 }
 
 function loadAdminDemoData() {
+  try { astate.eventPackages = JSON.parse(localStorage.getItem("shizuku-demo-events-" + DASHBOARD_MARKET) || "[]"); } catch (_) { astate.eventPackages = []; }
   const my=DASHBOARD_MARKET==="MY",cur=my?"MYR":"SGD",prefix=my?"MY":"SG";
   const saved=(()=>{try{return JSON.parse(localStorage.getItem(`slow-studio-exact-demo-products-${DASHBOARD_MARKET.toLowerCase()}`)||"null")}catch(_){return null}})();
   astate.menu=Array.isArray(saved)?saved:[
@@ -387,6 +392,9 @@ async function loadAll(options = {}) {
       const manualMarketingResult = await db.from("marketing_contacts").select("*").order("created_at", { ascending: false });
       if (manualMarketingResult.error && !/does not exist|schema cache/i.test(manualMarketingResult.error.message || "")) console.warn("Could not load manual marketing contacts:", manualMarketingResult.error.message);
       astate.marketingManualContacts = manualMarketingResult.data || [];
+      const eventResult = await db.from("event_packages").select("*").eq("market_code", DASHBOARD_MARKET).order("event_date", { ascending: false });
+      astate.eventPackages = eventResult.data || [];
+      astate.eventLoadError = eventResult.error ? eventResult.error.message : "";
 
       let menuResult = await db.from("products").select("*").order("sort_order").order("id");
       // Keep Admin usable until the one-time product sorting SQL is run.
@@ -4615,6 +4623,88 @@ renderAnalyticsReportTab = function () {
   return `<div class="analytics-compact-page">${toolbar}${summary}<div class="ui-two-column">${AdminSection("Top drinks",topRows,`${periodLabel} · ranked by sales`)}${AdminSection("Customer snapshot",`<div class="analytics-breakdown"><div><span>Total customers</span><b>${stats.customers}</b></div><div><span>Repeat customers</span><b>${insights.repeat.length}</b></div><div><span>New this month</span><b>${insights.newThisMonth.length}</b></div><div><span>Top customer</span><b>${escapeHtml(insights.top?.name||"—")}</b></div></div>`,"Normal store customers")}</div>${Accordion("Sales trend & date range",trend,false,`${periodLabel} · ${periodOrders.length} paid sales`)}${Accordion("Cost, cash and customer details",details,false,"Open for the full breakdown")}${Accordion("Product profitability",productTable,false,`${products.length} products in this period`)}</div>`;
 };
 
+const EVENT_COST_FIELDS = [
+  ["matcha", "Matcha"], ["milk", "Milk"], ["syrup", "Syrup"], ["ice", "Ice"],
+  ["cups", "Cups"], ["straws", "Straws"], ["whisking_sets", "Whisking sets"],
+  ["printing", "Printing"], ["packaging", "Packaging"], ["transport", "Transport"],
+  ["venue_rental", "Venue rental"], ["permit", "Permit / licence fee"], ["other", "Other expenses"]
+];
+function blankEventPackage() {
+  return {market_code:DASHBOARD_MARKET,event_name:"",partner_name:"",partner_email:"",package_name:"",package_includes:"",event_date:"",venue:"",event_type:"workshop",status:"draft",payment_status:"unpaid",payment_instructions:"",amount_paid:0,pax:0,price_per_pax:0,flat_fee:0,matcha_quantity:"",costs:{},notes:""};
+}
+function eventNumbers(row) {
+  const cents=(value)=>Math.round((Number(value)||0)*100);
+  const revenue=cents(row.pax*row.price_per_pax)+cents(row.flat_fee);
+  const cost=EVENT_COST_FIELDS.reduce((sum,[key])=>sum+cents((row.costs||{})[key]),0);
+  const profit=revenue-cost;
+  return {revenue:revenue/100,cost:cost/100,profit:profit/100,margin:revenue?profit/revenue*100:0,perPax:Number(row.pax)>0?profit/100/Number(row.pax):0,balance:Math.max(0,revenue/100-(Number(row.amount_paid)||0))};
+}
+function openEventPackage(id,duplicate) {
+  const found=astate.eventPackages.find((item)=>String(item.id)===String(id));
+  const draft=found ? JSON.parse(JSON.stringify(found)) : blankEventPackage();
+  if(duplicate) {delete draft.id;draft.event_name="";draft.partner_name="";draft.partner_email="";draft.event_date="";draft.venue="";draft.status="draft";draft.payment_status="unpaid";draft.amount_paid=0;draft.notes="";}
+  astate.eventDraft=draft;render();
+  document.getElementById("event-editor")?.scrollIntoView({behavior:"smooth",block:"start"});
+}
+function closeEventPackage() {astate.eventDraft=null;render();}
+function eventFieldChange(key,value) {
+  if(!astate.eventDraft)return;
+  astate.eventDraft[key]=["pax","price_per_pax","flat_fee","amount_paid"].includes(key)?Number(value)||0:value;
+  updateEventPreview();
+}
+function eventCostChange(key,value) {
+  if(!astate.eventDraft)return;
+  astate.eventDraft.costs=astate.eventDraft.costs||{};
+  astate.eventDraft.costs[key]=Number(value)||0;
+  updateEventPreview();
+}
+function eventPreviewHtml(row) {
+  const n=eventNumbers(row);
+  return '<div class="event-metrics"><div><small>Revenue</small><strong>'+money(n.revenue)+'</strong></div><div><small>Total event cost</small><strong>'+money(n.cost)+'</strong></div><div><small>Gross profit</small><strong>'+money(n.profit)+'</strong></div><div><small>Margin</small><strong>'+n.margin.toFixed(1)+'%</strong></div><div><small>Profit per pax</small><strong>'+money(n.perPax)+'</strong></div><div><small>Balance due</small><strong>'+money(n.balance)+'</strong></div></div>';
+}
+function updateEventPreview(){const target=document.getElementById("event-preview");if(target&&astate.eventDraft)target.innerHTML=eventPreviewHtml(astate.eventDraft);}
+async function saveEventPackage() {
+  const d=astate.eventDraft;if(!d||astate.eventSaving)return;
+  if(!String(d.package_name||"").trim())return alert("Enter a package name.");
+  if(!String(d.partner_name||"").trim())return alert("Enter a partner name.");
+  if(d.partner_email&& !/^\S+@\S+\.\S+$/.test(String(d.partner_email).trim()))return alert("Enter a valid partner email address.");
+  if(Number(d.pax)<0||Number(d.price_per_pax)<0||Number(d.flat_fee)<0||Number(d.amount_paid)<0||EVENT_COST_FIELDS.some(([k])=>Number(d.costs?.[k]||0)<0))return alert("Amounts cannot be negative.");
+  const n=eventNumbers(d);
+  if(Number(d.amount_paid)>n.revenue)return alert("Amount received cannot exceed package revenue.");
+  const payload={market_code:DASHBOARD_MARKET,event_name:String(d.event_name||"").trim(),partner_name:String(d.partner_name||"").trim(),partner_email:String(d.partner_email||"").trim(),package_name:String(d.package_name||"").trim(),package_includes:String(d.package_includes||"").trim(),event_date:d.event_date||null,venue:String(d.venue||"").trim(),event_type:d.event_type||"workshop",status:d.status||"draft",payment_status:d.payment_status||"unpaid",payment_instructions:String(d.payment_instructions||"").trim(),amount_paid:Number(d.amount_paid)||0,pax:Number(d.pax)||0,price_per_pax:Number(d.price_per_pax)||0,flat_fee:Number(d.flat_fee)||0,matcha_quantity:String(d.matcha_quantity||"").trim(),costs:d.costs||{},notes:String(d.notes||"").trim(),total_revenue:n.revenue,total_cost:n.cost,gross_profit:n.profit};
+  astate.eventSaving=true;
+  try {
+    let saved;
+    if(window.SLOW_STUDIO_DEMO_MODE||!IS_CONFIGURED){saved={...payload,id:d.id||"demo-event-"+Date.now()};astate.eventPackages=[saved,...astate.eventPackages.filter((row)=>String(row.id)!==String(saved.id))];localStorage.setItem("shizuku-demo-events-"+DASHBOARD_MARKET,JSON.stringify(astate.eventPackages));}
+    else {const result=d.id?await db.from("event_packages").update(payload).eq("id",d.id).eq("market_code",DASHBOARD_MARKET).select("*").single():await db.from("event_packages").insert(payload).select("*").single();if(result.error)throw result.error;saved=result.data;astate.eventPackages=[saved,...astate.eventPackages.filter((row)=>String(row.id)!==String(saved.id))];}
+    astate.eventDraft=null;astate.eventLoadError="";render();
+  } catch(error){alert("Could not save event: "+(error?.message||error));}
+  finally{astate.eventSaving=false;}
+}
+function eventField(label,key,type) {
+  const d=astate.eventDraft;
+  return '<label class="event-field"><span>'+escapeHtml(label)+'</span><input type="'+(type||"text")+'" min="0" step="'+(type==="number"?"0.01":"any")+'" value="'+escapeHtml(d[key]??"")+'" oninput="eventFieldChange(\''+key+'\',this.value)"></label>';
+}
+function eventArea(label,key,rows) {
+  return '<label class="event-field"><span>'+escapeHtml(label)+'</span><textarea rows="'+(rows||3)+'" oninput="eventFieldChange(\''+key+'\',this.value)">'+escapeHtml(astate.eventDraft[key]||"")+'</textarea></label>';
+}
+function eventSelect(label,key,options) {
+  const d=astate.eventDraft;
+  return '<label class="event-field"><span>'+escapeHtml(label)+'</span><select onchange="eventFieldChange(\''+key+'\',this.value)">'+options.map(([value,title])=>'<option value="'+value+'" '+(d[key]===value?'selected':'')+'>'+title+'</option>').join('')+'</select></label>';
+}
+function renderEventsTab() {
+  const rows=astate.eventPackages||[];
+  const actual=rows.filter((row)=>["confirmed","completed"].includes(row.status));
+  const totals=actual.reduce((sum,row)=>{const n=eventNumbers(row);sum.revenue+=n.revenue;sum.cost+=n.cost;return sum;},{revenue:0,cost:0});
+  const d=astate.eventDraft;
+  const costInputs=d?EVENT_COST_FIELDS.map(([key,label])=>'<label class="event-field"><span>'+label+'</span><input type="number" min="0" step="0.01" value="'+escapeHtml(d.costs?.[key]??0)+'" oninput="eventCostChange(\''+key+'\',this.value)"></label>').join(''):'';
+  return '<style>.event-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.event-field{display:flex;flex-direction:column;gap:6px;font-weight:600;min-width:0}.event-field input,.event-field select,.event-field textarea{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid var(--admin-line);border-radius:10px;background:var(--admin-card);color:var(--admin-text);font:inherit}.event-field textarea{resize:vertical}.event-wide{grid-column:1/-1}.event-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.event-metrics>div{border:1px solid var(--admin-line);border-radius:12px;padding:12px;background:var(--admin-card)}.event-metrics small{display:block;color:var(--admin-muted);margin-bottom:5px}.event-metrics strong{font-size:1.25rem}.event-list{display:grid;gap:12px}.event-row{border:1px solid var(--admin-line);border-radius:14px;padding:16px;background:var(--admin-card);display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}.event-row small{display:block;color:var(--admin-muted);margin-top:4px}.event-actions{display:flex;gap:8px;flex-wrap:wrap}.event-card{background:var(--admin-card);border:1px solid var(--admin-line);border-radius:var(--admin-radius);padding:22px;margin-bottom:20px}.event-card h2{margin:0 0 14px;font-size:1.25rem}.event-section{margin:26px 0 12px}.event-note{color:var(--admin-muted);font-size:.92rem}.event-buttons{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}@media(max-width:760px){.event-grid,.event-metrics{grid-template-columns:1fr}.event-card{padding:16px}.event-row{align-items:flex-start}.event-actions{width:100%}}</style>'+
+    '<div class="event-card"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2>Event packages</h2><p class="event-note">Quotes and drafts are excluded from the confirmed event totals. Events are separate from normal shop sales.</p></div><button class="btn-primary" onclick="openEventPackage()">New package</button></div><div class="event-metrics"><div><small>Confirmed / completed revenue</small><strong>'+money(totals.revenue)+'</strong></div><div><small>Total event cost</small><strong>'+money(totals.cost)+'</strong></div><div><small>Gross profit</small><strong>'+money(totals.revenue-totals.cost)+'</strong></div></div></div>'+
+    (astate.eventLoadError?'<div class="event-card" role="alert">Events cannot load: '+escapeHtml(astate.eventLoadError)+'. Please check the database setup.</div>':'')+
+    (d?'<div class="event-card" id="event-editor"><h2>'+(d.id?'Edit package':'New package')+'</h2><p class="event-note">Record the offer, then track the confirmed event and its costs. Saving does not send a quotation, invoice or email.</p><div class="event-grid">'+eventField('Partner name','partner_name')+eventField('Partner email','partner_email','email')+eventField('Package name','package_name')+eventField('Event name','event_name')+eventField('Event date','event_date','date')+eventField('Venue','venue')+eventSelect('Event type','event_type',[["workshop","Workshop"],["live_station","Live Station"],["drink_drop","Drink Drop"]])+eventSelect('Stage','status',[["draft","Draft"],["quoted","Quoted"],["confirmed","Confirmed"],["completed","Completed"],["cancelled","Cancelled"]])+eventArea('Package includes','package_includes',3).replace('class="event-field"','class="event-field event-wide"')+'<h2 class="event-section event-wide">Pricing</h2>'+eventField('Pax','pax','number')+eventField('Price per pax','price_per_pax','number')+eventField('Additional fixed fee','flat_fee','number')+eventField('Matcha quantity','matcha_quantity')+'<h2 class="event-section event-wide">Costs</h2>'+costInputs+'<div class="event-wide" id="event-preview">'+eventPreviewHtml(d)+'</div><h2 class="event-section event-wide">Payment</h2>'+eventSelect('Payment status','payment_status',[["unpaid","Unpaid"],["partial","Part-paid"],["paid","Paid"]])+eventField('Amount received','amount_paid','number')+eventArea('Payment instructions / method','payment_instructions',2).replace('class="event-field"','class="event-field event-wide"')+eventArea('Notes / final outcome','notes',3).replace('class="event-field"','class="event-field event-wide"')+'</div><div class="event-buttons"><button class="btn-primary" onclick="saveEventPackage()">Save package</button><button class="btn-secondary" onclick="closeEventPackage()">Cancel editing</button></div></div>':'')+
+    '<div class="event-card"><h2>Packages and events</h2>'+(rows.length?'<div class="event-list">'+rows.map((row)=>{const n=eventNumbers(row);return '<div class="event-row"><div><strong>'+escapeHtml(row.package_name||'Untitled package')+'</strong><small>'+escapeHtml(row.partner_name||'No partner')+' · '+escapeHtml(row.event_name||'Event date not set')+' · '+escapeHtml(row.event_date||'No date')+'</small><small>'+escapeHtml((row.status||'draft').replace('_',' '))+' · '+escapeHtml((row.payment_status||'unpaid').replace('_',' '))+' · Revenue '+money(n.revenue)+' · Cost '+money(n.cost)+' · Profit '+money(n.profit)+'</small></div><div class="event-actions"><button class="btn-secondary" onclick="openEventPackage(\''+escapeHtml(row.id)+'\',false)">Edit</button><button class="btn-secondary" onclick="openEventPackage(\''+escapeHtml(row.id)+'\',true)">Duplicate</button></div></div>';}).join('')+'</div>':'<p class="event-note">No packages yet. Add one to plan an event and its costing.</p>')+'</div>';
+}
+
 function render() {
   const app = document.getElementById("app");
   if (!astate.unlocked) { app.innerHTML = renderLogin(); return; }
@@ -4625,19 +4715,19 @@ function render() {
     { label:"OVERVIEW", tabs:[["dashboard","⌂","Dashboard"],["orders","▣","Orders"],["preparation","☷","Today’s Prep"]] },
     { label:"STORE", tabs:[["menu","◇","Products"],["availability","◷","Availability"],["inventory","▤","Inventory & Costing",lowStockCount]] },
     { label:"CUSTOMERS", tabs:[["customers","◉","Customers"],["messages","✉",`Messages${unreadMessageCount()?` (${unreadMessageCount()})`:""}`],...(DASHBOARD_MARKET==="SG"?[["matcha_passes","🍵","Matcha Pass"],["rewards","♧","Rewards"]]:[])] },
-    { label:"MARKETING", tabs:[["promos","✦","Promos"],["marketing","✉","Campaigns"],...(DASHBOARD_MARKET==="SG"?[["partners","↗","Partners"]]:[]),["reviews","★","Reviews"]] },
+    { label:"MARKETING", tabs:[["promos","✦","Promos"],["marketing","✉","Campaigns"],["events","✧","Events"],...(DASHBOARD_MARKET==="SG"?[["partners","↗","Partners"]]:[]),["reviews","★","Reviews"]] },
     { label:"DESIGN", tabs:[["brand","◈","Brand Colours"],["customer_page","☏","Customer Page"],["wording","Aa","Wording"],["faq","?","FAQ"],["store_details","⚙","Store Details"]] },
     { label:"REPORTS", tabs:[["analytics","▥","Analytics"],...(DASHBOARD_MARKET==="SG"?[["partner_report","↗","Partner Report"]]:[])] },
     { label:"SETTINGS", tabs:[["notifications","🔔","Notifications"],["account","♙","Account"]] },
   ];
   const navButton = ([tab,icon,label,badge]) => { const href=new URL(window.location.href);href.searchParams.set("tab",tab);return `<a class="admin-nav-child ${astate.tab===tab?"active":""}" href="${escapeHtml(href.pathname+href.search)}" onclick="event.preventDefault();setTab('${tab}')"><span class="nav-icon">${icon}</span><span class="nav-text">${label}</span>${badge?`<span class="admin-nav-badge">${badge}</span>`:""}</a>`; };
   const navGroupHtml = navGroups.map((group)=>{const key=group.label.toLowerCase();const open=astate.navGroups[key]!==false;const containsActive=group.tabs.some(([tab])=>tab===astate.tab);return `<div class="admin-nav-group ${open?"open":""}"><button class="admin-nav-group-toggle ${containsActive?"contains-active":""}" onclick="toggleAdminNavGroup('${key}')" aria-expanded="${open?"true":"false"}"><span>${group.label}</span><span class="admin-nav-chevron">⌄</span></button><div class="admin-nav-children">${group.tabs.map(navButton).join("")}</div></div>`;}).join("");
-  const tabTitle = { analytics:"Analytics",partner_report:"Partner Report",preparation:"Today’s Prep",orders:"Orders",partners:"Partners",matcha_passes:"Matcha Pass",menu:"Products",inventory:"Inventory & Costing",costing:"Inventory & Costing",promos:"Promos",rewards:"Rewards",customers:"Customers",messages:"Messages",reviews:"Reviews",marketing:"Campaigns & Contacts",availability:"Availability",faq:"FAQ",notifications:"Notifications",brand:"Brand Colours",wording:"Wording",customer_page:"Customer Page",store_details:"Store Details",account:"Account" };
-  const tabSubtitle = { preparation:"Every paid drink to prepare today.",orders:"Review payments and manage customer orders.",partners:"Referral links, member benefits, commission and payouts.",matcha_passes:"Pass balances, redemption history and customer emails.",menu:"Search, filter and maintain products and options.",inventory:"Stock, purchases, recipes, product cost, profit and margin in one place.",costing:"Stock, purchases, recipes, product cost, profit and margin in one place.",promos:"Create and maintain discounts.",rewards:"Manage repeat-customer rewards.",customers:"Customer history and private notes.",messages:"Order-linked conversations.",reviews:"Moderate verified customer reviews.",marketing:"Contacts, campaigns and consent.",availability:"Weekly collection schedule and exceptions.",faq:"Compact answers with store-specific visibility.",notifications:"Seller alerts, customer emails and delivery activity.",brand:"Independent Admin and Customer Store colours.",wording:"Customer-facing labels and status messages.",customer_page:"Checkout, payment, receipt, chat and tracking.",store_details:"Store identity, collection points and payment details.",analytics:"Normal store sales and profitability.",partner_report:"Partner sales, commission and net earnings kept separate.",account:"Workspace access and preferences." };
+  const tabTitle = { analytics:"Analytics",partner_report:"Partner Report",preparation:"Today’s Prep",orders:"Orders",partners:"Partners",matcha_passes:"Matcha Pass",menu:"Products",inventory:"Inventory & Costing",costing:"Inventory & Costing",promos:"Promos",rewards:"Rewards",customers:"Customers",messages:"Messages",reviews:"Reviews",marketing:"Campaigns & Contacts",events:"Events",availability:"Availability",faq:"FAQ",notifications:"Notifications",brand:"Brand Colours",wording:"Wording",customer_page:"Customer Page",store_details:"Store Details",account:"Account" };
+  const tabSubtitle = { preparation:"Every paid drink to prepare today.",orders:"Review payments and manage customer orders.",partners:"Referral links, member benefits, commission and payouts.",matcha_passes:"Pass balances, redemption history and customer emails.",menu:"Search, filter and maintain products and options.",inventory:"Stock, purchases, recipes, product cost, profit and margin in one place.",costing:"Stock, purchases, recipes, product cost, profit and margin in one place.",promos:"Create and maintain discounts.",rewards:"Manage repeat-customer rewards.",customers:"Customer history and private notes.",messages:"Order-linked conversations.",reviews:"Moderate verified customer reviews.",marketing:"Contacts, campaigns and consent.",events:"Partner packages, costs and payment progress.",availability:"Weekly collection schedule and exceptions.",faq:"Compact answers with store-specific visibility.",notifications:"Seller alerts, customer emails and delivery activity.",brand:"Independent Admin and Customer Store colours.",wording:"Customer-facing labels and status messages.",customer_page:"Checkout, payment, receipt, chat and tracking.",store_details:"Store identity, collection points and payment details.",analytics:"Normal store sales and profitability.",partner_report:"Partner sales, commission and net earnings kept separate.",account:"Workspace access and preferences." };
   const page = astate.tab === "dashboard" ? renderDashboardTab() : `
     ${AdminPageHeader(tabTitle[astate.tab]||"Dashboard",tabSubtitle[astate.tab]||"",`<a class="btn-secondary" href="${ADMIN_CUSTOMER_SHOP_URL}" target="_blank" rel="noopener">Open customer shop ↗</a>`)}
     <div class="admin-content">
-      ${astate.tab === "analytics" ? renderAnalyticsReportTab() : astate.tab === "partner_report" ? renderPartnerReportTab() : astate.tab === "preparation" ? renderPreparationTab() : astate.tab === "orders" ? renderOrders() : astate.tab === "partners" ? renderPartnersTab() : astate.tab === "matcha_passes" ? renderMatchaPassesTab() : astate.tab === "menu" ? renderMenuTab() : ["inventory","costing"].includes(astate.tab) ? renderInventoryTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "messages" ? renderMessagesTab() : astate.tab === "reviews" ? renderReviewsTab() : astate.tab === "marketing" ? renderMarketingTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : astate.tab === "brand" ? renderThemeDesignTab() : astate.tab === "wording" ? renderWordingTab() : astate.tab === "customer_page" ? renderCheckoutCommunicationTab() : astate.tab === "account" ? renderTeamTab() : renderSettingsTab()}
+      ${astate.tab === "analytics" ? renderAnalyticsReportTab() : astate.tab === "partner_report" ? renderPartnerReportTab() : astate.tab === "preparation" ? renderPreparationTab() : astate.tab === "orders" ? renderOrders() : astate.tab === "partners" ? renderPartnersTab() : astate.tab === "matcha_passes" ? renderMatchaPassesTab() : astate.tab === "menu" ? renderMenuTab() : ["inventory","costing"].includes(astate.tab) ? renderInventoryTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "messages" ? renderMessagesTab() : astate.tab === "reviews" ? renderReviewsTab() : astate.tab === "marketing" ? renderMarketingTab() : astate.tab === "events" ? renderEventsTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : astate.tab === "brand" ? renderThemeDesignTab() : astate.tab === "wording" ? renderWordingTab() : astate.tab === "customer_page" ? renderCheckoutCommunicationTab() : astate.tab === "account" ? renderTeamTab() : renderSettingsTab()}
     </div>`;
   app.innerHTML = `
     ${dashboardStyles()}${adminRedesignStyles()}
