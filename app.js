@@ -1332,8 +1332,8 @@ function advanceOptionStep(scope, groupId, groups, selectedOptions) {
   render();
   if (nextGroup) scrollToOptionStep(scope, nextGroup.id);
 }
-function skippedOption(product) {
-  return { productId: product.id, optionId: null, optionName: tr("skip"), price: 0, skipped: true };
+function skippedOption(product, label = tr("skip")) {
+  return { productId: product.id, optionId: null, optionName: label, price: 0, skipped: true };
 }
 function defaultOptionSelections(product) {
   // Optional choices stay unanswered until the customer selects an option or
@@ -1341,14 +1341,15 @@ function defaultOptionSelections(product) {
   return {};
 }
 function skipOptionStep(scope, groupId, drinkNumber = null) {
-  const group = state.optionGroups.find((item) => String(item.id) === String(groupId));
-  if (!group || group.required) return;
   let selectedOptions = state.selectedOptions;
   let product = state.selectedProduct;
   if (drinkNumber != null) { selectedOptions = bundleDrinkOptions(drinkNumber); product = bundleDrink(drinkNumber); }
   if (!product) return;
   const groups = optionGroupsForProduct(product);
-  selectedOptions[groupId] = skippedOption(product);
+  const group = groups.find((item) => String(item.id) === String(groupId));
+  const isLastGroup = groups.length > 0 && String(groups[groups.length - 1].id) === String(groupId);
+  if (!group || (group.required && !isLastGroup)) return;
+  selectedOptions[groupId] = skippedOption(product, isLastGroup ? "No thanks" : tr("skip"));
   advanceOptionStep(scope, groupId, groups, selectedOptions);
 }
 function renderProgressiveOptionGroups(product, selectedOptions, drinkNumber = null) {
@@ -1375,7 +1376,7 @@ function renderProgressiveOptionGroups(product, selectedOptions, drinkNumber = n
     const optionHandler = drinkNumber == null
       ? (optionId) => `selectOption('${escapeHtml(group.id)}','${escapeHtml(optionId)}')`
       : (optionId) => `selectBundleOption(${drinkNumber},'${escapeHtml(group.id)}','${escapeHtml(optionId)}')`;
-    const mustChoose = group.required;
+    const mustChoose = group.required && index !== groups.length - 1;
     return `<section class="field product-option-group option-step-open" id="${optionStepDomId(scope, group.id)}">
       <div class="option-step-heading">
         <span class="option-step-number">${stepNumber}</span>
@@ -1385,7 +1386,7 @@ function renderProgressiveOptionGroups(product, selectedOptions, drinkNumber = n
         ${options.map((option) => `<button type="button" class="slot ${selected && String(selected.optionId) === String(option.id) ? "active" : ""}" onclick="${optionHandler(option.id)}">
           <div><div class="slot-day">${escapeHtml(option.name)}</div><div class="slot-time">${optionPriceLabel(option.price)}</div></div>
         </button>`).join("")}
-        ${mustChoose ? "" : `<button type="button" class="option-skip ${selected?.skipped ? "active" : ""}" onclick="skipOptionStep('${scope}','${escapeHtml(group.id)}',${drinkNumber == null ? "null" : drinkNumber})">${tr("skip")}</button>`}
+        ${mustChoose ? "" : `<button type="button" class="option-skip ${selected?.skipped ? "active" : ""}" onclick="skipOptionStep('${scope}','${escapeHtml(group.id)}',${drinkNumber == null ? "null" : drinkNumber})">${index === groups.length - 1 ? "No thanks" : tr("skip")}</button>`}
       </div>
     </section>`;
   }).join("")}</div>`;
