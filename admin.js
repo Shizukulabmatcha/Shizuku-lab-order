@@ -568,6 +568,12 @@ async function refreshDashboard() {
   }
 }
 
+function openDashboardOrders(source = "all") {
+  astate.orderSourceFilter = source;
+  astate.orderFilter = "all";
+  astate.orderSearch = "";
+  setTab("orders");
+}
 function focusDashboardIssue(type, id = "") {
   if (type === "food_cost") {
     astate.dashboardFocusTarget = { type, id: String(id) };
@@ -583,10 +589,11 @@ function focusDashboardIssue(type, id = "") {
     });
     return;
   }
-  if (type === "payment_review") {
+  if (["payment_review", "payment_review_store", "payment_review_partner"].includes(type)) {
     astate.orderFilter = "payment";
-    astate.tab = "orders";
-    render();
+    astate.orderSourceFilter = type === "payment_review_store" ? "direct" : type === "payment_review_partner" ? "partner" : "all";
+    astate.orderSearch = "";
+    setTab("orders");
   }
 }
 
@@ -695,6 +702,7 @@ function openRelatedOrder(orderId, orderNumber = "") {
     || astate.orders.find((item) => String(item.order_number) === String(orderNumber));
   if (!order) { alert("This related order could not be found."); return; }
   astate.orderFilter = "all";
+  astate.orderSourceFilter = "all";
   astate.orderSearch = String(order.order_number || order.id || "");
   astate.expandedOrderIds = [String(order.id)];
   setTab("orders");
@@ -1746,7 +1754,7 @@ function dashboardStats() {
     revenue: monthlyRevenue, foodCost: monthlyFoodCost, grossProfit: monthlyGrossProfit, profitMargin: monthlyProfitMargin,
     monthlyRevenue, totalRevenue, monthlyFoodCost, totalFoodCost, monthlyStockPurchases,totalStockPurchases,monthlyGrossProfit, totalGrossProfit, monthlyProfitMargin, totalProfitMargin,
     missingRecipeProducts: [...missingRecipeProducts.values()], orders: monthlySales.length, totalOrders: allSales.length, totalPaidOrders: paid.length,
-    customers: customerKeys.size, paymentReview: marketOrders.filter(AdminOrderRules.isPaymentReviewOrder).length,
+    customers: customerKeys.size, paymentReview: ordersForMarket(DASHBOARD_MARKET).filter(AdminOrderRules.isPaymentReviewOrder).length,
   };
 }
 function salesPerformance() {
@@ -4354,8 +4362,11 @@ function AdminPageHeader(title, subtitle = "", actions = "") {
 function AdminSection(title, content, description = "", actions = "", className = "") {
   return `<section class="ui-section ${className}"><div class="ui-section-head"><div><h2>${escapeHtml(title)}</h2>${description ? `<p>${escapeHtml(description)}</p>` : ""}</div>${actions}</div>${content}</section>`;
 }
-function AdminCard(label, value, note = "", className = "") {
-  return `<article class="ui-kpi ${className}"><span>${escapeHtml(label)}</span><strong>${value}</strong>${note ? `<small>${note}</small>` : ""}</article>`;
+function AdminCard(label, value, note = "", className = "", onClick = "") {
+  const content = `<span>${escapeHtml(label)}</span><strong>${value}</strong>${note ? `<small>${note}</small>` : ""}`;
+  return onClick
+    ? `<button type="button" class="ui-kpi ${className}" style="text-align:left;cursor:pointer;width:100%;font:inherit;color:inherit" onclick="${onClick}" aria-label="${escapeHtml(label)}: ${escapeHtml(String(value))}. View orders">${content}</button>`
+    : `<article class="ui-kpi ${className}">${content}</article>`;
 }
 function AdminTable(headers, rows, empty = "Nothing to show yet.", className = "") {
   return `<div class="ui-table-wrap ${className}"><table class="ui-table"><thead><tr>${headers.map((heading) => `<th>${escapeHtml(heading)}</th>`).join("")}</tr></thead><tbody>${rows || `<tr><td colspan="${headers.length}"><div class="ui-empty">${escapeHtml(empty)}</div></td></tr>`}</tbody></table></div>`;
@@ -4556,10 +4567,14 @@ const renderDashboardTabBeforeSimplification = renderDashboardTab;
 renderDashboardTab = function () {
   const stats=dashboardStats(),now=new Date(),today=localDateKey(now);
   const name=astate.currentTeamMember?.display_name||"Ting",role=astate.currentTeamMember?.role||"Owner";
-  const normalOrders=ordersForMarket(DASHBOARD_MARKET).filter((order)=>!order.partner_id);
+  const allDashboardOrders=ordersForMarket(DASHBOARD_MARKET);
+  const normalOrders=allDashboardOrders.filter((order)=>!order.partner_id);
+  const partnerOrders=allDashboardOrders.filter((order)=>!!order.partner_id);
   const recent=[...normalOrders].sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0)).slice(0,6);
+  const recentPartner=[...partnerOrders].sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0)).slice(0,6);
   const prep=normalOrders.filter((order)=>order.payment_status==="paid"&&order.collection_date===today&&!["cancelled","collected","completed"].includes(order.order_status));
-  const reviews=normalOrders.filter(AdminOrderRules.isPaymentReviewOrder);
+  const storeReviews=normalOrders.filter(AdminOrderRules.isPaymentReviewOrder);
+  const partnerReviews=partnerOrders.filter(AdminOrderRules.isPaymentReviewOrder);
   const overdue=normalOrders.filter((order)=>order.payment_status==="paid"&&order.collection_date&&order.collection_date<today&&!["cancelled","collected","completed"].includes(order.order_status));
   const weekStart=new Date(now); weekStart.setHours(0,0,0,0); weekStart.setDate(weekStart.getDate()-((weekStart.getDay()+6)%7));
   const weekEnd=new Date(weekStart); weekEnd.setDate(weekEnd.getDate()+7);
@@ -4567,9 +4582,11 @@ renderDashboardTab = function () {
   const low=inventoryForCostingMarket().filter((item)=>Number(item.stock_quantity||0)<=Number(item.low_stock_level||0));
   const average=stats.orders?stats.monthlyRevenue/stats.orders:0;
   const partnerTotals=(astate.partners||[]).reduce((sum,partner)=>{const metrics=partnerMetrics(partner);sum.sales+=metrics.eligibleSales;sum.orders+=metrics.completedOrders;return sum;},{sales:0,orders:0});
-  const rows=recent.map((order)=>{const label=ORDER_LABEL[order.order_status]||PAY_LABEL[order.payment_status]||order.order_status||"Pending";const tone=order.order_status==="cancelled"?"cancelled":order.payment_status!=="paid"?"pending":["collected","completed"].includes(order.order_status)?"visible":"info";return `<tr><td><button class="link-btn" onclick="openRelatedOrder('${order.id}','${escapeHtml(order.order_number||"")}')"><b>${escapeHtml(order.order_number||order.id)}</b></button></td><td>${escapeHtml(order.customer_name||"Customer")}</td><td>${escapeHtml([order.collection_date,order.collection_time].filter(Boolean).join(" · ")||"—")}</td><td><b>${money(order.total)}</b></td><td>${StatusBadge(label,tone)}</td></tr>`;}).join("");
+  const orderRow=(order,showPartner=false)=>{const label=ORDER_LABEL[order.order_status]||PAY_LABEL[order.payment_status]||order.order_status||"Pending";const tone=order.order_status==="cancelled"?"cancelled":order.payment_status!=="paid"?"pending":["collected","completed"].includes(order.order_status)?"visible":"info";return `<tr><td><button class="link-btn" onclick="openRelatedOrder('${order.id}','${escapeHtml(order.order_number||"")}')"><b>${escapeHtml(order.order_number||order.id)}</b></button></td><td>${escapeHtml(order.customer_name||"Customer")}</td>${showPartner?`<td>${escapeHtml(order.partner_name_snapshot||"Partner")}</td>`:""}<td>${escapeHtml([order.collection_date,order.collection_time].filter(Boolean).join(" · ")||"—")}</td><td><b>${money(order.total)}</b></td><td>${StatusBadge(label,tone)}</td></tr>`;};
+  const rows=recent.map((order)=>orderRow(order)).join("");
+  const partnerRows=recentPartner.map((order)=>orderRow(order,true)).join("");
   const updated=astate.dashboardLastUpdated?astate.dashboardLastUpdated.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"Not refreshed yet";
-  return `${AdminPageHeader(`Good ${now.getHours()<12?"morning":now.getHours()<18?"afternoon":"evening"}, ${name}`,`${DASHBOARD_MARKET==="MY"?"Malaysia · MYR":"Singapore · SGD"} · ${role}`,`<span class="dashboard-refresh-meta">Last updated ${escapeHtml(updated)}</span><button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing?"disabled":""}>${astate.dashboardRefreshing?"Refreshing…":"Refresh"}</button><a class="btn-primary" href="${ADMIN_CUSTOMER_SHOP_URL}" target="_blank" rel="noopener">View store ↗</a>`)}<div class="ui-kpi-grid">${AdminCard("Revenue",money(stats.monthlyRevenue),"This month")}${AdminCard("Orders",String(stats.orders),"Paid orders this month")}${AdminCard("Average order",money(average),"This month")}${AdminCard("Gross profit",money(stats.monthlyGrossProfit),`${stats.monthlyProfitMargin.toFixed(1)}% margin`)}</div><div class="ui-summary-strip"><span>All-time revenue <b>${money(stats.totalRevenue)}</b></span><span><b>${stats.totalOrders}</b> paid orders</span><span><b>${stats.customers}</b> customers</span></div>${low.length?AdminSection(`${low.length} low-stock item${low.length===1?"":"s"}`,`<div class="ui-low-stock"><span>${escapeHtml(low.slice(0,3).map((item)=>item.name).join(" · "))}${low.length>3?` +${low.length-3}`:""}</span><button class="link-btn" onclick="setTab('inventory')">View Inventory</button></div>`,"Needs attention", "", "ui-low-stock-section"):""}<div class="ui-kpi-grid ui-today-grid">${AdminCard("Orders to prepare",String(prep.length),"Today")}${AdminCard("Payment reviews",String(reviews.length),"Waiting for confirmation",reviews.length?"warn":"")}${AdminCard("Overdue pickups",String(overdue.length),"Past collection date",overdue.length?"warn":"")}${AdminCard("Completed this week",String(weeklyCompleted),"Collected normal-store orders")}${AdminCard("Partner sales",money(partnerTotals.sales),`${partnerTotals.orders} completed partner orders`)}</div><div class="ui-two-column">${AdminSection("Recent orders",AdminTable(["Order","Customer","Collection","Total","Status"],rows,"No orders yet."),"Normal store orders only",`<button class="link-btn" onclick="setTab('orders')">View all</button>`)}${AdminSection("Partner performance",`<div class="ui-empty" style="text-align:left"><b>${money(partnerTotals.sales)} eligible sales</b><span>${partnerTotals.orders} completed order${partnerTotals.orders===1?"":"s"} · ${(astate.partners||[]).filter((partner)=>partner.is_active).length} active partner${(astate.partners||[]).filter((partner)=>partner.is_active).length===1?"":"s"}</span><button class="btn-secondary" onclick="setTab('partner_report')">View Partner Report</button></div>`,"Kept separate from normal store revenue")}</div>`;
+  return `${AdminPageHeader(`Good ${now.getHours()<12?"morning":now.getHours()<18?"afternoon":"evening"}, ${name}`,`${DASHBOARD_MARKET==="MY"?"Malaysia · MYR":"Singapore · SGD"} · ${role}`,`<span class="dashboard-refresh-meta">Last updated ${escapeHtml(updated)}</span><button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing?"disabled":""}>${astate.dashboardRefreshing?"Refreshing…":"Refresh"}</button><a class="btn-primary" href="${ADMIN_CUSTOMER_SHOP_URL}" target="_blank" rel="noopener">View store ↗</a>`)}<div class="ui-kpi-grid">${AdminCard("Revenue",money(stats.monthlyRevenue),"This month")}${AdminCard("Orders",String(stats.orders),"Paid orders this month")}${AdminCard("Average order",money(average),"This month")}${AdminCard("Gross profit",money(stats.monthlyGrossProfit),`${stats.monthlyProfitMargin.toFixed(1)}% margin`)}</div><div class="ui-summary-strip"><span>All-time revenue <b>${money(stats.totalRevenue)}</b></span><span><b>${stats.totalOrders}</b> paid orders</span><span><b>${stats.customers}</b> customers</span></div>${low.length?AdminSection(`${low.length} low-stock item${low.length===1?"":"s"}`,`<div class="ui-low-stock"><span>${escapeHtml(low.slice(0,3).map((item)=>item.name).join(" · "))}${low.length>3?` +${low.length-3}`:""}</span><button class="link-btn" onclick="setTab('inventory')">View Inventory</button></div>`,"Needs attention", "", "ui-low-stock-section"):""}<div class="ui-kpi-grid ui-today-grid">${AdminCard("Orders to prepare",String(prep.length),"Today")}${AdminCard("Store payment reviews",String(storeReviews.length),"Direct orders · Open →",storeReviews.length?"warn":"","focusDashboardIssue('payment_review_store')")}${AdminCard("Partner payment reviews",String(partnerReviews.length),"Partner orders · Open →",partnerReviews.length?"warn":"","focusDashboardIssue('payment_review_partner')")}${AdminCard("Overdue pickups",String(overdue.length),"Past collection date",overdue.length?"warn":"")}${AdminCard("Completed this week",String(weeklyCompleted),"Collected normal-store orders")}${AdminCard("Partner sales",money(partnerTotals.sales),`${partnerTotals.orders} completed partner orders`)}</div><div class="ui-two-column">${AdminSection("Store orders",AdminTable(["Order","Customer","Collection","Total","Status"],rows,"No store orders yet."),"Recent direct orders",`<button class="link-btn" onclick="openDashboardOrders('direct')">View all</button>`)}${AdminSection("Partner orders",AdminTable(["Order","Customer","Partner","Collection","Total","Status"],partnerRows,"No Partner orders yet."),"Recent Partner orders · separate from store sales",`<button class="link-btn" onclick="openDashboardOrders('partner')">View all</button><button class="link-btn" onclick="setTab('partner_report')">Sales report</button>`)}</div>`;
 };
 
 const renderAvailabilityTabBeforeSimplification = renderAvailabilityTab;
