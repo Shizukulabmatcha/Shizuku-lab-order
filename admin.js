@@ -88,6 +88,7 @@ const astate = {
   analyticsFrom: "",
   analyticsTo: "",
   calendarMonth: null,
+  availabilityCalendarOpen: false,
   preparationDate: "",
   orderFilter: "all",
   orderSourceFilter: "all",
@@ -242,7 +243,7 @@ function setAvailabilityDraft(dateText) {
   const value = availabilityForDate(dateText);
   astate.availabilityDraft = { collection_date: dateText, is_open: value.is_open, collection_time: value.collection_time, pickup_windows: (value.pickup_windows || []).map((item) => ({ ...item })) };
 }
-function selectAvailabilityDate(dateText) { setAvailabilityDraft(dateText); render(); }
+function selectAvailabilityDate(dateText) { astate.availabilityCalendarOpen = true; setAvailabilityDraft(dateText); render(); }
 function setAvailabilityMarket(market) {
   astate.availabilityMarket = market === "MY" ? "MY" : "SG";
   try { localStorage.setItem("shizuku-availability-market", astate.availabilityMarket); } catch (_) {}
@@ -253,7 +254,38 @@ function changeCalendarMonth(amount) {
   const current = new Date(`${astate.calendarMonth}T12:00:00`);
   current.setMonth(current.getMonth() + amount);
   astate.calendarMonth = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}-01`;
+  astate.availabilityCalendarOpen = true;
   render();
+}
+let availabilityCalendarTouchX = null;
+let availabilityCalendarTouchY = null;
+let availabilityCalendarWheelDelta = 0;
+let availabilityCalendarWheelLast = 0;
+function startAvailabilityCalendarSwipe(event) {
+  if (!event.touches || event.touches.length !== 1) return;
+  availabilityCalendarTouchX = event.touches[0].clientX;
+  availabilityCalendarTouchY = event.touches[0].clientY;
+}
+function endAvailabilityCalendarSwipe(event) {
+  if (availabilityCalendarTouchX === null || !event.changedTouches || !event.changedTouches.length) return;
+  const dx = event.changedTouches[0].clientX - availabilityCalendarTouchX;
+  const dy = event.changedTouches[0].clientY - availabilityCalendarTouchY;
+  availabilityCalendarTouchX = null;
+  availabilityCalendarTouchY = null;
+  if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy) * 1.3) return;
+  event.preventDefault();
+  changeCalendarMonth(dx < 0 ? 1 : -1);
+}
+function wheelAvailabilityCalendar(event) {
+  if (Math.abs(event.deltaX) <= Math.abs(event.deltaY) * 1.3) return;
+  const now = Date.now();
+  if (now - availabilityCalendarWheelLast < 550) return;
+  availabilityCalendarWheelDelta += event.deltaX;
+  if (Math.abs(availabilityCalendarWheelDelta) < 55) return;
+  const direction = availabilityCalendarWheelDelta > 0 ? 1 : -1;
+  availabilityCalendarWheelDelta = 0;
+  availabilityCalendarWheelLast = now;
+  changeCalendarMonth(direction);
 }
 function onAvailabilityField(key, value) { astate.availabilityDraft[key] = value; }
 function availabilityRanges(value) {
@@ -4207,11 +4239,11 @@ function renderAvailabilityTab() {
     <button class="btn-primary" style="width:100%;margin:4px 0 20px;" onclick="saveSettings()">Save weekly schedule</button>
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:16px 0 8px;">Opening calendar</div>
-    <div class="hint" style="text-align:left;margin:0 0 10px;">Your weekly schedule repeats automatically. Click a date to close it, open an extra day, or use different windows and limits for that date.</div>
+    <div class="hint" style="text-align:left;margin:0 0 10px;">Your weekly schedule repeats automatically. Click a date to close it, open an extra day, or use different windows and limits for that date. Swipe left or right to change months.</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 10px;"><button class="link-btn" onclick="changeCalendarMonth(-1)">←</button><b>${month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</b><button class="link-btn" onclick="changeCalendarMonth(1)">→</button></div>
     <style>.availability-week,.availability-calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;width:100%;min-width:0}.availability-week{text-align:center;margin-bottom:6px;color:#777064;font-size:12px}.availability-day{width:100%;min-width:0;overflow:hidden}@media(max-width:640px){.availability-week,.availability-calendar{gap:3px}.availability-week{font-size:9px}.availability-day{min-height:54px!important;padding:5px 3px!important;font-size:11px}.availability-day span{display:block;font-size:8px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}</style>
     <div class="availability-week"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
-    <div class="availability-calendar">${cells.join("")}</div>
+    <div class="availability-calendar" ontouchstart="startAvailabilityCalendarSwipe(event)" ontouchend="endAvailabilityCalendarSwipe(event)" onwheel="wheelAvailabilityCalendar(event)">${cells.join("")}</div>
     <div class="order-card" style="margin-top:16px;">
       <div class="order-top"><b>${escapeHtml(selected.collection_date)}</b><span class="hint">${existing ? "Special calendar setting" : "Normal weekly schedule"}</span></div>
       <label class="slot" style="cursor:pointer;gap:10px;margin:12px 0;">
@@ -4599,7 +4631,7 @@ renderAvailabilityTab = function () {
   const rows=weekly.map((day)=>{const ranges=day.is_open?(day.windows||[]).map((slot)=>slot.range||"Time not set").join(" · "):"Closed";const capacity=day.is_open?(day.windows||[]).map((slot)=>slot.capacity?String(slot.capacity):"Unlimited").join(" · "):"—";return `<div class="availability-compact-row"><b>${escapeHtml(day.label)}</b><span>${escapeHtml(ranges)}</span><small>${escapeHtml(capacity)}</small><button class="btn-secondary" onclick="editWeeklyAvailabilityDay(${day.day})">Edit</button></div>`;}).join("");
   const selected=weekly.find((day)=>Number(day.day)===Number(astate.availabilityEditingDay));
   const editor=selected?Drawer(`${selected.label} availability`,`${Toggle(selected.is_open,"Open for pickup",`setWeeklyDayOpen(${selected.day},this.checked)`)}${selected.is_open?(selected.windows||[]).map((slot,index)=>`<div class="availability-window-editor"><div class="field"><label>Pickup window</label><input value="${escapeHtml(slot.range||"")}" placeholder="10:00 AM - 12:00 PM" oninput="setWeeklyWindow(${selected.day},${index},'range',this.value)"></div><div class="field"><label>Order limit</label><input type="number" min="1" value="${slot.capacity??""}" placeholder="Unlimited" oninput="setWeeklyWindow(${selected.day},${index},'capacity',this.value)"></div><button class="link-danger" onclick="removeWeeklyWindow(${selected.day},${index})">Remove</button></div>`).join("")+`<button class="btn-secondary" onclick="addWeeklyWindow(${selected.day})">+ Add pickup window</button>`:""}<div class="ui-toolbar" style="justify-content:flex-end"><button class="btn-secondary" onclick="astate.availabilityEditingDay=null;render()">Close</button><button class="btn-primary" onclick="saveSettings();astate.availabilityEditingDay=null">Save schedule</button></div>`,`astate.availabilityEditingDay=null;render()`):"";
-  return `<div class="ui-tabs"><button class="${market==="SG"?"active":""}" onclick="setAvailabilityMarket('SG')">Singapore</button><button class="${market==="MY"?"active":""}" onclick="setAvailabilityMarket('MY')">Malaysia</button></div>${Accordion("Ordering window",`<div class="product-editor-grid"><div class="field"><label>Order up to (days ahead)</label><input type="number" min="0" max="60" value="${s[advanceKey]??14}" oninput="onSettingsField('${advanceKey}',Number(this.value))"></div><div class="field"><label>Minimum notice (hours)</label><input type="number" min="0" max="168" value="${s[noticeKey]??0}" oninput="onSettingsField('${noticeKey}',Number(this.value))"></div><div class="field"><label>Pickup interval</label><select onchange="onSettingsField('${intervalKey}',Number(this.value))">${[15,30,60].map((value)=>`<option value="${value}" ${Number(s[intervalKey]??30)===value?"selected":""}>Every ${value} minutes</option>`).join("")}</select></div></div><button class="btn-primary" onclick="saveSettings()">Save ordering window</button>`,false,`${s[advanceKey]??14} days ahead · ${s[noticeKey]??0}h notice`)}${AdminSection("Weekly schedule",rows,"Only open a day when you need to edit it.")}${Accordion("Calendar exceptions & advanced availability",renderAvailabilityTabBeforeSimplification(),false,"Special open or closed dates, capacity and pickup overrides")}${editor}`;
+  return `<div class="ui-tabs"><button class="${market==="SG"?"active":""}" onclick="setAvailabilityMarket('SG')">Singapore</button><button class="${market==="MY"?"active":""}" onclick="setAvailabilityMarket('MY')">Malaysia</button></div>${Accordion("Ordering window",`<div class="product-editor-grid"><div class="field"><label>Order up to (days ahead)</label><input type="number" min="0" max="60" value="${s[advanceKey]??14}" oninput="onSettingsField('${advanceKey}',Number(this.value))"></div><div class="field"><label>Minimum notice (hours)</label><input type="number" min="0" max="168" value="${s[noticeKey]??0}" oninput="onSettingsField('${noticeKey}',Number(this.value))"></div><div class="field"><label>Pickup interval</label><select onchange="onSettingsField('${intervalKey}',Number(this.value))">${[15,30,60].map((value)=>`<option value="${value}" ${Number(s[intervalKey]??30)===value?"selected":""}>Every ${value} minutes</option>`).join("")}</select></div></div><button class="btn-primary" onclick="saveSettings()">Save ordering window</button>`,false,`${s[advanceKey]??14} days ahead · ${s[noticeKey]??0}h notice`)}${AdminSection("Weekly schedule",rows,"Only open a day when you need to edit it.")}${Accordion("Calendar exceptions & advanced availability",renderAvailabilityTabBeforeSimplification(),astate.availabilityCalendarOpen,"Special open or closed dates, capacity and pickup overrides").replace("<details class="ui-accordion"", "<details class="ui-accordion" ontoggle="astate.availabilityCalendarOpen=this.open"")}${editor}`;
 };
 
 const renderPromosTabBeforeSimplification = renderPromosTab;
