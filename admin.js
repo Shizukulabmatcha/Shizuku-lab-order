@@ -34,6 +34,7 @@ const astate = {
   productSort: "manual",
   productEditorSection: "basic",
   openActionMenu: "",
+  openOrderStatusMenu: "",
   notificationSection: "seller",
   marketingSection: "contacts",
   eventPackages: [],
@@ -88,6 +89,7 @@ const astate = {
   analyticsFrom: "",
   analyticsTo: "",
   calendarMonth: null,
+  availabilityCalendarOpen: false,
   preparationDate: "",
   orderFilter: "all",
   orderSourceFilter: "all",
@@ -242,7 +244,7 @@ function setAvailabilityDraft(dateText) {
   const value = availabilityForDate(dateText);
   astate.availabilityDraft = { collection_date: dateText, is_open: value.is_open, collection_time: value.collection_time, pickup_windows: (value.pickup_windows || []).map((item) => ({ ...item })) };
 }
-function selectAvailabilityDate(dateText) { setAvailabilityDraft(dateText); render(); }
+function selectAvailabilityDate(dateText) { astate.availabilityCalendarOpen = true; setAvailabilityDraft(dateText); render(); }
 function setAvailabilityMarket(market) {
   astate.availabilityMarket = market === "MY" ? "MY" : "SG";
   try { localStorage.setItem("shizuku-availability-market", astate.availabilityMarket); } catch (_) {}
@@ -253,7 +255,38 @@ function changeCalendarMonth(amount) {
   const current = new Date(`${astate.calendarMonth}T12:00:00`);
   current.setMonth(current.getMonth() + amount);
   astate.calendarMonth = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}-01`;
+  astate.availabilityCalendarOpen = true;
   render();
+}
+let availabilityCalendarTouchX = null;
+let availabilityCalendarTouchY = null;
+let availabilityCalendarWheelDelta = 0;
+let availabilityCalendarWheelLast = 0;
+function startAvailabilityCalendarSwipe(event) {
+  if (!event.touches || event.touches.length !== 1) return;
+  availabilityCalendarTouchX = event.touches[0].clientX;
+  availabilityCalendarTouchY = event.touches[0].clientY;
+}
+function endAvailabilityCalendarSwipe(event) {
+  if (availabilityCalendarTouchX === null || !event.changedTouches || !event.changedTouches.length) return;
+  const dx = event.changedTouches[0].clientX - availabilityCalendarTouchX;
+  const dy = event.changedTouches[0].clientY - availabilityCalendarTouchY;
+  availabilityCalendarTouchX = null;
+  availabilityCalendarTouchY = null;
+  if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy) * 1.3) return;
+  event.preventDefault();
+  changeCalendarMonth(dx < 0 ? 1 : -1);
+}
+function wheelAvailabilityCalendar(event) {
+  if (Math.abs(event.deltaX) <= Math.abs(event.deltaY) * 1.3) return;
+  const now = Date.now();
+  if (now - availabilityCalendarWheelLast < 550) return;
+  availabilityCalendarWheelDelta += event.deltaX;
+  if (Math.abs(availabilityCalendarWheelDelta) < 55) return;
+  const direction = availabilityCalendarWheelDelta > 0 ? 1 : -1;
+  availabilityCalendarWheelDelta = 0;
+  availabilityCalendarWheelLast = now;
+  changeCalendarMonth(direction);
 }
 function onAvailabilityField(key, value) { astate.availabilityDraft[key] = value; }
 function availabilityRanges(value) {
@@ -690,6 +723,15 @@ async function advanceOrderStatus(id) {
   const next = nextFulfilmentStatus(order);
   if (!next) return;
   await updateOrderStatus(id, next, true);
+}
+function toggleOrderStatusMenu(id) {
+  const key = String(id);
+  astate.openOrderStatusMenu = astate.openOrderStatusMenu === key ? "" : key;
+  render();
+}
+async function chooseOrderStatus(id, status) {
+  astate.openOrderStatusMenu = "";
+  await updateOrderStatus(id, status, true);
 }
 
 function toggleOrderExpanded(id) {
@@ -1645,7 +1687,7 @@ function dashboardStyles() {
     .shop-admin [data-theme-preview]{background:var(--preview-bg)!important;color:var(--preview-text)!important;border-color:var(--preview-primary)!important;box-shadow:var(--preview-shadow)!important}.shop-admin [data-theme-preview] .dashboard-card-head{border-color:color-mix(in srgb,var(--preview-text) 18%,transparent)!important}.shop-admin [data-theme-preview] .dashboard-card-head h2,.shop-admin [data-theme-preview] .dashboard-card-head span{color:var(--preview-text)!important}.shop-admin [data-theme-preview] .theme-preview-screen{background:var(--preview-card)!important;color:var(--preview-text)!important;border-color:color-mix(in srgb,var(--preview-text) 22%,transparent)!important}.shop-admin [data-theme-preview] .theme-preview-button,.shop-admin [data-theme-preview] .btn-primary{background:var(--preview-primary)!important;color:var(--preview-bg)!important}.shop-admin [data-theme-preview] .btn-secondary{background:var(--preview-card)!important;color:var(--preview-primary)!important;border-color:var(--preview-primary)!important}
     .costing-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}.costing-table{width:100%;border-collapse:collapse;min-width:860px}.costing-table th,.costing-table td{padding:13px 14px;text-align:left;border-bottom:1px solid var(--admin-line);font-size:13px}.costing-table th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--admin-muted)}.costing-table tbody tr:hover{background:var(--admin-soft)}.idea-board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.idea-card{min-height:190px}.idea-card.idea-archived{opacity:.6}
     .workspace-role-pill{display:inline-flex;align-items:center;margin-top:12px;padding:7px 11px;border-radius:999px;background:var(--admin-soft);color:var(--admin-primary);font-size:12px;font-weight:800}.team-profile,.team-member-main,.team-member-actions{display:flex;align-items:center;gap:12px}.team-profile{padding:4px 0}.team-profile>div:nth-child(2){flex:1;min-width:0}.team-avatar{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:var(--admin-primary);color:var(--admin-on-primary);font:800 20px/1 Georgia,serif;flex:0 0 auto}.team-avatar.small{width:38px;height:38px;border-radius:12px;font-size:16px}.team-member-actions{justify-content:flex-end;flex-wrap:wrap}.workspace-preference-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.activity-list .queue-row{cursor:default}
-    .orders-mobile-list{display:none}.orders-bulk-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px}.orders-bulk-tools button{padding:9px 12px}.orders-table-card{overflow:hidden}.orders-table-wrap{overflow-x:auto}.orders-table{width:100%;border-collapse:collapse;min-width:940px}.orders-table th,.orders-table td{padding:12px 11px;border-bottom:1px solid var(--admin-line);text-align:left;font-size:13px;vertical-align:middle}.orders-table th{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--admin-muted)}.orders-table td small{display:block;margin-top:4px;color:var(--admin-muted)}.orders-table tbody tr:not(.orders-detail-row):hover{background:var(--admin-soft)}.orders-table .btn-secondary{padding:7px 10px}.orders-detail-row td{padding:0 18px 18px;background:var(--admin-soft)}.order-expanded-detail{padding:15px 0}.order-status-step{appearance:none;display:inline-flex;align-items:center;justify-content:center;min-width:92px;padding:8px 13px;border:1px solid var(--admin-line);border-radius:999px;background:var(--admin-soft);color:var(--admin-text);font:750 12px/1 inherit;text-align:center;white-space:nowrap;cursor:pointer;transition:transform .12s ease,filter .12s ease}.order-status-step:hover{filter:brightness(.97);transform:translateY(-1px)}.order-status-step:active{transform:translateY(0)}.order-status-step:disabled{cursor:default;opacity:.8;transform:none}.order-status-pill{display:inline-block;border:1px solid var(--admin-line);border-radius:999px;padding:8px 12px;font-size:11px;color:var(--admin-muted);white-space:nowrap}.status-confirmed,.status-pending,.status-awaiting_confirmation{background:color-mix(in srgb,var(--admin-primary) 12%,var(--admin-card))!important;color:var(--admin-primary)!important}.status-preparing{background:#fff3d8!important;color:#9b6616!important}.status-ready{background:#e3f1ff!important;color:#27628f!important}.status-collected{background:#e4f3e5!important;color:#356b45!important}.status-cancelled{background:#f8e5e2!important;color:#b33333!important}
+    .orders-mobile-list{display:none}.orders-bulk-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px}.orders-bulk-tools button{padding:9px 12px}.orders-table-card{overflow:hidden}.orders-table-wrap{overflow-x:auto}.orders-table{width:100%;border-collapse:collapse;min-width:940px}.orders-table th,.orders-table td{padding:12px 11px;border-bottom:1px solid var(--admin-line);text-align:left;font-size:13px;vertical-align:middle}.orders-table th{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--admin-muted)}.orders-table td small{display:block;margin-top:4px;color:var(--admin-muted)}.orders-table tbody tr:not(.orders-detail-row):hover{background:var(--admin-soft)}.orders-table .btn-secondary{padding:7px 10px}.orders-detail-row td{padding:0 18px 18px;background:var(--admin-soft)}.order-expanded-detail{padding:15px 0}.order-status-step{appearance:none;display:inline-flex;align-items:center;justify-content:center;min-width:92px;padding:8px 13px;border:1px solid var(--admin-line);border-radius:999px;background:var(--admin-soft);color:var(--admin-text);font:750 12px/1 inherit;text-align:center;white-space:nowrap;cursor:pointer;transition:transform .12s ease,filter .12s ease}.order-status-step:hover{filter:brightness(.97);transform:translateY(-1px)}.order-status-step:active{transform:translateY(0)}.order-status-step:disabled{cursor:default;opacity:.8;transform:none}.order-status-pill{display:inline-block;border:1px solid var(--admin-line);border-radius:999px;padding:8px 12px;font-size:11px;color:var(--admin-muted);white-space:nowrap}.order-status-control{display:inline-grid;gap:6px;min-width:120px}.order-status-step{gap:7px}.order-status-menu{display:grid;gap:3px;min-width:190px;padding:7px;border:1px solid var(--admin-line);border-radius:12px;background:var(--admin-card);box-shadow:var(--admin-card-shadow);text-align:left}.order-status-menu button{border:0;background:transparent;color:var(--admin-text);padding:8px 10px;border-radius:7px;text-align:left;font:inherit;font-size:12px;cursor:pointer}.order-status-menu button:hover{background:var(--admin-soft)}.order-status-menu button:disabled{color:var(--admin-primary);font-weight:800;cursor:default}.order-status-menu small{padding:7px 10px;color:var(--admin-muted);font-size:10px;line-height:1.4}.status-confirmed,.status-pending,.status-awaiting_confirmation{background:color-mix(in srgb,var(--admin-primary) 12%,var(--admin-card))!important;color:var(--admin-primary)!important}.status-preparing{background:#fff3d8!important;color:#9b6616!important}.status-ready{background:#e3f1ff!important;color:#27628f!important}.status-collected{background:#e4f3e5!important;color:#356b45!important}.status-cancelled{background:#f8e5e2!important;color:#b33333!important}
     @media(max-width:1100px){.shop-admin .dashboard-summary-grid,.shop-admin .analytics-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.shop-admin .analytics-report-grid,.shop-admin .analytics-report-grid-secondary{grid-template-columns:1fr}}
     @media(max-width:800px){
       .shop-admin{display:grid;grid-template-columns:142px minmax(0,1fr);align-items:start}
@@ -2105,7 +2147,7 @@ function renderDashboardTab() {
   const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate()+7);
   const weeklyCompleted = ordersForMarket(DASHBOARD_MARKET).filter((order)=>!order.partner_id && order.payment_status==='paid' && ['collected','completed','delivered'].includes(order.order_status) && String(order.collection_date||'')>=localDateKey(weekStart) && String(order.collection_date||'')<localDateKey(weekEnd)).length;
   return `
-    <div class="admin-top"><div><div class="admin-eyebrow">${DASHBOARD_MARKET === "MY" ? "Malaysia · MYR" : "Singapore · SGD"} command center</div><h1 class="admin-title">Good day, ${escapeHtml(workspaceName)}</h1><div class="workspace-role-pill">${escapeHtml(workspaceRole)}</div><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><div class="dashboard-top-actions">${astate.settings?.show_dashboard_refresh !== false ? `<button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing ? "disabled" : ""}>${astate.dashboardRefreshing ? "Refreshing…" : "↻ Refresh"}</button><span class="dashboard-refresh-meta">Last updated: ${escapeHtml(updatedTime)}</span>` : ""}<a class="open-shop" href="${ADMIN_CUSTOMER_SHOP_URL}" target="_blank" rel="noopener">Open customer shop ↗</a></div></div>
+    <div class="admin-top"><div><div class="admin-eyebrow">${DASHBOARD_MARKET === "MY" ? "Malaysia · MYR" : "Singapore · SGD"} command center</div><h1 class="admin-title">Good day, ${escapeHtml(workspaceName)}</h1><div class="workspace-role-pill">${escapeHtml(workspaceRole)}</div><p class="admin-subtitle">Your orders, revenue and customers — all in one place.</p></div><div class="dashboard-top-actions"><button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing ? "disabled" : ""}>${astate.dashboardRefreshing ? "Refreshing…" : "↻ Refresh"}</button><a class="open-shop" href="${ADMIN_CUSTOMER_SHOP_URL}" target="_blank" rel="noopener">View store ↗</a><span class="dashboard-refresh-meta">Last updated: ${escapeHtml(updatedTime)}</span></div></div>
     <div class="stat-grid dashboard-summary-grid">
       <div class="stat"><div class="stat-label"><span class="stat-icon">✦</span>Total sales</div><div class="stat-value">${money(stats.totalRevenue)}</div><div class="stat-help">${stats.totalOrders} ${DASHBOARD_MARKET === "MY" ? "Malaysia" : "Singapore"} paid sale${stats.totalOrders === 1 ? "" : "s"}</div></div>
       <div class="stat"><div class="stat-label"><span class="stat-icon">▣</span>Sales this month</div><div class="stat-value">${money(stats.monthlyRevenue)}</div><div class="stat-help">${stats.orders} paid order${stats.orders === 1 ? "" : "s"} this month</div></div>
@@ -3153,11 +3195,14 @@ function renderOrders() {
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:13px;">${filters.map(([key, label]) => `<button class="${astate.orderFilter === key ? "btn-primary" : "btn-secondary"}" style="padding:8px 11px;font-size:12px;" onclick="setOrderFilter('${key}')">${label}</button>`).join("")}</div>
   </section><section class="dashboard-card" style="padding:16px 20px;margin-bottom:18px;"><div style="display:flex;align-items:end;gap:10px;flex-wrap:wrap;"><div class="field" style="margin:0"><label>Sales from</label><input type="date" value="${escapeHtml(astate.salesFrom)}" onchange="astate.salesFrom=this.value;render()"></div><div class="field" style="margin:0"><label>To</label><input type="date" value="${escapeHtml(astate.salesTo)}" onchange="astate.salesTo=this.value;render()"></div><button class="btn-secondary" onclick="downloadSalesExcel()">Download Excel</button><button class="btn-secondary" onclick="printSalesReport()">Print / Save PDF</button><span class="hint" style="margin:0 0 10px">${salesOrders().length} sales · ${money(salesOrders().reduce((sum,o)=>sum+Number(o.total||0),0))}. Free tastings are excluded.</span></div></section>`;
   const quickStatus = (o) => {
-    if (o.payment_status !== "paid") return `<span class="order-status-pill">${escapeHtml(PAY_LABEL[o.payment_status] || ORDER_LABEL[o.order_status] || "Payment review")}</span>`;
-    const currentLabel = o.order_status === "confirmed" ? "Paid" : o.order_status === "ready" ? "Ready for collection" : ORDER_LABEL[o.order_status] || "Paid";
-    const next = nextFulfilmentStatus(o);
-    const nextLabel = next === "ready" ? "Ready for collection" : ORDER_LABEL[next] || next;
-    return `<button type="button" class="order-status-step status-${escapeHtml(o.order_status || "confirmed")}" ${next ? `onclick="advanceOrderStatus('${o.id}')" aria-label="Change ${escapeHtml(o.order_number || "order")} to ${escapeHtml(nextLabel)}" title="Press to mark ${escapeHtml(nextLabel)}"` : "disabled"}>${escapeHtml(currentLabel)}${o.order_status === "collected" ? " ✓" : ""}</button>`;
+    if (o.payment_status !== "paid" || o.order_status === "cancelled" || o.deleted_at) return `<span class="order-status-pill">${escapeHtml(o.order_status === "cancelled" ? "Cancelled" : PAY_LABEL[o.payment_status] || ORDER_LABEL[o.order_status] || "Payment review")}</span>`;
+    const current = o.order_status === "confirmed" ? "confirmed" : String(o.order_status || "confirmed");
+    const currentLabel = current === "confirmed" ? "Paid" : ORDER_LABEL[current] || "Paid";
+    const choices = o.is_b2b
+      ? [["preparing", "Preparing"], ["on_the_way", "On the way"], ["delivered", "Delivered"], ["completed", "Completed"]]
+      : [["confirmed", "Paid"], ["preparing", "Preparing"], ["ready", "Ready for collection"], ["collected", "Collected"], ["completed", "Completed"]];
+    const open = astate.openOrderStatusMenu === String(o.id);
+    return `<div class="order-status-control"><button type="button" class="order-status-step status-${escapeHtml(current)}" onclick="toggleOrderStatusMenu('${o.id}')" aria-expanded="${open}" aria-label="Choose status for ${escapeHtml(o.order_number || "order")}">${escapeHtml(currentLabel)} <span aria-hidden="true">⌄</span></button>${open ? `<div class="order-status-menu" role="group" aria-label="Choose order status">${choices.map(([value,label]) => `<button type="button" ${current === value ? 'disabled aria-current="true"' : `onclick="chooseOrderStatus('${o.id}','${value}')"`}>${escapeHtml(label)}${current === value ? " ✓" : ""}</button>`).join("")}<small>Only “Ready for collection” sends the collection email. “Completed” does not.</small></div>` : ""}</div>`;
   };
   const orderKindBadge = (o) => o.order_kind === "matcha_pass_purchase" ? `<span class="queue-status">Matcha Pass Purchase</span>` : o.order_kind === "matcha_pass_redemption" ? `<span class="queue-status">Matcha Pass Redemption</span>` : "";
   const details = (o) => {
@@ -4207,11 +4252,11 @@ function renderAvailabilityTab() {
     <button class="btn-primary" style="width:100%;margin:4px 0 20px;" onclick="saveSettings()">Save weekly schedule</button>
     <div class="divider"></div>
     <div class="display" style="font-size:20px;margin:16px 0 8px;">Opening calendar</div>
-    <div class="hint" style="text-align:left;margin:0 0 10px;">Your weekly schedule repeats automatically. Click a date to close it, open an extra day, or use different windows and limits for that date.</div>
+    <div class="hint" style="text-align:left;margin:0 0 10px;">Your weekly schedule repeats automatically. Click a date to close it, open an extra day, or use different windows and limits for that date. Swipe left or right to change months.</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 10px;"><button class="link-btn" onclick="changeCalendarMonth(-1)">←</button><b>${month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</b><button class="link-btn" onclick="changeCalendarMonth(1)">→</button></div>
     <style>.availability-week,.availability-calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;width:100%;min-width:0}.availability-week{text-align:center;margin-bottom:6px;color:#777064;font-size:12px}.availability-day{width:100%;min-width:0;overflow:hidden}@media(max-width:640px){.availability-week,.availability-calendar{gap:3px}.availability-week{font-size:9px}.availability-day{min-height:54px!important;padding:5px 3px!important;font-size:11px}.availability-day span{display:block;font-size:8px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}</style>
     <div class="availability-week"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
-    <div class="availability-calendar">${cells.join("")}</div>
+    <div class="availability-calendar" ontouchstart="startAvailabilityCalendarSwipe(event)" ontouchend="endAvailabilityCalendarSwipe(event)" onwheel="wheelAvailabilityCalendar(event)">${cells.join("")}</div>
     <div class="order-card" style="margin-top:16px;">
       <div class="order-top"><b>${escapeHtml(selected.collection_date)}</b><span class="hint">${existing ? "Special calendar setting" : "Normal weekly schedule"}</span></div>
       <label class="slot" style="cursor:pointer;gap:10px;margin:12px 0;">
@@ -4284,8 +4329,65 @@ const renderEditOverlayBeforeProductStructure = renderEditOverlay;
 function productEditorTabs(active) {
   return `<div class="product-editor-tabs" role="tablist">${[["basic","Basic"],["pricing","Pricing"],["availability","Availability"],["options","Options"],["advanced","Advanced"]].map(([key,label])=>`<button type="button" class="${active===key?"active":""}" onclick="setAdminViewState('productEditorSection','${key}')">${label}</button>`).join("")}</div>`;
 }
+function productGalleryExtras(item) {
+  return Array.isArray(item.image_urls) ? item.image_urls.filter((url)=>typeof url === "string" && url.trim()) : [];
+}
 function productImageEditor(item, label = "Product image") {
-  return `<div class="field"><label>${escapeHtml(label)}</label><input value="${escapeHtml(item.image_url||"")}" placeholder="Upload below or paste image URL" oninput="onEditField('image_url',this.value)"><input type="file" accept="image/*" style="margin-top:8px" onchange="uploadStorefrontImage(this,'products')">${item.image_url?`<img class="product-editor-image" src="${escapeHtml(item.image_url)}" alt="Preview">`:""}</div>`;
+  const extras = productGalleryExtras(item);
+  return `<div class="field"><label>${escapeHtml(label)} · cover photo</label><input value="${escapeHtml(item.image_url||"")}" placeholder="Upload below or paste image URL" oninput="onEditField('image_url',this.value)"><input type="file" accept="image/*" style="margin-top:8px" onchange="uploadStorefrontImage(this,'products')">${item.image_url?`<img class="product-editor-image" src="${escapeHtml(item.image_url)}" alt="Cover preview">`:""}<div style="margin-top:16px"><strong>More product photos</strong><p class="muted" style="margin:4px 0 10px">Upload several photos. Customers can swipe through them; the cover stays first.</p><input type="file" accept="image/*" multiple onchange="uploadProductGalleryImages(this)"><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">${extras.map((url,index)=>`<div style="width:120px"><img src="${escapeHtml(url)}" alt="Product photo ${index+2}" style="width:120px;height:96px;object-fit:cover;border-radius:10px"><div style="display:flex;gap:4px;flex-wrap:wrap"><button type="button" class="btn-secondary" onclick="setProductCoverPhoto(${index})">Cover</button><button type="button" class="btn-secondary" onclick="moveProductGalleryPhoto(${index},-1)" aria-label="Move photo left">←</button><button type="button" class="btn-secondary" onclick="moveProductGalleryPhoto(${index},1)" aria-label="Move photo right">→</button><button type="button" class="btn-secondary" onclick="removeProductGalleryPhoto(${index})">Remove</button></div></div>`).join("")}</div><div style="display:flex;gap:8px;margin-top:10px"><input id="product-gallery-url" type="url" placeholder="Or paste another image URL" style="flex:1"><button type="button" class="btn-secondary" onclick="addProductGalleryUrl()">Add photo</button></div></div></div>`;
+}
+function addProductGalleryUrl() {
+  const input = document.getElementById("product-gallery-url");
+  const url = (input?.value || "").trim();
+  if (!/^https?:\/\//i.test(url)) { alert("Please enter a full http or https image URL."); return; }
+  const item = astate.editing;
+  if (!item) return;
+  const extras = productGalleryExtras(item);
+  if (url !== item.image_url && !extras.includes(url)) item.image_urls = [...extras,url];
+  render();
+}
+function removeProductGalleryPhoto(index) {
+  const item = astate.editing; if (!item) return;
+  item.image_urls = productGalleryExtras(item).filter((_,i)=>i!==index); render();
+}
+function moveProductGalleryPhoto(index,direction) {
+  const item = astate.editing; if (!item) return;
+  const extras = productGalleryExtras(item), next = index + direction;
+  if (next < 0 || next >= extras.length) return;
+  [extras[index],extras[next]] = [extras[next],extras[index]]; item.image_urls = extras; render();
+}
+function setProductCoverPhoto(index) {
+  const item = astate.editing; if (!item) return;
+  const extras = productGalleryExtras(item), cover = extras.splice(index,1)[0];
+  if (!cover) return;
+  if (item.image_url) extras.unshift(item.image_url);
+  item.image_url = cover; item.image_urls = extras; render();
+}
+async function uploadProductGalleryImages(input) {
+  const item = astate.editing, files = Array.from(input?.files || []);
+  if (!item || !files.length) return;
+  for (const file of files) {
+    if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) { alert("Each photo must be an image of 5 MB or smaller."); return; }
+  }
+  input.disabled = true;
+  const urls = [];
+  try {
+    for (const file of files) {
+      if (window.SLOW_STUDIO_DEMO_MODE) {
+        urls.push(await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);}));
+      } else {
+        const extension=(file.name.split(".").pop()||"jpg").replace(/[^a-z0-9]/gi,"");
+        const path=`products/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${extension}`;
+        const {error}=await db.storage.from("storefront-images").upload(path,file,{upsert:false,contentType:file.type});
+        if (error) throw error;
+        urls.push(db.storage.from("storefront-images").getPublicUrl(path).data.publicUrl);
+      }
+    }
+    item.image_urls=[...new Set([...productGalleryExtras(item),...urls].filter((url)=>url!==item.image_url))];
+  } catch (error) {
+    item.image_urls=[...new Set([...productGalleryExtras(item),...urls])];
+    alert("Some photos could not be uploaded: " + (error?.message || String(error)));
+  } finally { input.disabled=false; render(); }
 }
 function renderProductChoiceEditor(item, pass = false) {
   const isMalaysiaAdmin = ADMIN_WORKSPACE_MARKET === "MY";
@@ -4599,7 +4701,7 @@ renderAvailabilityTab = function () {
   const rows=weekly.map((day)=>{const ranges=day.is_open?(day.windows||[]).map((slot)=>slot.range||"Time not set").join(" · "):"Closed";const capacity=day.is_open?(day.windows||[]).map((slot)=>slot.capacity?String(slot.capacity):"Unlimited").join(" · "):"—";return `<div class="availability-compact-row"><b>${escapeHtml(day.label)}</b><span>${escapeHtml(ranges)}</span><small>${escapeHtml(capacity)}</small><button class="btn-secondary" onclick="editWeeklyAvailabilityDay(${day.day})">Edit</button></div>`;}).join("");
   const selected=weekly.find((day)=>Number(day.day)===Number(astate.availabilityEditingDay));
   const editor=selected?Drawer(`${selected.label} availability`,`${Toggle(selected.is_open,"Open for pickup",`setWeeklyDayOpen(${selected.day},this.checked)`)}${selected.is_open?(selected.windows||[]).map((slot,index)=>`<div class="availability-window-editor"><div class="field"><label>Pickup window</label><input value="${escapeHtml(slot.range||"")}" placeholder="10:00 AM - 12:00 PM" oninput="setWeeklyWindow(${selected.day},${index},'range',this.value)"></div><div class="field"><label>Order limit</label><input type="number" min="1" value="${slot.capacity??""}" placeholder="Unlimited" oninput="setWeeklyWindow(${selected.day},${index},'capacity',this.value)"></div><button class="link-danger" onclick="removeWeeklyWindow(${selected.day},${index})">Remove</button></div>`).join("")+`<button class="btn-secondary" onclick="addWeeklyWindow(${selected.day})">+ Add pickup window</button>`:""}<div class="ui-toolbar" style="justify-content:flex-end"><button class="btn-secondary" onclick="astate.availabilityEditingDay=null;render()">Close</button><button class="btn-primary" onclick="saveSettings();astate.availabilityEditingDay=null">Save schedule</button></div>`,`astate.availabilityEditingDay=null;render()`):"";
-  return `<div class="ui-tabs"><button class="${market==="SG"?"active":""}" onclick="setAvailabilityMarket('SG')">Singapore</button><button class="${market==="MY"?"active":""}" onclick="setAvailabilityMarket('MY')">Malaysia</button></div>${Accordion("Ordering window",`<div class="product-editor-grid"><div class="field"><label>Order up to (days ahead)</label><input type="number" min="0" max="60" value="${s[advanceKey]??14}" oninput="onSettingsField('${advanceKey}',Number(this.value))"></div><div class="field"><label>Minimum notice (hours)</label><input type="number" min="0" max="168" value="${s[noticeKey]??0}" oninput="onSettingsField('${noticeKey}',Number(this.value))"></div><div class="field"><label>Pickup interval</label><select onchange="onSettingsField('${intervalKey}',Number(this.value))">${[15,30,60].map((value)=>`<option value="${value}" ${Number(s[intervalKey]??30)===value?"selected":""}>Every ${value} minutes</option>`).join("")}</select></div></div><button class="btn-primary" onclick="saveSettings()">Save ordering window</button>`,false,`${s[advanceKey]??14} days ahead · ${s[noticeKey]??0}h notice`)}${AdminSection("Weekly schedule",rows,"Only open a day when you need to edit it.")}${Accordion("Calendar exceptions & advanced availability",renderAvailabilityTabBeforeSimplification(),false,"Special open or closed dates, capacity and pickup overrides")}${editor}`;
+  return `<div class="ui-tabs"><button class="${market==="SG"?"active":""}" onclick="setAvailabilityMarket('SG')">Singapore</button><button class="${market==="MY"?"active":""}" onclick="setAvailabilityMarket('MY')">Malaysia</button></div>${Accordion("Ordering window",`<div class="product-editor-grid"><div class="field"><label>Order up to (days ahead)</label><input type="number" min="0" max="60" value="${s[advanceKey]??14}" oninput="onSettingsField('${advanceKey}',Number(this.value))"></div><div class="field"><label>Minimum notice (hours)</label><input type="number" min="0" max="168" value="${s[noticeKey]??0}" oninput="onSettingsField('${noticeKey}',Number(this.value))"></div><div class="field"><label>Pickup interval</label><select onchange="onSettingsField('${intervalKey}',Number(this.value))">${[15,30,60].map((value)=>`<option value="${value}" ${Number(s[intervalKey]??30)===value?"selected":""}>Every ${value} minutes</option>`).join("")}</select></div></div><button class="btn-primary" onclick="saveSettings()">Save ordering window</button>`,false,`${s[advanceKey]??14} days ahead · ${s[noticeKey]??0}h notice`)}${AdminSection("Weekly schedule",rows,"Only open a day when you need to edit it.")}${Accordion("Calendar exceptions & advanced availability",renderAvailabilityTabBeforeSimplification(),astate.availabilityCalendarOpen,"Special open or closed dates, capacity and pickup overrides").replace('<details class="ui-accordion"', '<details class="ui-accordion" ontoggle="astate.availabilityCalendarOpen=this.open"')}${editor}`;
 };
 
 const renderPromosTabBeforeSimplification = renderPromosTab;
@@ -4745,7 +4847,7 @@ function render() {
   const tabTitle = { analytics:"Analytics",partner_report:"Partner Report",preparation:"Today’s Prep",orders:"Orders",partners:"Partners",matcha_passes:"Matcha Pass",menu:"Products",inventory:"Inventory & Costing",costing:"Inventory & Costing",promos:"Promos",rewards:"Rewards",customers:"Customers",messages:"Messages",reviews:"Reviews",marketing:"Campaigns & Contacts",events:"Events",availability:"Availability",faq:"FAQ",notifications:"Notifications",brand:"Brand Colours",wording:"Wording",customer_page:"Customer Page",store_details:"Store Details",account:"Account" };
   const tabSubtitle = { preparation:"Every paid drink to prepare today.",orders:"Review payments and manage customer orders.",partners:"Referral links, member benefits, commission and payouts.",matcha_passes:"Pass balances, redemption history and customer emails.",menu:"Search, filter and maintain products and options.",inventory:"Stock, purchases, recipes, product cost, profit and margin in one place.",costing:"Stock, purchases, recipes, product cost, profit and margin in one place.",promos:"Create and maintain discounts.",rewards:"Manage repeat-customer rewards.",customers:"Customer history and private notes.",messages:"Order-linked conversations.",reviews:"Moderate verified customer reviews.",marketing:"Contacts, campaigns and consent.",events:"Partner packages, costs and payment progress.",availability:"Weekly collection schedule and exceptions.",faq:"Compact answers with store-specific visibility.",notifications:"Seller alerts, customer emails and delivery activity.",brand:"Independent Admin and Customer Store colours.",wording:"Customer-facing labels and status messages.",customer_page:"Checkout, payment, receipt, chat and tracking.",store_details:"Store identity, collection points and payment details.",analytics:"Normal store sales and profitability.",partner_report:"Partner sales, commission and net earnings kept separate.",account:"Workspace access and preferences." };
   const page = astate.tab === "dashboard" ? renderDashboardTab() : `
-    ${AdminPageHeader(tabTitle[astate.tab]||"Dashboard",tabSubtitle[astate.tab]||"",`<a class="btn-secondary" href="${ADMIN_CUSTOMER_SHOP_URL}" target="_blank" rel="noopener">Open customer shop ↗</a>`)}
+    ${AdminPageHeader(tabTitle[astate.tab]||"Dashboard",tabSubtitle[astate.tab]||"",`<button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing ? "disabled" : ""}>${astate.dashboardRefreshing ? "Refreshing…" : "↻ Refresh"}</button><a class="btn-secondary" href="${ADMIN_CUSTOMER_SHOP_URL}" target="_blank" rel="noopener">View store ↗</a>`)}
     <div class="admin-content">
       ${astate.tab === "analytics" ? renderAnalyticsReportTab() : astate.tab === "partner_report" ? renderPartnerReportTab() : astate.tab === "preparation" ? renderPreparationTab() : astate.tab === "orders" ? renderOrders() : astate.tab === "partners" ? renderPartnersTab() : astate.tab === "matcha_passes" ? renderMatchaPassesTab() : astate.tab === "menu" ? renderMenuTab() : ["inventory","costing"].includes(astate.tab) ? renderInventoryTab() : astate.tab === "promos" ? renderPromosTab() : astate.tab === "rewards" ? renderRewardsTab() : astate.tab === "customers" ? renderCustomersTab() : astate.tab === "messages" ? renderMessagesTab() : astate.tab === "reviews" ? renderReviewsTab() : astate.tab === "marketing" ? renderMarketingTab() : astate.tab === "events" ? renderEventsTab() : astate.tab === "availability" ? renderAvailabilityTab() : astate.tab === "faq" ? renderFaqTab() : astate.tab === "notifications" ? renderNotificationsTab() : astate.tab === "brand" ? renderThemeDesignTab() : astate.tab === "wording" ? renderWordingTab() : astate.tab === "customer_page" ? renderCheckoutCommunicationTab() : astate.tab === "account" ? renderTeamTab() : renderSettingsTab()}
     </div>`;
