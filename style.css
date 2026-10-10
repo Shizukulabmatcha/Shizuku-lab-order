@@ -346,3 +346,14 @@ img{display:block;max-width:100%;}
 @media(max-width:620px){.partner-order-history-head{display:grid;align-items:stretch;gap:10px}.partner-order-history-head .btn-secondary{width:100%}.partner-order-history-table{display:none}.partner-order-history-cards{display:grid;gap:10px;margin-top:12px}}
 @media(max-width:350px){.partner-metrics{grid-template-columns:1fr}}
 .partner-statement-email-card{margin-top:18px;padding:18px;border:1px solid var(--admin-line);border-radius:16px;background:var(--admin-soft)}.partner-statement-email-card .dashboard-card-head{padding:0 0 12px}.partner-statement-email-preview{display:grid;gap:10px;margin:12px 0;padding:14px;border:1px solid var(--admin-line);border-radius:12px;background:var(--admin-card);font-size:12px;line-height:1.55}.partner-statement-attachment{display:flex;align-items:center;gap:7px;min-width:0;flex-wrap:wrap;font-size:12px}.partner-statement-attachment a{color:var(--admin-primary);overflow-wrap:anywhere}@media(max-width:620px){.partner-statement-email-card{padding:13px;margin-left:-2px;margin-right:-2px}.partner-statement-email-card .dashboard-card-head{display:block}.partner-statement-email-card input,.partner-statement-email-card textarea{min-width:0;width:100%}.partner-statement-attachment{display:grid;grid-template-columns:1fr}.partner-statement-attachment .link-danger{justify-self:start}}
+
+/* Product photo carousel: keeps the existing single-photo layout unchanged. */
+.product-gallery{position:relative;width:100%;overflow:hidden;background:var(--matcha-bg)}
+.product-gallery-track{display:flex;width:100%;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;scrollbar-width:none;touch-action:pan-x pan-y}
+.product-gallery-track::-webkit-scrollbar{display:none}
+.product-gallery-track .product-detail-image{flex:0 0 100%;min-width:100%;scroll-snap-align:start}
+.product-gallery-arrow{position:absolute;top:50%;transform:translateY(-50%);width:34px;height:34px;border:1px solid var(--line);border-radius:50%;background:rgba(255,255,255,.88);color:var(--matcha);font-size:27px;line-height:1;cursor:pointer}
+.product-gallery-arrow.previous{left:10px}.product-gallery-arrow.next{right:10px}
+.product-gallery-dots{position:absolute;left:0;right:0;bottom:9px;display:flex;justify-content:center;gap:6px}
+.product-gallery-dot{width:8px;height:8px;border:0;border-radius:50%;padding:0;background:rgba(255,255,255,.65);box-shadow:0 0 2px rgba(0,0,0,.3);cursor:pointer}
+.product-gallery-dot.active{background:var(--matcha);outline:1px solid white}
