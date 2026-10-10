@@ -4329,8 +4329,65 @@ const renderEditOverlayBeforeProductStructure = renderEditOverlay;
 function productEditorTabs(active) {
   return `<div class="product-editor-tabs" role="tablist">${[["basic","Basic"],["pricing","Pricing"],["availability","Availability"],["options","Options"],["advanced","Advanced"]].map(([key,label])=>`<button type="button" class="${active===key?"active":""}" onclick="setAdminViewState('productEditorSection','${key}')">${label}</button>`).join("")}</div>`;
 }
+function productGalleryExtras(item) {
+  return Array.isArray(item.image_urls) ? item.image_urls.filter((url)=>typeof url === "string" && url.trim()) : [];
+}
 function productImageEditor(item, label = "Product image") {
-  return `<div class="field"><label>${escapeHtml(label)}</label><input value="${escapeHtml(item.image_url||"")}" placeholder="Upload below or paste image URL" oninput="onEditField('image_url',this.value)"><input type="file" accept="image/*" style="margin-top:8px" onchange="uploadStorefrontImage(this,'products')">${item.image_url?`<img class="product-editor-image" src="${escapeHtml(item.image_url)}" alt="Preview">`:""}</div>`;
+  const extras = productGalleryExtras(item);
+  return `<div class="field"><label>${escapeHtml(label)} · cover photo</label><input value="${escapeHtml(item.image_url||"")}" placeholder="Upload below or paste image URL" oninput="onEditField('image_url',this.value)"><input type="file" accept="image/*" style="margin-top:8px" onchange="uploadStorefrontImage(this,'products')">${item.image_url?`<img class="product-editor-image" src="${escapeHtml(item.image_url)}" alt="Cover preview">`:""}<div style="margin-top:16px"><strong>More product photos</strong><p class="muted" style="margin:4px 0 10px">Upload several photos. Customers can swipe through them; the cover stays first.</p><input type="file" accept="image/*" multiple onchange="uploadProductGalleryImages(this)"><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">${extras.map((url,index)=>`<div style="width:120px"><img src="${escapeHtml(url)}" alt="Product photo ${index+2}" style="width:120px;height:96px;object-fit:cover;border-radius:10px"><div style="display:flex;gap:4px;flex-wrap:wrap"><button type="button" class="btn-secondary" onclick="setProductCoverPhoto(${index})">Cover</button><button type="button" class="btn-secondary" onclick="moveProductGalleryPhoto(${index},-1)" aria-label="Move photo left">←</button><button type="button" class="btn-secondary" onclick="moveProductGalleryPhoto(${index},1)" aria-label="Move photo right">→</button><button type="button" class="btn-secondary" onclick="removeProductGalleryPhoto(${index})">Remove</button></div></div>`).join("")}</div><div style="display:flex;gap:8px;margin-top:10px"><input id="product-gallery-url" type="url" placeholder="Or paste another image URL" style="flex:1"><button type="button" class="btn-secondary" onclick="addProductGalleryUrl()">Add photo</button></div></div></div>`;
+}
+function addProductGalleryUrl() {
+  const input = document.getElementById("product-gallery-url");
+  const url = (input?.value || "").trim();
+  if (!/^https?:\/\//i.test(url)) { alert("Please enter a full http or https image URL."); return; }
+  const item = astate.editing;
+  if (!item) return;
+  const extras = productGalleryExtras(item);
+  if (url !== item.image_url && !extras.includes(url)) item.image_urls = [...extras,url];
+  render();
+}
+function removeProductGalleryPhoto(index) {
+  const item = astate.editing; if (!item) return;
+  item.image_urls = productGalleryExtras(item).filter((_,i)=>i!==index); render();
+}
+function moveProductGalleryPhoto(index,direction) {
+  const item = astate.editing; if (!item) return;
+  const extras = productGalleryExtras(item), next = index + direction;
+  if (next < 0 || next >= extras.length) return;
+  [extras[index],extras[next]] = [extras[next],extras[index]]; item.image_urls = extras; render();
+}
+function setProductCoverPhoto(index) {
+  const item = astate.editing; if (!item) return;
+  const extras = productGalleryExtras(item), cover = extras.splice(index,1)[0];
+  if (!cover) return;
+  if (item.image_url) extras.unshift(item.image_url);
+  item.image_url = cover; item.image_urls = extras; render();
+}
+async function uploadProductGalleryImages(input) {
+  const item = astate.editing, files = Array.from(input?.files || []);
+  if (!item || !files.length) return;
+  for (const file of files) {
+    if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) { alert("Each photo must be an image of 5 MB or smaller."); return; }
+  }
+  input.disabled = true;
+  const urls = [];
+  try {
+    for (const file of files) {
+      if (window.SLOW_STUDIO_DEMO_MODE) {
+        urls.push(await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);}));
+      } else {
+        const extension=(file.name.split(".").pop()||"jpg").replace(/[^a-z0-9]/gi,"");
+        const path=`products/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${extension}`;
+        const {error}=await db.storage.from("storefront-images").upload(path,file,{upsert:false,contentType:file.type});
+        if (error) throw error;
+        urls.push(db.storage.from("storefront-images").getPublicUrl(path).data.publicUrl);
+      }
+    }
+    item.image_urls=[...new Set([...productGalleryExtras(item),...urls].filter((url)=>url!==item.image_url))];
+  } catch (error) {
+    item.image_urls=[...new Set([...productGalleryExtras(item),...urls])];
+    alert("Some photos could not be uploaded: " + (error?.message || String(error)));
+  } finally { input.disabled=false; render(); }
 }
 function renderProductChoiceEditor(item, pass = false) {
   const isMalaysiaAdmin = ADMIN_WORKSPACE_MARKET === "MY";
