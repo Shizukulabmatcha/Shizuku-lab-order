@@ -2179,6 +2179,32 @@ function openFaq(selectedItem) {
   if (shouldOpen) selectedItem.open = true;
 }
 
+function productGalleryPhotos(product) {
+  const extras = Array.isArray(product.image_urls) ? product.image_urls : [];
+  return [...new Set([product.image_url, ...extras].filter((url)=>typeof url === "string" && url.trim()))];
+}
+function renderProductImages(product) {
+  const photos = productGalleryPhotos(product);
+  if (!photos.length) photos.push("matcha-lab.jpg");
+  if (photos.length === 1) return `<img class="product-detail-image" src="${escapeHtml(photos[0])}" alt="${escapeHtml(product.name)}">`;
+  return `<div class="product-gallery"><div class="product-gallery-track" id="product-gallery-track" onscroll="syncProductGalleryDots(this)">${photos.map((url,index)=>`<img class="product-detail-image" src="${escapeHtml(url)}" alt="${escapeHtml(product.name)} photo ${index+1} of ${photos.length}" loading="${index?'lazy':'eager'}">`).join("")}</div><button type="button" class="product-gallery-arrow previous" onclick="scrollProductGallery(-1)" aria-label="Previous photo">‹</button><button type="button" class="product-gallery-arrow next" onclick="scrollProductGallery(1)" aria-label="Next photo">›</button><div class="product-gallery-dots" aria-label="Product photos">${photos.map((_,index)=>`<button type="button" class="product-gallery-dot ${index===0?'active':''}" onclick="showProductGalleryPhoto(${index})" aria-label="View photo ${index+1}" aria-current="${index===0?'true':'false'}"></button>`).join("")}</div></div>`;
+}
+function showProductGalleryPhoto(index) {
+  const track = document.getElementById("product-gallery-track");
+  if (track) track.scrollTo({left:track.clientWidth*index,behavior:"smooth"});
+}
+function scrollProductGallery(direction) {
+  const track = document.getElementById("product-gallery-track");
+  if (!track) return;
+  const index = Math.round(track.scrollLeft / Math.max(track.clientWidth,1));
+  const max = track.children.length-1;
+  showProductGalleryPhoto(Math.max(0,Math.min(max,index+direction)));
+}
+function syncProductGalleryDots(track) {
+  const index = Math.round(track.scrollLeft / Math.max(track.clientWidth,1));
+  document.querySelectorAll(".product-gallery-dot").forEach((dot,i)=>{dot.classList.toggle("active",i===index);dot.setAttribute("aria-current",i===index?"true":"false");});
+}
+
 /* ---------- options screen ---------- */
 function renderOptions() {
   const product = state.selectedProduct;
@@ -2189,7 +2215,7 @@ function renderOptions() {
     <div class="screen">
       <button class="back-link" onclick="setScreen('menu')">${ICONS.back} Back to menu</button>
       <div class="product-detail-card">
-        <img class="product-detail-image" src="${escapeHtml(product.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(product.name)}">
+        ${renderProductImages(product)}
         <div class="item-info product-detail-copy">
           <div class="item-name">${escapeHtml(product.name)}</div>
           <div class="item-desc">${escapeHtml(product.description)}</div>
@@ -2219,7 +2245,7 @@ function renderBundle() {
     <div class="screen">
       <button class="back-link" onclick="setScreen('menu')">${ICONS.back} Back to menu</button>
       <div class="product-detail-card">
-        <img class="product-detail-image" src="${escapeHtml(bundle.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(bundle.name)}">
+        ${renderProductImages(bundle)}
         <div class="item-info product-detail-copy">
           <div class="item-name">${escapeHtml(bundle.name)}</div>
           <div class="item-desc">${escapeHtml(bundle.description || `Choose ${count} drinks from the selections below.`)}</div>
