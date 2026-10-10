@@ -731,7 +731,7 @@ function toggleOrderStatusMenu(id) {
 }
 async function chooseOrderStatus(id, status) {
   astate.openOrderStatusMenu = "";
-  await updateOrderStatus(id, status);
+  await updateOrderStatus(id, status, true);
 }
 
 function toggleOrderExpanded(id) {
