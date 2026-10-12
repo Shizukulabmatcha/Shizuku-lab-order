@@ -103,6 +103,7 @@ const astate = {
   recipes: [],
   stockPurchases: [],
   cashFlowEntries: [],
+  stockPurchaseDeleteBusy: false,
   stockPurchaseDraft: { inventory_item_id: "", quantity: "", total_cost: "", supplier: "", notes: "" },
   inventoryReady: true,
   inventoryDraft: null,
@@ -383,7 +384,7 @@ function loadAdminDemoData() {
   try { const savedSettings=JSON.parse(localStorage.getItem(`slow-studio-exact-demo-settings-${DASHBOARD_MARKET.toLowerCase()}`)||"null"); if(savedSettings&&typeof savedSettings==="object") astate.settings={...astate.settings,...savedSettings,id:1,store_currency:cur}; } catch (_) {}
   astate.settingsDraft={...astate.settings};
   astate.inventory=[{id:`00000000-0000-4000-8000-${my?"000000000001":"000000000002"}`,market_code:DASHBOARD_MARKET,name:"Tea powder",unit:"g",stock_quantity:500,low_stock_level:100,pack_size:100,pack_cost:my?48:18,supplier:"Demo supplier",cost_type:"ingredient"},{id:`00000000-0000-4000-8000-${my?"000000000003":"000000000004"}`,market_code:DASHBOARD_MARKET,name:"Cup + lid",unit:"pc",stock_quantity:60,low_stock_level:15,pack_size:50,pack_cost:my?25:9,supplier:"Demo packaging",cost_type:"packaging"}];
-  astate.stockPurchases=[{id:"sp1",market_code:DASHBOARD_MARKET,inventory_item_id:astate.inventory[0].id,quantity:100,total_cost:my?48:18,supplier:"Demo supplier",purchased_at:new Date().toISOString()}];astate.cashFlowEntries=[{id:"cf1",market_code:DASHBOARD_MARKET,entry_type:"expense",category:"stock_purchase",amount:my?48:18,occurred_at:new Date().toISOString()}];
+  astate.stockPurchases=[{id:"sp1",market_code:DASHBOARD_MARKET,inventory_item_id:astate.inventory[0].id,quantity:100,total_cost:my?48:18,supplier:"Demo supplier",purchased_at:new Date().toISOString()}];astate.cashFlowEntries=[{id:"cf1",market_code:DASHBOARD_MARKET,entry_type:"expense",category:"stock_purchase",amount:my?48:18,reference_type:"stock_purchase",reference_id:"sp1",occurred_at:new Date().toISOString()}];
   astate.recipes=[{id:"r1",market_code:DASHBOARD_MARKET,product_id:`${prefix}-P1`,inventory_item_id:astate.inventory[0].id,quantity_used:4},{id:"r2",market_code:DASHBOARD_MARKET,product_id:`${prefix}-P1`,inventory_item_id:astate.inventory[1].id,quantity_used:1}];
   astate.inventoryReady=true;astate.marketingManualContacts=[{id:1,market_code:DASHBOARD_MARKET,customer_name:"Sample Customer",customer_email:"sample@example.com",customer_phone:my?"0112233445":"90001111",marketing_email_opt_in:true,marketing_whatsapp_opt_in:true,consent_at:new Date().toISOString()}];
   astate.promos=[{id:"promo1",code:"DEMOTREAT",discount_type:"fixed",discount_value:my?2:1,is_active:true,created_at:new Date().toISOString()}];astate.promoRedemptions=[];astate.customerNotes={};
@@ -2838,10 +2839,40 @@ async function recordStockPurchase() {
   astate.stockPurchaseDraft={inventory_item_id:"",quantity:"",total_cost:"",supplier:"",notes:""};
   await loadAll({silent:true}); alert("Stock purchase recorded. Inventory and cash-flow profit are updated.");
 }
+async function deleteStockPurchase(id) {
+  if(astate.stockPurchaseDeleteBusy) return;
+  const purchase=(astate.stockPurchases||[]).find((row)=>String(row.id)===String(id));
+  if(!purchase) return alert("This purchase is no longer available. Refresh and try again.");
+  const expense=(astate.cashFlowEntries||[]).find((row)=>row.reference_type==="stock_purchase"&&String(row.reference_id)===String(id));
+  if(!purchase.inventory_item_id||!expense) return alert("This older purchase has no complete inventory and expense link, so it cannot be safely reversed automatically.");
+  const item=(astate.inventory||[]).find((row)=>String(row.id)===String(purchase.inventory_item_id));
+  const market=String(purchase.market_code||"SG").toUpperCase();
+  const quantity=Number(purchase.quantity||0);
+  if(!item||Number(item.stock_quantity||0)<quantity) return alert("This stock has already been used or adjusted. The purchase cannot be deleted without making inventory negative.");
+  if(!confirm(`Delete the ${marketMoney(purchase.total_cost,market)} purchase of ${quantity} ${purchase.unit||item.unit||"units"} of ${item.name}? This removes the linked cash expense and subtracts the purchased stock. Product recipe costs will not change.`)) return;
+  astate.stockPurchaseDeleteBusy=true;
+  try {
+    if(window.SLOW_STUDIO_DEMO_MODE) {
+      astate.inventory=astate.inventory.map((row)=>String(row.id)===String(item.id)?{...row,stock_quantity:Number(row.stock_quantity||0)-quantity}:row);
+      astate.stockPurchases=astate.stockPurchases.filter((row)=>String(row.id)!==String(id));
+      astate.cashFlowEntries=astate.cashFlowEntries.filter((row)=>!(row.reference_type==="stock_purchase"&&String(row.reference_id)===String(id)));
+      render();
+    } else {
+      const {error}=await db.rpc("delete_shizuku_stock_purchase",{p_purchase_id:id});
+      if(error) return alert("Could not delete stock purchase: "+error.message);
+      await loadAll({silent:true});
+    }
+    alert("Purchase deleted. Stock and cash-flow expense have been reversed.");
+  } catch(error) {
+    alert("Could not delete stock purchase: "+(error?.message||"Please refresh and try again."));
+  } finally {
+    astate.stockPurchaseDeleteBusy=false;
+  }
+}
 function renderStockPurchasePanel() {
   const market=currentCostingMarket(),items=inventoryForCostingMarket(),draft=astate.stockPurchaseDraft||{};
-  const purchases=(astate.stockPurchases||[]).filter((row)=>String(row.market_code||"SG").toUpperCase()===market).slice(0,8);
-  return `<section class="dashboard-card" style="padding:20px;margin-bottom:20px"><div class="dashboard-card-head" style="padding:0 0 16px"><div><h2>Stock purchase</h2><span>Adds stock to ${market==="MY"?"Malaysia":"Singapore"} inventory and records a cash expense</span></div><b>${market==="MY"?"MYR · RM":"SGD · $"}</b></div><div class="workspace-preference-grid"><div class="field"><label>Inventory item</label><select onchange="stockPurchaseField('inventory_item_id',this.value)"><option value="">Choose item…</option>${items.map((item)=>`<option value="${item.id}" ${String(draft.inventory_item_id)===String(item.id)?"selected":""}>${escapeHtml(item.name)}</option>`).join("")}</select></div><div class="field"><label>Quantity purchased</label><input type="number" min="0.01" step="0.01" value="${escapeHtml(draft.quantity||"")}" oninput="stockPurchaseField('quantity',this.value)"></div><div class="field"><label>Total paid</label><input type="number" min="0" step="0.01" value="${escapeHtml(draft.total_cost||"")}" oninput="stockPurchaseField('total_cost',this.value)"></div><div class="field"><label>Supplier</label><input value="${escapeHtml(draft.supplier||"")}" oninput="stockPurchaseField('supplier',this.value)"></div></div><div class="field"><label>Notes</label><input value="${escapeHtml(draft.notes||"")}" oninput="stockPurchaseField('notes',this.value)"></div><button class="btn-primary" onclick="recordStockPurchase()">Record purchase & add stock</button>${purchases.length?`<div class="divider"></div><h3>Recent stock purchases</h3>${purchases.map((row)=>{const item=astate.inventory.find((x)=>String(x.id)===String(row.inventory_item_id));return `<div class="queue-row"><div class="queue-top"><div><b>${escapeHtml(item?.name||"Inventory item")}</b><div class="queue-name">+${Number(row.quantity||0)} · ${escapeHtml(row.supplier||"No supplier")} · ${new Date(row.purchased_at||row.created_at).toLocaleDateString()}</div></div><b>${marketMoney(row.total_cost,market)}</b></div></div>`}).join("")}`:""}</section>`;
+  const purchases=(astate.stockPurchases||[]).filter((row)=>String(row.market_code||"SG").toUpperCase()===market);
+  return `<section class="dashboard-card" style="padding:20px;margin-bottom:20px"><div class="dashboard-card-head" style="padding:0 0 16px"><div><h2>Stock purchase</h2><span>Adds stock to ${market==="MY"?"Malaysia":"Singapore"} inventory and records a cash expense</span></div><b>${market==="MY"?"MYR · RM":"SGD · $"}</b></div><div class="workspace-preference-grid"><div class="field"><label>Inventory item</label><select onchange="stockPurchaseField('inventory_item_id',this.value)"><option value="">Choose item…</option>${items.map((item)=>`<option value="${item.id}" ${String(draft.inventory_item_id)===String(item.id)?"selected":""}>${escapeHtml(item.name)}</option>`).join("")}</select></div><div class="field"><label>Quantity purchased</label><input type="number" min="0.01" step="0.01" value="${escapeHtml(draft.quantity||"")}" oninput="stockPurchaseField('quantity',this.value)"></div><div class="field"><label>Total paid</label><input type="number" min="0" step="0.01" value="${escapeHtml(draft.total_cost||"")}" oninput="stockPurchaseField('total_cost',this.value)"></div><div class="field"><label>Supplier</label><input value="${escapeHtml(draft.supplier||"")}" oninput="stockPurchaseField('supplier',this.value)"></div></div><div class="field"><label>Notes</label><input value="${escapeHtml(draft.notes||"")}" oninput="stockPurchaseField('notes',this.value)"></div><button class="btn-primary" onclick="recordStockPurchase()">Record purchase & add stock</button>${purchases.length?`<div class="divider"></div><details><summary>Stock purchases (${purchases.length})</summary><div class="hint" style="text-align:left">Deleting a linked purchase reverses its stock and cash expense. Recipe unit costs are managed separately.</div>${purchases.map((row)=>{const item=astate.inventory.find((x)=>String(x.id)===String(row.inventory_item_id));const linked=!!item&&(astate.cashFlowEntries||[]).some((entry)=>entry.reference_type==="stock_purchase"&&String(entry.reference_id)===String(row.id));return `<div class="queue-row"><div class="queue-top"><div><b>${escapeHtml(item?.name||row.item_name||"Inventory item")}</b><div class="queue-name">+${Number(row.quantity||0)} ${escapeHtml(row.unit||item?.unit||"")} · ${escapeHtml(row.supplier||"No supplier")} · ${new Date(row.purchased_at||row.created_at).toLocaleDateString()}</div></div><div style="display:flex;align-items:center;gap:10px"><b>${marketMoney(row.total_cost,market)}</b>${linked?`<button type="button" class="btn-secondary" style="color:#b42318" onclick="deleteStockPurchase('${row.id}')">Delete</button>`:`<span class="hint" title="No linked inventory and expense record">Legacy record</span>`}</div></div></div>`}).join("")}</details>`:""}</section>`;
 }
 const renderInventoryTabWithoutPurchases=renderInventoryTab;
 renderInventoryTab=function(){return renderStockPurchasePanel()+renderInventoryTabWithoutPurchases();};
