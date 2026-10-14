@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&family=Noto+Sans+JP:wght@400;500;600;700&family=Noto+Serif+JP:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&family=Noto+Sans+JP:wght@400;500;600;700&family=Noto+Serif+JP:wght@500;600;700&display=swap');
 
 :root{
   --cream:#F3EEE3;
@@ -357,3 +357,148 @@ img{display:block;max-width:100%;}
 .product-gallery-dots{position:absolute;left:0;right:0;bottom:9px;display:flex;justify-content:center;gap:6px}
 .product-gallery-dot{width:8px;height:8px;border:0;border-radius:50%;padding:0;background:rgba(255,255,255,.65);box-shadow:0 0 2px rgba(0,0,0,.3);cursor:pointer}
 .product-gallery-dot.active{background:var(--matcha);outline:1px solid white}
+
+/* The ordering preview's photo-forward product layout, scoped to product pages. */
+.product-configuration-screen{max-width:820px;margin:0 auto}
+.product-configuration-screen .product-detail-card{background:transparent;border:0;border-radius:0;box-shadow:none;margin-bottom:4px;overflow:visible}
+.product-configuration-screen .product-detail-image{height:clamp(360px,75vw,550px);object-fit:cover;border-radius:0!important}
+.contain-product-image .product-configuration-screen .product-detail-image{object-fit:contain}
+.product-configuration-screen .product-detail-copy{padding:24px 0 22px;border-bottom:1px solid var(--line)}
+.product-configuration-screen .product-detail-copy .item-name{font-family:'Fraunces',Georgia,serif;font-size:clamp(30px,6vw,48px);font-weight:400;line-height:1.13;letter-spacing:-.03em}
+.product-configuration-screen .product-detail-copy .item-desc{font-size:14px;line-height:1.7;margin-top:12px;color:var(--muted)}
+.product-configuration-screen .product-detail-price,.product-configuration-screen .product-detail-copy .item-price{font-family:'Fraunces',Georgia,serif;font-size:27px;line-height:1.2;margin-top:17px;color:var(--ink)}
+.product-configuration-screen .product-detail-copy .stock-line{margin-top:12px}
+.product-configuration-screen .progressive-options{display:block;margin:0}
+.product-configuration-screen .product-option-group{border:0;border-bottom:1px solid var(--line);border-radius:0;box-shadow:none;background:transparent;padding:23px 0!important;margin:0!important}
+.product-configuration-screen .option-step-heading{justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:13px}
+.product-configuration-screen .option-step-heading label{font-family:'Fraunces',Georgia,serif;font-size:24px;font-weight:400;line-height:1.2;margin:0;color:var(--ink)}
+.product-configuration-screen .option-required{color:var(--houjicha)}
+.product-configuration-screen .option-optional{font-size:11px;color:var(--muted);white-space:nowrap}
+.product-configuration-screen .option-choice-list{display:flex;flex-wrap:wrap;gap:8px}
+.product-configuration-screen .product-option-group .slot.option-choice,.product-configuration-screen .product-option-group .option-skip.option-choice{width:auto;min-height:47px;margin:0;padding:10px 14px;border:1px solid var(--line);border-radius:3px;background:transparent;color:var(--ink);display:inline-flex;align-items:center;justify-content:center;gap:8px;box-shadow:none;line-height:1.35;text-align:center;font-size:13px;font-weight:500}
+.product-configuration-screen .product-option-group .option-choice.active{background:var(--matcha);border-color:var(--matcha);color:var(--cream)}
+.product-configuration-screen .option-choice-name{color:inherit}
+.product-configuration-screen .option-choice-price{font-size:11px;color:var(--muted);white-space:nowrap}
+.product-configuration-screen .option-choice.active .option-choice-price{color:var(--cream)}
+@media(max-width:520px){.product-options-screen .product-configuration-screen .product-detail-image{height:clamp(350px,92vw,490px)}.product-configuration-screen .product-detail-copy .item-name{font-size:38px}.product-configuration-screen .option-step-heading label{font-size:22px}.product-configuration-screen .product-option-group .slot.option-choice,.product-configuration-screen .product-option-group .option-skip.option-choice{min-height:44px}}
+
+/* Menu list and gallery share the same products, prices and cart actions. */
+.ordering-menu-intro{padding:27px 20px 18px}
+.ordering-menu-intro span{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--matcha)}
+.ordering-menu-intro h1{font:400 clamp(31px,7vw,40px)/1.1 'Fraunces',Georgia,serif;letter-spacing:-.035em;margin:9px 0 0;color:var(--ink)}
+.ordering-menu-toolbar{display:flex;align-items:center;gap:10px;padding:13px 20px 2px}
+.ordering-menu-search{flex:1;min-width:0;display:flex;align-items:center;gap:7px;border-bottom:1px solid var(--ink);padding:5px 0 8px;color:var(--matcha)}
+.ordering-menu-search span{font-size:21px;line-height:1}
+.ordering-menu-search input{width:100%;min-width:0;border:0;outline:0;background:transparent;color:var(--ink);font-size:13px}
+.ordering-menu-search input::placeholder{color:var(--faint)}
+.ordering-view-switch{display:flex;flex-shrink:0;gap:2px;padding:2px;border:1px solid var(--line);border-radius:3px}
+.ordering-view-switch button{border:0;border-radius:2px;padding:8px 9px;background:transparent;color:var(--muted);white-space:nowrap;font-size:11px;cursor:pointer}
+.ordering-view-switch button.active{background:var(--matcha);color:var(--cream)}
+.ordering-menu-products{padding-top:17px}
+.ordering-menu-products .product-group-title{font:400 27px/1.1 'Fraunces',Georgia,serif;margin:12px 0 9px}
+.ordering-menu-products .ordering-product-list{gap:0}
+.ordering-menu-products .ordering-list-card{display:grid;grid-template-columns:70px minmax(0,1fr) auto;align-items:center;gap:12px;margin:0;padding:15px 0;border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent;box-shadow:none}
+.ordering-list-open{display:block;width:70px;height:70px;padding:0;border:0;border-radius:50%;background:transparent;cursor:pointer}
+.ordering-menu-products .ordering-list-card .item-thumb{width:70px;height:70px;border-radius:50%;object-fit:cover}
+.ordering-menu-products .ordering-product-name{display:block;width:100%;border:0;background:transparent;padding:0;text-align:left;font:400 19px/1.18 'Fraunces',Georgia,serif;color:var(--ink);cursor:pointer}
+.ordering-menu-products .ordering-product-desc{font-size:10.5px;line-height:1.45;color:var(--muted);margin:5px 0 7px}
+.ordering-menu-products .ordering-list-side{display:flex;flex-direction:column;align-items:flex-end;gap:10px;min-width:65px}
+.ordering-menu-products .ordering-list-side .item-price,.ordering-menu-products .gallery-price{font:400 16px/1.2 'Fraunces',Georgia,serif;white-space:nowrap;text-align:right}
+.ordering-menu-products .ordering-product-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+.ordering-gallery-card{min-width:0;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--line);border-radius:4px;background:var(--card)}
+.ordering-gallery-open{display:block;width:100%;padding:0;border:0;background:var(--matcha-bg);cursor:pointer}
+.ordering-gallery-open img{width:100%;aspect-ratio:1/1;object-fit:cover}
+.ordering-gallery-copy{display:flex;flex:1;flex-direction:column;padding:11px}
+.ordering-gallery-copy .ordering-product-name{font-size:18px}
+.ordering-gallery-copy .ordering-product-desc{flex:1;min-height:47px}
+.ordering-product-tag{display:block;color:var(--matcha);font-size:10px;letter-spacing:.09em;margin:6px 0 7px}
+.ordering-gallery-foot{display:flex;justify-content:space-between;align-items:baseline;gap:5px;flex-wrap:wrap}
+.ordering-menu-products .ordering-card-action{width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;appearance:none;-webkit-appearance:none}
+.ordering-menu-products .ordering-card-action:disabled{cursor:not-allowed}
+.ordering-menu-products .ordering-card-action:focus-visible{outline:2px solid var(--matcha);outline-offset:3px}
+@media(max-width:390px){.ordering-menu-toolbar{align-items:stretch;flex-direction:column}.ordering-view-switch{align-self:flex-end}.ordering-menu-products .ordering-product-name{font-size:17px}.ordering-menu-products .ordering-list-card{grid-template-columns:60px minmax(0,1fr) auto;gap:9px}.ordering-list-open{width:60px;height:60px}.ordering-menu-products .ordering-list-card .item-thumb{width:60px;height:60px}}
+
+/* Match the approved ordering preview on the real product configuration flow. */
+.product-configuration-screen .product-detail-copy{padding:23px 0 28px}
+.product-detail-kicker{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:24px;color:var(--matcha);font-size:10px;letter-spacing:.18em;text-transform:uppercase}
+.product-detail-kicker span:last-child{text-align:right}
+.product-configuration-screen .product-detail-copy .item-name{font-size:clamp(38px,8vw,52px);margin-bottom:8px}
+.product-configuration-screen .product-detail-copy .item-desc{font-size:14px;line-height:1.6}
+.product-configuration-screen .product-detail-price{font-size:29px;margin-top:17px}
+.product-configuration-screen .product-option-group{padding:26px 0!important}
+.product-configuration-screen .option-step-heading{margin-bottom:17px}
+.product-configuration-screen .option-group-hint{color:var(--matcha);font-size:10px;letter-spacing:.17em;line-height:1.3;text-align:right;white-space:nowrap}
+.product-configuration-screen .option-required-star{display:inline-block;margin-left:3px;color:#b54037;font-size:.46em;font-weight:700;vertical-align:top;line-height:1.25}
+.product-configuration-screen .product-option-group .slot.option-choice{min-height:48px;padding:11px 17px}
+.product-detail-sticky{background:var(--cream);border-top:1px solid var(--line);backdrop-filter:none}
+.product-detail-sticky .sticky-bar-inner{display:grid;grid-template-columns:108px minmax(0,1fr);gap:9px}
+.product-quantity{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--line);color:var(--ink);font:400 19px/1 'Fraunces',Georgia,serif}
+.product-quantity button{width:34px;height:100%;min-height:45px;padding:0;border:0;background:transparent;color:var(--ink);font:400 24px/1 'Fraunces',Georgia,serif;cursor:pointer}
+.product-quantity button:disabled{opacity:.3;cursor:default}
+.product-detail-sticky .product-detail-action{background:var(--ink);border-color:var(--ink);border-radius:2px;color:var(--cream);font-size:13px;font-weight:500;letter-spacing:.065em;min-height:49px}
+@media(max-width:390px){.product-detail-kicker{font-size:9px;letter-spacing:.12em}.product-detail-sticky .sticky-bar-inner{grid-template-columns:96px minmax(0,1fr)}.product-detail-sticky .product-detail-action{font-size:11px;letter-spacing:.02em}}
+
+/* Keep the menu concise: categories and layout controls lead directly to drinks. */
+.ordering-menu-intro{display:none}
+.ordering-menu-intro h1{font-size:24px;line-height:1.15;margin:0;letter-spacing:-.02em}
+#app .cats{gap:25px;margin:18px 20px 0;padding:0;overflow-x:auto;border-bottom:1px solid var(--line);scrollbar-width:none}
+#app .cats::-webkit-scrollbar{display:none}
+#app .cats .pill{flex:0 0 auto;padding:12px 0 13px;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;color:#8a897e;font:400 19px/1.2 'Fraunces',Georgia,serif;font-size:19px!important}
+#app .cats .pill.active{border-bottom-color:var(--matcha);background:transparent;color:var(--ink)}
+.ordering-menu-toolbar{justify-content:flex-end;padding:5px 20px 0}
+.ordering-menu-products{padding-top:11px}
+
+/* FAQ uses the same editorial dividers and calm spacing as the menu. */
+#app .ordering-faq{padding:20px 20px 28px;margin-top:18px;border-top:1px solid var(--line)}
+.ordering-faq .faq-title{margin:0 0 8px;color:var(--ink)}
+.ordering-faq .faq-title span{display:block;margin-bottom:5px;font-size:10px;letter-spacing:.16em;color:var(--matcha)}
+.ordering-faq .faq-title h2{font-family:'Fraunces',Georgia,serif;font-size:25px;line-height:1.1;font-weight:400;letter-spacing:-.025em;margin:0}
+#app .ordering-faq .faq-item{padding:0;margin:0;border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent;box-shadow:none}
+.ordering-faq .faq-item summary{min-height:53px;padding:12px 0;gap:12px;font-size:13px;line-height:1.35;font-weight:500;color:var(--ink)}
+.ordering-faq .faq-item summary::after{content:'+';flex:0 0 auto;display:grid;place-items:center;width:22px;height:22px;margin:0;border:1px solid var(--line);border-radius:50%;font-size:15px;line-height:1;color:var(--matcha)}
+.ordering-faq .faq-item[open] summary::after{content:'−'}
+.ordering-faq .faq-answer{max-width:48ch;margin:0 30px 15px 0;font-size:12.5px;line-height:1.6;color:var(--muted)}
+
+/* A quieter, photo-led welcome section replaces the crowded banner stack. */
+.ordering-home-header{padding:20px 20px 17px}
+.ordering-home-header .header-row{gap:12px;align-items:flex-start}
+.ordering-home-header .brand-title{font-size:clamp(23px,6vw,29px);line-height:1.04;font-weight:400;letter-spacing:-.035em}
+.ordering-home-header .brand-sub{margin-top:6px;font-size:10px;letter-spacing:.065em;color:var(--matcha)}
+.ordering-home-header .drip-row{display:block;height:24px;margin-top:8px}
+.ordering-home-header .header-market-switch{padding:2px;border:1px solid var(--line);background:transparent}
+.ordering-home-header .header-market-switch>span{font-size:9px;padding:0 5px}
+.ordering-home-header .header-market-switch button{min-height:29px;padding:0 8px;font-size:10px;font-weight:600}
+.ordering-home-ticker{margin:0 20px 10px;padding:8px 10px;border-top:1px solid var(--matcha);border-bottom:1px solid var(--matcha);background:transparent;color:var(--matcha);text-align:center;white-space:normal;font-size:10px;line-height:1.35;letter-spacing:.11em}
+.ordering-home-panel .store-banner{height:clamp(195px,var(--banner-height,240px),300px);border-radius:3px;background-color:var(--matcha-bg)}
+#app .ordering-home-panel .store-panel-body{padding:17px 0 0;border:0;border-radius:0;background:transparent;text-align:left}
+.ordering-home-panel .store-identity{display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:15px;text-align:center}
+.ordering-home-panel .store-logo-inline{position:relative;z-index:1;flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:106px;height:106px;margin-top:-62px;padding:0;overflow:hidden;border:4px solid var(--cream);border-radius:50%;background:#fff;box-shadow:0 4px 14px rgba(42,42,34,.10)}
+.ordering-home-panel .store-logo-inline img{flex:0 0 auto;width:112px;height:112px;max-width:none;object-fit:contain;mix-blend-mode:normal;filter:contrast(1.35)}
+.ordering-home-panel .store-identity-copy{display:grid;justify-items:center;gap:4px;min-width:0}
+.ordering-home-panel .store-identity-name{font:400 21px/1.15 'Fraunces',Georgia,serif;color:var(--ink)}
+.ordering-home-panel .store-insta{margin:0;font-size:16px;font-weight:400;overflow-wrap:anywhere}
+.ordering-home-panel .store-desc{max-width:none;margin:8px 0 13px;font-size:13px;line-height:1.55;color:var(--ink);text-align:center}
+.ordering-home-panel .store-dropoff{margin:7px 0 0;font-size:12px}
+.ordering-home-panel .next-collection-summary{grid-template-columns:minmax(0,1fr) auto;gap:8px 10px}
+.ordering-home-panel .next-collection-date{grid-column:1/-1;font-size:21px}
+.ordering-home-panel .next-collection-time{grid-column:1;justify-self:start;white-space:normal}
+.ordering-home-panel .next-collection-chevron{grid-column:2;grid-row:2}
+@media(max-width:390px){.ordering-home-header{padding-left:16px;padding-right:16px}.ordering-home-header .header-row{align-items:flex-start}.ordering-home-header .header-actions{max-width:132px}.ordering-home-header .header-market-switch button{white-space:normal;line-height:1.1;min-height:34px}.ordering-home-ticker{margin-left:16px;margin-right:16px}.ordering-home-panel .store-desc{font-size:13px}}
+
+/* Compact home shortcuts, with the same title/body font pairing as the Gallery. */
+#app .ordering-home-panel .ritual-pass-banner{display:grid;grid-template-columns:106px minmax(0,1fr);overflow:hidden;border-radius:12px}
+#app .ordering-home-panel .ritual-pass-banner.is-access-only{grid-template-columns:1fr}
+#app .ordering-home-panel .ritual-pass-banner>img{width:100%;height:100%;min-height:176px;max-height:none;object-fit:contain;background:var(--card)}
+#app .ordering-home-panel .ritual-pass-copy{padding:13px 13px 14px}
+#app .ordering-home-panel .ritual-pass-kicker{font-size:9.5px;letter-spacing:.12em}
+#app .ordering-home-panel .ritual-pass-copy h2{font-family:'Fraunces',Georgia,serif;font-size:23px;line-height:1.12;margin:5px 0 7px}
+#app .ordering-home-panel .ritual-pass-copy p{display:-webkit-box;overflow:hidden;font-size:11.5px;line-height:1.45;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+#app .ordering-home-panel .ritual-pass-meta{gap:6px;margin:8px 0;font-size:11px}
+#app .ordering-home-panel .ritual-pass-actions{display:flex;flex-wrap:wrap;gap:7px}
+#app .ordering-home-panel .ritual-pass-actions .primary-btn,#app .ordering-home-panel .ritual-pass-actions .btn-secondary{width:auto;min-height:36px;padding:7px 9px;font-size:11px;line-height:1.2;white-space:normal}
+#app .ordering-home-panel .customer-store-actions{gap:8px;margin-top:11px}
+#app .ordering-home-panel .customer-store-action{min-height:72px;padding:12px;border-radius:11px;align-items:center}
+#app .ordering-home-panel .customer-store-action strong{font-size:16px;line-height:1.2;font-weight:600}
+#app .ordering-home-panel .customer-store-action small{font-size:11px;line-height:1.35}
+#app .ordering-home-panel .customer-store-action>span:last-child{font-size:17px}
+@media(max-width:390px){#app .ordering-home-panel .ritual-pass-banner{grid-template-columns:82px minmax(0,1fr)}#app .ordering-home-panel .ritual-pass-copy{padding:11px}#app .ordering-home-panel .ritual-pass-copy h2{font-size:21px}#app .ordering-home-panel .customer-store-action{min-height:68px;padding:10px}#app .ordering-home-panel .customer-store-action strong{font-size:14px}#app .ordering-home-panel .customer-store-action small{font-size:10px}}

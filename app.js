@@ -90,6 +90,7 @@ const state = {
   productOptionGroups: [],
   selectedProduct: null,
   selectedOptions: {},
+  productQuantity: 1,
   expandedOptionSteps: { product: null, bundle1: null, bundle2: null },
   bundle: { drink1: null, drink2: null, drink1Options: {}, drink2Options: {} },
   slots: [],
@@ -1308,6 +1309,12 @@ function optionGroupsForProduct(product) {
 function selectOption(groupId, optionId) {
   const option = state.options.find((item) => String(item.id) === String(optionId));
   if (!option) return;
+  const group = optionGroupsForProduct(state.selectedProduct).find((item) => String(item.id) === String(groupId));
+  if (group && !group.required && String(state.selectedOptions[groupId]?.optionId) === String(option.id)) {
+    delete state.selectedOptions[groupId];
+    render();
+    return;
+  }
   state.selectedOptions[groupId] = { productId: state.selectedProduct.id, optionId: option.id, optionName: option.name, price: Number(option.price || 0) };
   advanceOptionStep("product", groupId, optionGroupsForProduct(state.selectedProduct), state.selectedOptions);
 }
@@ -1327,18 +1334,26 @@ function openOptionStep(scope, groupId) {
 }
 function advanceOptionStep(scope, groupId, groups, selectedOptions) {
   state.expandedOptionSteps[scope] = null;
-  const currentIndex = groups.findIndex((group) => String(group.id) === String(groupId));
-  const nextGroup = groups.slice(Math.max(0, currentIndex + 1)).find((group) => !selectedOptions[group.id]);
   render();
-  if (nextGroup) scrollToOptionStep(scope, nextGroup.id);
 }
 function skippedOption(product, label = tr("skip")) {
   return { productId: product.id, optionId: null, optionName: label, price: 0, skipped: true };
 }
 function defaultOptionSelections(product) {
-  // Optional choices stay unanswered until the customer selects an option or
-  // explicitly taps Skip. Do not silently choose Skip for Milk or Packaging.
+  // Admin's required flag controls validation; optional groups start unselected.
   return {};
+}
+function optionGroupJapaneseLabel(name) {
+  const value = String(name || "").toLowerCase();
+  if (/ice/.test(value)) return "氷";
+  if (/sweet|sugar/.test(value)) return "甘さ";
+  if (/milk/.test(value)) return "ミルク";
+  if (/packag|bag|cup/.test(value)) return "パッケージ";
+  if (/base/.test(value)) return "ベース";
+  if (/topp/.test(value)) return "トッピング";
+  if (/syrup/.test(value)) return "シロップ";
+  if (/temperat/.test(value)) return "温度";
+  return "";
 }
 function skipOptionStep(scope, groupId, drinkNumber = null) {
   let selectedOptions = state.selectedOptions;
@@ -1356,37 +1371,22 @@ function renderProgressiveOptionGroups(product, selectedOptions, drinkNumber = n
   const groups = optionGroupsForProduct(product);
   if (!groups.length) return `<div class="hint">${tr("no_options")}</div>`;
   const scope = drinkNumber == null ? "product" : `bundle${drinkNumber}`;
-  const requestedGroupId = state.expandedOptionSteps[scope];
-  const requestedIndex = requestedGroupId == null ? -1 : groups.findIndex((group) => String(group.id) === String(requestedGroupId));
-  const firstIncompleteIndex = groups.findIndex((group) => !selectedOptions[group.id]);
-  const activeIndex = requestedIndex >= 0 ? requestedIndex : firstIncompleteIndex;
-
   return `<div class="progressive-options">${groups.map((group, index) => {
     const selected = selectedOptions[group.id];
-    if (!selected && index !== activeIndex) return "";
-    const stepNumber = index + 1;
-    if (selected && index !== activeIndex) {
-      return `<button type="button" class="option-step-summary" id="${optionStepDomId(scope, group.id)}" onclick="openOptionStep('${scope}','${escapeHtml(group.id)}')">
-        <span class="option-step-number">${stepNumber}</span>
-        <span class="option-step-summary-copy"><strong>${escapeHtml(group.name)}</strong><small>${escapeHtml(selected.optionName || "Selected")}</small></span>
-        <span class="option-step-change">${tr("change")}</span>
-      </button>`;
-    }
     const options = getOptionsForGroup(group.id);
     const optionHandler = drinkNumber == null
       ? (optionId) => `selectOption('${escapeHtml(group.id)}','${escapeHtml(optionId)}')`
       : (optionId) => `selectBundleOption(${drinkNumber},'${escapeHtml(group.id)}','${escapeHtml(optionId)}')`;
-    const mustChoose = group.required && index !== groups.length - 1;
+    const isLastGroup = index === groups.length - 1;
+    const japaneseLabel = optionGroupJapaneseLabel(group.name);
+    const hint = japaneseLabel ? `${japaneseLabel}${group.required && !isLastGroup ? "" : " · OPTIONAL"}` : (group.required && !isLastGroup ? "CHOOSE ONE" : "OPTIONAL");
     return `<section class="field product-option-group option-step-open" id="${optionStepDomId(scope, group.id)}">
-      <div class="option-step-heading">
-        <span class="option-step-number">${stepNumber}</span>
-        <label><span class="option-kana">${tr("customisation")}</span>${escapeHtml(group.name)}${mustChoose ? " *" : ` (${tr("optional")})`}</label>
-      </div>
-      <div>
-        ${options.map((option) => `<button type="button" class="slot ${selected && String(selected.optionId) === String(option.id) ? "active" : ""}" onclick="${optionHandler(option.id)}">
-          <div><div class="slot-day">${escapeHtml(option.name)}</div><div class="slot-time">${optionPriceLabel(option.price)}</div></div>
+      <div class="option-step-heading"><label>${escapeHtml(group.name)}${group.required && !isLastGroup ? `<span class="option-required-star" aria-label="required">*</span>` : ""}</label><span class="option-group-hint">${hint}</span></div>
+      <div class="option-choice-list" role="group" aria-label="${escapeHtml(group.name)}${group.required && !isLastGroup ? ", required" : ", optional"}">
+        ${options.map((option) => `<button type="button" class="slot option-choice ${selected && String(selected.optionId) === String(option.id) ? "active" : ""}" aria-pressed="${selected && String(selected.optionId) === String(option.id) ? "true" : "false"}" onclick="${optionHandler(option.id)}">
+          <span class="option-choice-name">${escapeHtml(option.name)}</span>${Number(option.price || 0) ? `<span class="option-choice-price">${optionPriceLabel(option.price)}</span>` : ""}
         </button>`).join("")}
-        ${mustChoose ? "" : `<button type="button" class="option-skip ${selected?.skipped ? "active" : ""}" onclick="skipOptionStep('${scope}','${escapeHtml(group.id)}',${drinkNumber == null ? "null" : drinkNumber})">${index === groups.length - 1 ? "No thanks" : tr("skip")}</button>`}
+        ${isLastGroup ? `<button type="button" class="option-choice option-skip ${selected?.skipped ? "active" : ""}" aria-pressed="${selected?.skipped ? "true" : "false"}" onclick="skipOptionStep('${scope}','${escapeHtml(group.id)}',${drinkNumber == null ? "null" : drinkNumber})">No thanks</button>` : ""}
       </div>
     </section>`;
   }).join("")}</div>`;
@@ -1415,6 +1415,7 @@ function openProductOptions(productId) {
   if (isSoldOut(product)) { alert("Sorry, this item is sold out."); return; }
   state.selectedProduct = product;
   state.selectedOptions = defaultOptionSelections(product);
+  state.productQuantity = 1;
   state.expandedOptionSteps = { product: null };
   if (isBundle(product)) {
     resetBundleSelection(product);
@@ -1424,13 +1425,21 @@ function openProductOptions(productId) {
   }
   render();
 }
+function changeProductQuantity(change) {
+  const stock = productStock(state.selectedProduct);
+  const passLimit = isRitualRedemptionMode() ? Math.max(1, ritualAvailable() - ritualCreditsInCart()) : 20;
+  const maximum = Math.max(1, Math.min(20, stock == null ? 20 : stock, passLimit));
+  state.productQuantity = Math.max(1, Math.min(maximum, (Number(state.productQuantity) || 1) + change));
+  render();
+}
 function addConfiguredProductToCart() {
   const product = state.selectedProduct;
   if (!product) return;
   if (isSoldOut(product)) { alert("Sorry, this item is sold out."); return; }
   if (!validateRequiredOptions()) return;
   if(isRitualRedemptionMode()&&!ritualEligibleProduct(product))return alert("This item is not eligible for Matcha Pass credits.");
-  if(isRitualRedemptionMode()&&ritualCreditsInCart()>=ritualAvailable())return alert(`You only have ${ritualAvailable()} unreserved Matcha Pass drinks available.`);
+  const addQuantity = Math.max(1, Math.min(20, Number(state.productQuantity) || 1));
+  if(isRitualRedemptionMode()&&ritualCreditsInCart()+addQuantity>ritualAvailable())return alert(`You only have ${ritualAvailable()} unreserved Matcha Pass drinks available.`);
   const selectedOptions = getSelectedOptionsForProduct(product.id);
   const optionsKey = selectedOptions.map((option) => String(option.optionId)).sort().join("-");
   const key = `${product.id}__${optionsKey}`;
@@ -1438,11 +1447,11 @@ function addConfiguredProductToCart() {
   const available = productStock(product);
   if (available != null) {
     const existingQty = state.cart[key]?.qty || 0;
-    if (existingQty >= available) { alert("Sorry, this item is sold out."); return; }
+    if (existingQty + addQuantity > available) { alert("Sorry, there is not enough stock for that quantity."); return; }
   }
   state.cart[key] = {
     productId: product.id, productName: product.name, imageUrl: product.image_url || "",
-    unitPrice, regularUnitPrice: isRitualRedemptionMode() ? unitPrice : Math.max(0, Math.round((salePrice(product) + selectedOptions.reduce((sum, option) => sum + Number(option.price || 0), 0)) * 100) / 100), basePrice: isRitualRedemptionMode()?Number(ritualDrinkTopUp(product)||0):salePrice(product), qty: (state.cart[key]?.qty || 0) + 1, options: selectedOptions, isRitualRedemption:isRitualRedemptionMode(),
+    unitPrice, regularUnitPrice: isRitualRedemptionMode() ? unitPrice : Math.max(0, Math.round((salePrice(product) + selectedOptions.reduce((sum, option) => sum + Number(option.price || 0), 0)) * 100) / 100), basePrice: isRitualRedemptionMode()?Number(ritualDrinkTopUp(product)||0):salePrice(product), qty: (state.cart[key]?.qty || 0) + addQuantity, options: selectedOptions, isRitualRedemption:isRitualRedemptionMode(),
   };
   state.selectedProduct = null;
   state.selectedOptions = {};
@@ -1464,12 +1473,18 @@ function selectBundleDrink(slot, productId) {
 function selectBundleOption(drinkNumber, groupId, optionId) {
   const option = state.options.find((item) => String(item.id) === String(optionId));
   if (!option) return;
+  const drink = bundleDrink(drinkNumber);
+  const group = optionGroupsForProduct(drink).find((item) => String(item.id) === String(groupId));
+  if (group && !group.required && String(bundleDrinkOptions(drinkNumber)[groupId]?.optionId) === String(option.id)) {
+    delete bundleDrinkOptions(drinkNumber)[groupId];
+    render();
+    return;
+  }
   const value = {
-    productId: bundleDrink(drinkNumber).id,
+    productId: drink.id,
     optionId: option.id, optionName: option.name, price: Number(option.price || 0),
   };
   bundleDrinkOptions(drinkNumber)[groupId] = value;
-  const drink = bundleDrink(drinkNumber);
   const selectedOptions = bundleDrinkOptions(drinkNumber);
   advanceOptionStep(`bundle${drinkNumber}`, groupId, optionGroupsForProduct(drink), selectedOptions);
 }
@@ -1985,13 +2000,13 @@ function storeInfoPanel() {
   const tickerText = escapeHtml(state.store.ticker_text || "PRE-ORDER ONLY · FRESHLY WHISKED · SHIZUKU LAB");
   const storeDescription = escapeHtml(state.store.store_description || "Little cups, big comfort. Freshly whisked matcha made with care — one cup at a time.");
   const collectionAddress = escapeHtml(marketCollectionSettings().address);
-  const nextCollections = nextCollectionSchedule(6);
+  const nextCollections = nextCollectionSchedule(4);
   return `
-    ${state.store.show_ticker === false || !partnerFeatureEnabled("ticker") ? "" : `<div class="promo-ticker"><div class="promo-ticker-track"><span>${tickerText}</span><span>${tickerText}</span><span>${tickerText}</span></div></div>`}
-    <div class="store-panel">
-      <div class="store-banner" style="--banner-height:${bannerHeight}px;background-position:${bannerX}% ${bannerY}%;background-image:linear-gradient(90deg,rgba(52,69,39,.14),rgba(52,69,39,.05)),url('${escapeHtml(bannerImage)}');"><span class="store-logo-overlap" style="--logo-circle-size:${logoCircleSize}px;"><img src="${escapeHtml(logoUrl)}" style="transform:translate(${logoImageX}%,${logoImageY}%) scale(${logoImageScale});" alt="${escapeHtml(state.store.store_name)} logo"></span></div>
-      <div class="store-panel-body" style="padding-top:${Math.round(logoCircleSize / 2 + 12)}px;">
-        <a class="store-insta" href="https://instagram.com/${encodeURIComponent(igHandle)}" target="_blank" rel="noopener">@${escapeHtml(igHandle)}</a>${whatsappLink}
+    ${state.store.show_ticker === false || !partnerFeatureEnabled("ticker") ? "" : `<div class="promo-ticker ordering-home-ticker"><span>${tickerText}</span></div>`}
+    <div class="store-panel ordering-home-panel">
+      <div class="store-banner" style="--banner-height:${bannerHeight}px;background-position:${bannerX}% ${bannerY}%;background-image:url('${escapeHtml(bannerImage)}');"></div>
+      <div class="store-panel-body">
+        <div class="store-identity"><span class="store-logo-inline" style="--logo-circle-size:${logoCircleSize}px;"><img src="${escapeHtml(logoUrl)}" style="transform:translate(${logoImageX}%,${logoImageY}%) scale(${Math.min(1, Math.max(.8, logoImageScale))});" alt="${escapeHtml(state.store.store_name)} logo"></span><div class="store-identity-copy"><a class="store-insta" href="https://instagram.com/${encodeURIComponent(igHandle)}" target="_blank" rel="noopener">@${escapeHtml(igHandle)}</a></div></div>${whatsappLink}
         ${state.store.reviews_enabled === false || !partnerFeatureEnabled("reviews") ? "" : `<button type="button" class="write-review-link" onclick="setScreen('reviews')">${escapeHtml(state.store.review_cta_label || "Share your Shizuku moment")}</button>`}
         <div class="store-dropoff">${collectionAddress}</div>
         <p class="store-desc">${storeDescription}</p>
@@ -2007,7 +2022,7 @@ function storeInfoPanel() {
 }
 
 /* ---------- header ---------- */
-function header() {
+function header(isHome = false) {
   const storeName = escapeHtml(state.store.store_name || "Shizuku Lab");
   const storeTaglineRaw = String(state.store.store_tagline || "雫ラボ · crafted drop by drop");
   const storeTagline = escapeHtml(storeTaglineRaw);
@@ -2022,7 +2037,7 @@ function header() {
     <div class="header-market-switch" aria-label="Ordering workspace"><span>${tr("store")}</span><button type="button" class="active" disabled>${state.market === "MY" ? "Malaysia · MYR" : "Singapore · SGD"}</button></div>
   </div>`;
   return `
-    <div class="header ${partnerModeActive() ? "partner-header" : ""}">
+    <div class="header ${partnerModeActive() ? "partner-header" : ""} ${isHome ? "ordering-home-header" : ""}">
       <div class="header-row">
         <div>
           <div class="display brand-title ${partnerModeActive() ? "partner-brand-title" : ""}">${brandTitle}</div>
@@ -2059,26 +2074,52 @@ function poweredByFooter() {
 }
 
 /* ---------- menu ---------- */
+function productMenuTag(item) {
+  if (item.menu_tag !== undefined && item.menu_tag !== null) return String(item.menu_tag).trim();
+  const savedTag = String(item.tagline || item.subtitle || "").trim();
+  if (savedTag) return savedTag;
+  const name = String(item.name || "").trim().toLowerCase();
+  const previewTags = {
+    "signature matcha latte": "First harvest",
+    "signature houjicha latte": "Dark roasted",
+    "ma-hou": "Matcha × Houjicha",
+    "ichigo matcha latte": "Strawberry",
+    "ichigo houjicha latte": "Strawberry",
+    "singapore fog": "Local favourite",
+    "cold brew sobacha": "No caffeine"
+  };
+  return previewTags[name] || "";
+}
 function renderMenuCard(item) {
   const soldOut = isSoldOut(item);
-  const addButton = soldOut
-    ? `<button class="add-btn" disabled>Sold out</button>`
-    : `<button class="add-btn" onclick="openProductOptions('${escapeHtml(item.id)}')">Add</button>`;
+  const menuTag = productMenuTag(item);
   if (state.menuView === "gallery") return `
-    <div style="background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;min-width:0;">
-      <img src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(item.name)}" style="width:100%;aspect-ratio:1/1;object-fit:cover;background:var(--matcha-bg);">
-      <div style="padding:11px 11px 12px;display:flex;flex:1;flex-direction:column;">
-        <button type="button" ${soldOut ? "disabled" : ""} style="font:600 13px/1.25 'Work Sans',sans-serif;cursor:pointer;border:0;background:none;padding:0;text-align:left;color:var(--ink);" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} ${soldOut ? "" : `<span style="color:var(--ink);">→</span>`}</button>
-        <div style="font-size:10.5px;color:var(--ink);line-height:1.4;margin:5px 0 10px;">${escapeHtml(item.description)}</div>
-        <div class="stock-line">${stockMarkup(item)}</div>
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:7px;margin-top:auto;">${productPriceMarkup(item, "item-price gallery-price")}${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : addButton}</div>
+    <button type="button" class="ordering-gallery-card ordering-card-action" ${soldOut ? "disabled" : ""} onclick="openProductOptions('${escapeHtml(item.id)}')" aria-label="View ${escapeHtml(item.name)}">
+      <span class="ordering-gallery-open"><img src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="" loading="lazy"></span>
+      <div class="ordering-gallery-copy">
+        <span class="ordering-product-name">${escapeHtml(item.name)}</span>
+        <p class="ordering-product-desc">${escapeHtml(item.description)}</p>
+        ${menuTag ? `<span class="ordering-product-tag">${escapeHtml(menuTag)}</span>` : ""}
+        <div class="ordering-gallery-foot"><div class="stock-line">${stockMarkup(item)}</div>${productPriceMarkup(item, "item-price gallery-price")}</div>
       </div>
-    </div>`;
+    </button>`;
   return `
-    <div class="item-card">
-      <img class="item-thumb" src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="${escapeHtml(item.name)}">
-      <div class="item-info"><button class="item-name" type="button" ${soldOut ? "disabled" : ""} style="cursor:pointer;border:0;background:none;padding:0;text-align:left;font:inherit;width:100%;color:var(--ink);" onclick="openProductOptions('${escapeHtml(item.id)}')">${escapeHtml(item.name)} ${soldOut ? "" : `<span style="color:var(--ink);">→</span>`}</button><div class="item-desc" style="color:var(--ink);">${escapeHtml(item.description)}</div><div class="stock-line">${stockMarkup(item)}</div><div class="item-row">${productPriceMarkup(item)}${state.cart[`${item.id}__`]?.qty > 0 ? stepper(`${item.id}__`, state.cart[`${item.id}__`].qty) : addButton}</div></div>
-    </div>`;
+    <button type="button" class="item-card ordering-list-card ordering-card-action" ${soldOut ? "disabled" : ""} onclick="openProductOptions('${escapeHtml(item.id)}')" aria-label="View ${escapeHtml(item.name)}">
+      <span class="ordering-list-open"><img class="item-thumb" src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="" loading="lazy"></span>
+      <div class="item-info"><span class="item-name ordering-product-name">${escapeHtml(item.name)}</span><div class="item-desc ordering-product-desc">${escapeHtml(item.description)}</div>${menuTag ? `<span class="ordering-product-tag">${escapeHtml(menuTag)}</span>` : ""}<div class="stock-line">${stockMarkup(item)}</div></div>
+      <div class="ordering-list-side">${productPriceMarkup(item)}</div>
+    </button>`;
+}
+function renderMenuItemsMarkup() {
+  const browseMenu = state.menu.filter((item) => (isRitualRedemptionMode() ? ritualEligibleProduct(item) : !isRitualProduct(item)) && partnerVisibleProduct(item));
+  const productGroupNames = state.productGroups.map((group) => group.name);
+  const extraNames = browseMenu.map(productGroupName).filter((name) => !productGroupNames.includes(name));
+  const categories = ["All", ...productGroupNames, ...Array.from(new Set(extraNames))];
+  const items = state.activeCategory === "All" ? browseMenu : browseMenu.filter((item) => productGroupName(item) === state.activeCategory);
+  if (!items.length) return `<div class="empty">No items available yet.</div>`;
+  const groups = state.activeCategory === "All" ? categories.slice(1) : [state.activeCategory];
+  if (partnerModeActive()) return `<section class="product-group"><div class="product-group-items ${state.menuView === "gallery" ? "ordering-product-grid" : "ordering-product-list"}">${items.map(renderMenuCard).join("")}</div></section>`;
+  return groups.map((group) => { const groupItems = items.filter((item) => productGroupName(item) === group); if (!groupItems.length) return ""; return `<section class="product-group"><h2 class="product-group-title">${escapeHtml(group.replace(/[✨🌟🫧]/gu, "").trim())}</h2><div class="product-group-items ${state.menuView === "gallery" ? "ordering-product-grid" : "ordering-product-list"}">${groupItems.map(renderMenuCard).join("")}</div></section>`; }).join("");
 }
 function renderMenu() {
   const browseMenu = state.menu.filter((item) => (isRitualRedemptionMode() ? ritualEligibleProduct(item) : !isRitualProduct(item)) && partnerVisibleProduct(item));
@@ -2086,25 +2127,19 @@ function renderMenu() {
   const extraNames = browseMenu.map(productGroupName).filter((name) => !productGroupNames.includes(name));
   const categories = ["All", ...productGroupNames, ...Array.from(new Set(extraNames))];
   const items = state.activeCategory === "All" ? browseMenu : browseMenu.filter((item) => productGroupName(item) === state.activeCategory);
-  const groups = state.activeCategory === "All" ? categories.slice(1) : [state.activeCategory];
-  const menuItemsMarkup = partnerModeActive()
-    ? `<section class="product-group"><div class="product-group-items" style="${state.menuView === "gallery" ? "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;" : ""}">${items.map(renderMenuCard).join("")}</div></section>`
-    : groups.map((group) => { const groupItems = items.filter((item) => productGroupName(item) === group); if (!groupItems.length) return ""; return `<section class="product-group"><h2 class="product-group-title">${escapeHtml(group)}</h2><div class="product-group-items" style="${state.menuView === "gallery" ? "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;" : ""}">${groupItems.map(renderMenuCard).join("")}</div></section>`; }).join("");
   return `
-    ${header()}
+    ${header(true)}
     ${storeInfoPanel()}
     ${isRitualRedemptionMode()?`<div style="margin:14px 20px;padding:14px 16px;border-radius:15px;background:var(--matcha);color:var(--cream);display:flex;justify-content:space-between;gap:12px;align-items:center"><div><b>Using Matcha Pass</b><div style="font-size:11px;margin-top:3px">${ritualAvailable()} drink${ritualAvailable()===1?"":"s"} available · ${ritualRemaining()} remaining on Pass</div></div><button class="btn-secondary" style="width:auto;background:var(--card)" onclick="exitRitualRedemption()">Exit</button></div>`:""}
     ${cartNoticeMarkup()}
     ${state.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load products: <code>${escapeHtml(state.loadError)}</code></div>` : ""}
+    <div class="ordering-menu-intro"><h1>${escapeHtml(state.store.menu_heading || "メニュー · DRINK MENU")}</h1></div>
     ${partnerModeActive() ? "" : `<div class="cats">
-      ${categories.map((category) => `<button class="pill ${category === state.activeCategory ? "active" : ""}" onclick="setCategory('${escapeHtml(category)}')">${escapeHtml(category)}</button>`).join("")}
+      ${categories.map((category) => `<button class="pill ${category === state.activeCategory ? "active" : ""}" onclick="setCategory('${escapeHtml(category)}')">${escapeHtml(category.replace(/[✨🌟🫧]/gu, "").trim())}</button>`).join("")}
     </div>`}
-    ${state.store.show_menu_view_switch === false || !partnerFeatureEnabled("menu_view_switch") ? "" : `<div style="display:flex;justify-content:flex-end;gap:7px;padding:2px 20px 3px;">
-      <button class="pill ${state.menuView === "list" ? "active" : ""}" style="padding:6px 11px;font-size:11px;" onclick="state.menuView='list';render();">☷ List</button>
-      <button class="pill ${state.menuView === "gallery" ? "active" : ""}" style="padding:6px 11px;font-size:11px;" onclick="state.menuView='gallery';render();">▦ Gallery</button>
-    </div>`}
-    <div class="menu-list" style="padding-top:10px;"><div class="menu-kana">${escapeHtml(state.store.menu_heading || "メニュー · DRINK MENU")}</div>
-      ${items.length === 0 ? `<div class="empty">No items available yet.</div>` : menuItemsMarkup}
+    ${partnerModeActive() && !partnerFeatureEnabled("menu_view_switch") ? "" : `<div class="ordering-menu-toolbar"><div class="ordering-view-switch" role="group" aria-label="Menu layout"><button type="button" class="${state.menuView === "list" ? "active" : ""}" aria-pressed="${state.menuView === "list"}" onclick="state.menuView='list';render();">☷ List</button><button type="button" class="${state.menuView === "gallery" ? "active" : ""}" aria-pressed="${state.menuView === "gallery"}" onclick="state.menuView='gallery';render();">▦ Gallery</button></div></div>`}
+    <div class="menu-list ordering-menu-products">
+      ${renderMenuItemsMarkup()}
     </div>
     ${cartCount() > 0 ? `
     <div class="sticky-bar floating-cart-bar"><div class="sticky-bar-inner">
@@ -2166,8 +2201,8 @@ function renderFAQ() {
   const faqItems = IS_CONFIGURED ? state.faq.map((item) => ({ q: item.question, a: item.answer })) : (STORE_FAQ || []);
   if (!faqItems.length) return "";
   return `
-    <section class="faq-section">
-      <div class="faq-title"><span>よくある質問</span> · FAQ</div>
+    <section class="faq-section ordering-faq">
+      <div class="faq-title"><span>よくある質問</span><h2>FAQ</h2></div>
       ${faqItems.map((item) => `<details class="faq-item"><summary onclick="openFaq(this.parentElement); return false;">${escapeHtml(item.q)}</summary><div class="faq-answer">${escapeHtml(item.a).replace(/\n/g, "<br>")}</div></details>`).join("")}
     </section>
   `;
@@ -2210,22 +2245,26 @@ function renderOptions() {
   const product = state.selectedProduct;
   if (!product) return renderMenu();
   const price = isRitualRedemptionMode()?Math.round((Number(ritualDrinkTopUp(product)||0)+getSelectedOptionsForProduct(product.id).reduce((sum,option)=>sum+Number(option.price||0),0))*100)/100:calculateProductPrice(product);
+  const quantity = Math.max(1, Number(state.productQuantity) || 1);
   return `
     ${header()}
-    <div class="screen">
+    <div class="screen product-configuration-screen">
       <button class="back-link" onclick="setScreen('menu')">${ICONS.back} Back to menu</button>
       <div class="product-detail-card">
         ${renderProductImages(product)}
         <div class="item-info product-detail-copy">
+          <div class="product-detail-kicker"><span>${escapeHtml(productGroupName(product))}</span><span>SHIZUKU LAB · 雫ラボ</span></div>
           <div class="item-name">${escapeHtml(product.name)}</div>
           <div class="item-desc">${escapeHtml(product.description)}</div>
+          <div class="product-detail-price">${isRitualRedemptionMode() ? (price ? `+${money(price)}` : "Included with Matcha Pass") : `from ${money(partnerMemberBasePrice(product))}`}</div>
           <div class="stock-line">${stockMarkup(product)}</div>
         </div>
       </div>
       ${renderProgressiveOptionGroups(product, state.selectedOptions)}
     </div>
-    <div class="sticky-bar"><div class="sticky-bar-inner">
-      <button class="primary-btn" ${isSoldOut(product) ? "disabled" : ""} onclick="addConfiguredProductToCart()">${isSoldOut(product) ? "Sold out" : isRitualRedemptionMode()?(price?`Add · +${money(price)}`:"Add · Included"):`Add to cart · ${money(price)}`}</button>
+    <div class="sticky-bar product-detail-sticky"><div class="sticky-bar-inner">
+      <div class="product-quantity" aria-label="Quantity"><button type="button" onclick="changeProductQuantity(-1)" aria-label="Decrease quantity" ${quantity <= 1 ? "disabled" : ""}>−</button><span>${quantity}</span><button type="button" onclick="changeProductQuantity(1)" aria-label="Increase quantity">+</button></div>
+      <button class="primary-btn product-detail-action" ${isSoldOut(product) ? "disabled" : ""} onclick="addConfiguredProductToCart()">${isSoldOut(product) ? "Sold out" : isRitualRedemptionMode()?(price?`Add to order · +${money(price * quantity)}`:"Add to order · Included"):`Add to order · ${money(price * quantity)}`}</button>
     </div></div>
   `;
 }
@@ -2242,11 +2281,12 @@ function renderBundle() {
   const drinkSections=selectedDrinks.map((selectedDrink,index)=>{const slot=index+1;return `<div class="bundle-section"><div class="bundle-heading">Drink ${slot}</div><div class="bundle-subheading">Choose your drink</div><div class="bundle-drinks">${drinks.map((drink)=>`<button type="button" ${isSoldOut(drink)?"disabled":""} class="slot ${selectedDrink&&String(selectedDrink.id)===String(drink.id)?"active":""}" onclick="selectBundleDrink(${slot},'${escapeHtml(drink.id)}')"><div><div class="slot-day">${escapeHtml(drink.name)}</div><div class="slot-time">${showChoicePrices?(isDynamicBundle(bundle)?money(bundleOptionPrice(bundle,drink)):(hasDiscount(drink)?`${money(salePrice(drink))} <span class="original-price">${money(originalPrice(drink))}</span>`:money(salePrice(drink)))):""} ${stockMarkup(drink)}</div></div></button>`).join("")}</div>${selectedDrink?renderBundleDrinkOptions(slot,selectedDrink,selectedOptions[index]):""}</div>`;}).join("");
   return `
     ${header()}
-    <div class="screen">
+    <div class="screen product-configuration-screen">
       <button class="back-link" onclick="setScreen('menu')">${ICONS.back} Back to menu</button>
       <div class="product-detail-card">
         ${renderProductImages(bundle)}
         <div class="item-info product-detail-copy">
+          <div class="product-detail-kicker"><span>${escapeHtml(productGroupName(bundle))}</span><span>SHIZUKU LAB · 雫ラボ</span></div>
           <div class="item-name">${escapeHtml(bundle.name)}</div>
           <div class="item-desc">${escapeHtml(bundle.description || `Choose ${count} drinks from the selections below.`)}</div>
           ${bundle.ritual_validity_weeks?`<div class="ref-note"><b>${count} drinks · ${Number(bundle.ritual_validity_weeks)} weeks</b><br>Choose all ${count} drinks now. Your order keeps the Weekly Ritual together as one purchase.</div>`:""}
