@@ -405,15 +405,15 @@ img{display:block;max-width:100%;}
 .ordering-menu-products .ordering-list-side{display:flex;flex-direction:column;align-items:flex-end;gap:10px;min-width:65px}
 .ordering-menu-products .ordering-list-side .item-price,.ordering-menu-products .gallery-price{font:400 16px/1.2 'Fraunces',Georgia,serif;white-space:nowrap;text-align:right}
 .ordering-menu-products .ordering-product-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
-.ordering-gallery-card{min-width:0;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--line);border-radius:4px;background:var(--card)}
+.ordering-gallery-card{min-width:0;display:flex;flex-direction:column;overflow:hidden;padding:0;border:1px solid var(--line);border-radius:4px;background:var(--card)}
 .ordering-gallery-open{display:block;width:100%;padding:0;border:0;background:var(--matcha-bg);cursor:pointer}
-.ordering-gallery-open img{width:100%;aspect-ratio:1/1;object-fit:cover}
+.ordering-gallery-open img{display:block;width:100%;aspect-ratio:1/1;object-fit:cover}
 .ordering-gallery-copy{display:flex;flex:1;flex-direction:column;padding:11px}
 .ordering-gallery-copy .ordering-product-name{font-size:18px}
 .ordering-gallery-copy .ordering-product-desc{flex:1;min-height:47px}
 .ordering-product-tag{display:block;color:var(--matcha);font-size:10px;letter-spacing:.09em;margin:6px 0 7px}
 .ordering-gallery-foot{display:flex;justify-content:space-between;align-items:baseline;gap:5px;flex-wrap:wrap}
-.ordering-menu-products .ordering-card-action{width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;appearance:none;-webkit-appearance:none}
+.ordering-menu-products .ordering-card-action{box-sizing:border-box;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;appearance:none;-webkit-appearance:none}
 .ordering-menu-products .ordering-card-action:disabled{cursor:not-allowed}
 .ordering-menu-products .ordering-card-action:focus-visible{outline:2px solid var(--matcha);outline-offset:3px}
 @media(max-width:390px){.ordering-menu-toolbar{align-items:stretch;flex-direction:column}.ordering-view-switch{align-self:flex-end}.ordering-menu-products .ordering-product-name{font-size:17px}.ordering-menu-products .ordering-list-card{grid-template-columns:60px minmax(0,1fr) auto;gap:9px}.ordering-list-open{width:60px;height:60px}.ordering-menu-products .ordering-list-card .item-thumb{width:60px;height:60px}}

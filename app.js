@@ -1336,9 +1336,6 @@ function advanceOptionStep(scope, groupId, groups, selectedOptions) {
   state.expandedOptionSteps[scope] = null;
   render();
 }
-function skippedOption(product, label = tr("skip")) {
-  return { productId: product.id, optionId: null, optionName: label, price: 0, skipped: true };
-}
 function defaultOptionSelections(product) {
   // Admin's required flag controls validation; optional groups start unselected.
   return {};
@@ -1355,38 +1352,24 @@ function optionGroupJapaneseLabel(name) {
   if (/temperat/.test(value)) return "温度";
   return "";
 }
-function skipOptionStep(scope, groupId, drinkNumber = null) {
-  let selectedOptions = state.selectedOptions;
-  let product = state.selectedProduct;
-  if (drinkNumber != null) { selectedOptions = bundleDrinkOptions(drinkNumber); product = bundleDrink(drinkNumber); }
-  if (!product) return;
-  const groups = optionGroupsForProduct(product);
-  const group = groups.find((item) => String(item.id) === String(groupId));
-  const isLastGroup = groups.length > 0 && String(groups[groups.length - 1].id) === String(groupId);
-  if (!group || (group.required && !isLastGroup)) return;
-  selectedOptions[groupId] = skippedOption(product, isLastGroup ? "No thanks" : tr("skip"));
-  advanceOptionStep(scope, groupId, groups, selectedOptions);
-}
 function renderProgressiveOptionGroups(product, selectedOptions, drinkNumber = null) {
   const groups = optionGroupsForProduct(product);
   if (!groups.length) return `<div class="hint">${tr("no_options")}</div>`;
   const scope = drinkNumber == null ? "product" : `bundle${drinkNumber}`;
-  return `<div class="progressive-options">${groups.map((group, index) => {
+  return `<div class="progressive-options">${groups.map((group) => {
     const selected = selectedOptions[group.id];
     const options = getOptionsForGroup(group.id);
     const optionHandler = drinkNumber == null
       ? (optionId) => `selectOption('${escapeHtml(group.id)}','${escapeHtml(optionId)}')`
       : (optionId) => `selectBundleOption(${drinkNumber},'${escapeHtml(group.id)}','${escapeHtml(optionId)}')`;
-    const isLastGroup = index === groups.length - 1;
     const japaneseLabel = optionGroupJapaneseLabel(group.name);
-    const hint = japaneseLabel ? `${japaneseLabel}${group.required && !isLastGroup ? "" : " · OPTIONAL"}` : (group.required && !isLastGroup ? "CHOOSE ONE" : "OPTIONAL");
+    const hint = japaneseLabel ? `${japaneseLabel}${group.required ? "" : " · OPTIONAL"}` : (group.required ? "CHOOSE ONE" : "OPTIONAL");
     return `<section class="field product-option-group option-step-open" id="${optionStepDomId(scope, group.id)}">
-      <div class="option-step-heading"><label>${escapeHtml(group.name)}${group.required && !isLastGroup ? `<span class="option-required-star" aria-label="required">*</span>` : ""}</label><span class="option-group-hint">${hint}</span></div>
-      <div class="option-choice-list" role="group" aria-label="${escapeHtml(group.name)}${group.required && !isLastGroup ? ", required" : ", optional"}">
+      <div class="option-step-heading"><label>${escapeHtml(group.name)}${group.required ? `<span class="option-required-star" aria-label="required">*</span>` : ""}</label><span class="option-group-hint">${hint}</span></div>
+      <div class="option-choice-list" role="group" aria-label="${escapeHtml(group.name)}${group.required ? ", required" : ", optional"}">
         ${options.map((option) => `<button type="button" class="slot option-choice ${selected && String(selected.optionId) === String(option.id) ? "active" : ""}" aria-pressed="${selected && String(selected.optionId) === String(option.id) ? "true" : "false"}" onclick="${optionHandler(option.id)}">
           <span class="option-choice-name">${escapeHtml(option.name)}</span>${Number(option.price || 0) ? `<span class="option-choice-price">${optionPriceLabel(option.price)}</span>` : ""}
         </button>`).join("")}
-        ${isLastGroup ? `<button type="button" class="option-choice option-skip ${selected?.skipped ? "active" : ""}" aria-pressed="${selected?.skipped ? "true" : "false"}" onclick="skipOptionStep('${scope}','${escapeHtml(group.id)}',${drinkNumber == null ? "null" : drinkNumber})">No thanks</button>` : ""}
       </div>
     </section>`;
   }).join("")}</div>`;
@@ -1395,7 +1378,7 @@ function validateRequiredOptions() {
   const groups = optionGroupsForProduct(state.selectedProduct);
   for (const group of groups) {
     if (!group.required) continue;
-    if (!state.selectedOptions[group.id]) { alert(`Please choose an option for "${group.name}".`); return false; }
+    if (!state.selectedOptions[group.id]?.optionId) { alert(`Please choose an option for "${group.name}".`); return false; }
   }
   return true;
 }
@@ -1493,7 +1476,7 @@ function validateBundleDrink(drink, selectedOptions) {
   const groups = optionGroupsForProduct(drink);
   for (const group of groups) {
     if (!group.required) continue;
-    if (!selectedOptions[group.id]) return false;
+    if (!selectedOptions[group.id]?.optionId) return false;
   }
   return true;
 }
