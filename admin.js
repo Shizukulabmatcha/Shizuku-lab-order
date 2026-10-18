@@ -887,6 +887,23 @@ function toggleBundleProduct(productId, checked) {
   astate.editing.bundle_product_ids = checked ? [...new Set([...ids, String(productId)])] : ids.filter((id) => id !== String(productId));
   if (!checked && astate.editing.bundle_option_prices) delete astate.editing.bundle_option_prices[String(productId)];
 }
+function toggleBundleProductFromEditor(productId, checked) {
+  const body = document.querySelector(".product-editor-body");
+  const list = body?.querySelector(".product-choice-list");
+  const bodyScroll = body?.scrollTop || 0;
+  const listScroll = list?.scrollTop || 0;
+  toggleBundleProduct(productId, checked);
+  render();
+  const nextBody = document.querySelector(".product-editor-body");
+  if (nextBody) nextBody.scrollTop = bodyScroll;
+  const nextList = nextBody?.querySelector(".product-choice-list");
+  if (nextList) nextList.scrollTop = listScroll;
+}
+function onProductChoiceRowClick(event, productId) {
+  if (event.target.closest("label, input, button")) return;
+  const checkbox = event.currentTarget.querySelector('input[type="checkbox"]');
+  if (checkbox) toggleBundleProductFromEditor(productId, !checkbox.checked);
+}
 function setBundleOptionPrice(productId, value) {
   const prices = astate.editing.bundle_option_prices && typeof astate.editing.bundle_option_prices === "object"
     ? { ...astate.editing.bundle_option_prices } : {};
@@ -4490,7 +4507,7 @@ function renderProductChoiceEditor(item, pass = false) {
   const overrides = isMalaysiaAdmin ? item.bundle_myr_option_prices : item.bundle_option_prices;
   const setter = isMalaysiaAdmin ? "setBundleMyrOptionPrice" : "setBundleOptionPrice";
   const products = astate.menu.filter((product)=>String(product.id)!==String(item.id)&&!product.is_bundle&&Number(product.ritual_validity_weeks||0)<=0);
-  return `<div class="product-choice-list">${products.map((product)=>{const selected=(item.bundle_product_ids||[]).map(String).includes(String(product.id));const hasOverride=overrides&&Object.prototype.hasOwnProperty.call(overrides,String(product.id));const override=hasOverride?overrides[String(product.id)]:"";const productPrice=Number(isMalaysiaAdmin?(product.myr_discount_price||product.myr_price||0):(product.discount_price||product.price||0));const placeholder=pass?defaultMatchaPassTopUpAdmin(product).toFixed(2):productPrice.toFixed(2);return `<div class="product-choice-row"><label><input type="checkbox" ${selected?"checked":""} onchange="toggleBundleProduct('${product.id}',this.checked);render()"><span><b>${escapeHtml(product.name)}</b><small>${currency} ${productPrice.toFixed(2)}</small></span></label>${selected&&(pass||item.bundle_pricing_mode==="sum_selected")?`<div class="product-choice-price"><small>${pass?"Pass top-up":`${currency} override`}</small><input type="number" min="0" step="0.01" value="${escapeHtml(pass&&!hasOverride?placeholder:override)}" placeholder="${placeholder}" oninput="${setter}('${product.id}',this.value)"></div>`:""}</div>`;}).join("")}</div>`;
+  return `<div class="product-choice-list">${products.map((product)=>{const selected=(item.bundle_product_ids||[]).map(String).includes(String(product.id));const hasOverride=overrides&&Object.prototype.hasOwnProperty.call(overrides,String(product.id));const override=hasOverride?overrides[String(product.id)]:"";const productPrice=Number(isMalaysiaAdmin?(product.myr_discount_price||product.myr_price||0):(product.discount_price||product.price||0));const placeholder=pass?defaultMatchaPassTopUpAdmin(product).toFixed(2):productPrice.toFixed(2);return `<div class="product-choice-row" onclick="onProductChoiceRowClick(event,'${product.id}')"><label><input type="checkbox" ${selected?"checked":""} onchange="toggleBundleProductFromEditor('${product.id}',this.checked)"><span><b>${escapeHtml(product.name)}</b><small>${currency} ${productPrice.toFixed(2)}</small></span></label>${selected&&(pass||item.bundle_pricing_mode==="sum_selected")?`<div class="product-choice-price"><small>${pass?"Pass top-up":`${currency} override`}</small><input type="number" min="0" step="0.01" value="${escapeHtml(pass&&!hasOverride?placeholder:override)}" placeholder="${placeholder}" oninput="${setter}('${product.id}',this.value)"></div>`:""}</div>`;}).join("")}</div>`;
 }
 function renderProductSettingsEditor(item) {
   const isMalaysiaAdmin = ADMIN_WORKSPACE_MARKET === "MY";
