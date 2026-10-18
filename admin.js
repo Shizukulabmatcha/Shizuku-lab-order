@@ -3418,8 +3418,9 @@ async function saveProductOrder() {
     for (let index = 0; index < astate.menu.length; index++) {
       const product = astate.menu[index];
       const sortOrder = index + 1;
-      const { error } = await db.from("products").update({ sort_order: sortOrder }).eq("id", product.id);
+      const { data, error } = await db.from("products").update({ sort_order: sortOrder }).eq("id", product.id).select("id,sort_order").maybeSingle();
       if (error) throw error;
+      if (!data || Number(data.sort_order) !== sortOrder) throw new Error(`The order for ${product.name || "a product"} was not saved. Please check your Admin access and try again.`);
       product.sort_order = sortOrder;
     }
     alert("Product order saved.");
@@ -3734,7 +3735,7 @@ function renderPartnersTab() {
     ["collection_area", "Collection area card"],
     ["next_collection", "Next Collection card"],
     ["track_order", "Track Order"],
-    ["rewards", "Rewards"],
+    ["rewards", "Rewards & referrals"],
     ["reviews", "Review invitation and published reviews"],
     ["menu_view_switch", "List / Gallery switch"]
   ];
@@ -5094,7 +5095,7 @@ function render() {
   const navGroups = [
     { label:"OVERVIEW", tabs:[["dashboard","⌂","Dashboard"],["orders","▣","Orders"],["preparation","☷","Today’s Prep"]] },
     { label:"STORE", tabs:[["menu","◇","Products"],["availability","◷","Availability"],["inventory","▤","Inventory & Costing",lowStockCount]] },
-    { label:"CUSTOMERS", tabs:[["customers","◉","Customers"],["messages","✉",`Messages${unreadMessageCount()?` (${unreadMessageCount()})`:""}`],...(DASHBOARD_MARKET==="SG"?[["matcha_passes","🍵","Matcha Pass"],["rewards","♧","Rewards"]]:[])] },
+    { label:"CUSTOMERS", tabs:[["customers","◉","Customers"],["messages","✉",`Messages${unreadMessageCount()?` (${unreadMessageCount()})`:""}`],...(DASHBOARD_MARKET==="SG"?[["matcha_passes","🍵","Matcha Pass"],["rewards","♧","Rewards & referrals"]]:[])] },
     { label:"MARKETING", tabs:[["promos","✦","Promos"],["marketing","✉","Campaigns"],["events","✧","Events"],...(DASHBOARD_MARKET==="SG"?[["partners","↗","Partners"]]:[]),["reviews","★","Reviews"]] },
     { label:"DESIGN", tabs:[["brand","◈","Brand Colours"],["customer_page","☏","Customer Page"],["wording","Aa","Wording"],["faq","?","FAQ"],["store_details","⚙","Store Details"]] },
     { label:"REPORTS", tabs:[["analytics","▥","Analytics"],...(DASHBOARD_MARKET==="SG"?[["partner_report","↗","Partner Report"]]:[])] },
@@ -5102,7 +5103,7 @@ function render() {
   ];
   const navButton = ([tab,icon,label,badge]) => { const href=new URL(window.location.href);href.searchParams.set("tab",tab);return `<a class="admin-nav-child ${astate.tab===tab?"active":""}" href="${escapeHtml(href.pathname+href.search)}" onclick="event.preventDefault();setTab('${tab}')"><span class="nav-icon">${icon}</span><span class="nav-text">${label}</span>${badge?`<span class="admin-nav-badge">${badge}</span>`:""}</a>`; };
   const navGroupHtml = navGroups.map((group)=>{const key=group.label.toLowerCase();const open=astate.navGroups[key]!==false;const containsActive=group.tabs.some(([tab])=>tab===astate.tab);return `<div class="admin-nav-group ${open?"open":""}"><button class="admin-nav-group-toggle ${containsActive?"contains-active":""}" onclick="toggleAdminNavGroup('${key}')" aria-expanded="${open?"true":"false"}"><span>${group.label}</span><span class="admin-nav-chevron">⌄</span></button><div class="admin-nav-children">${group.tabs.map(navButton).join("")}</div></div>`;}).join("");
-  const tabTitle = { analytics:"Analytics",partner_report:"Partner Report",preparation:"Today’s Prep",orders:"Orders",partners:"Partners",matcha_passes:"Matcha Pass",menu:"Products",inventory:"Inventory & Costing",costing:"Inventory & Costing",promos:"Promos",rewards:"Rewards",customers:"Customers",messages:"Messages",reviews:"Reviews",marketing:"Campaigns & Contacts",events:"Events",availability:"Availability",faq:"FAQ",notifications:"Notifications",brand:"Brand Colours",wording:"Wording",customer_page:"Customer Page",store_details:"Store Details",account:"Account" };
+  const tabTitle = { analytics:"Analytics",partner_report:"Partner Report",preparation:"Today’s Prep",orders:"Orders",partners:"Partners",matcha_passes:"Matcha Pass",menu:"Products",inventory:"Inventory & Costing",costing:"Inventory & Costing",promos:"Promos",rewards:"Rewards & referrals",customers:"Customers",messages:"Messages",reviews:"Reviews",marketing:"Campaigns & Contacts",events:"Events",availability:"Availability",faq:"FAQ",notifications:"Notifications",brand:"Brand Colours",wording:"Wording",customer_page:"Customer Page",store_details:"Store Details",account:"Account" };
   const tabSubtitle = { preparation:"Every paid drink to prepare today.",orders:"Review payments and manage customer orders.",partners:"Referral links, member benefits, commission and payouts.",matcha_passes:"Pass balances, redemption history and customer emails.",menu:"Search, filter and maintain products and options.",inventory:"Stock, purchases, recipes, product cost, profit and margin in one place.",costing:"Stock, purchases, recipes, product cost, profit and margin in one place.",promos:"Create and maintain discounts.",rewards:"Manage repeat-customer rewards.",customers:"Customer history and private notes.",messages:"Order-linked conversations.",reviews:"Moderate verified customer reviews.",marketing:"Contacts, campaigns and consent.",events:"Partner packages, costs and payment progress.",availability:"Weekly collection schedule and exceptions.",faq:"Compact answers with store-specific visibility.",notifications:"Seller alerts, customer emails and delivery activity.",brand:"Independent Admin and Customer Store colours.",wording:"Customer-facing labels and status messages.",customer_page:"Checkout, payment, receipt, chat and tracking.",store_details:"Store identity, collection points and payment details.",analytics:"Normal store sales and profitability.",partner_report:"Partner sales, commission and net earnings kept separate.",account:"Workspace access and preferences." };
   const page = astate.tab === "dashboard" ? renderDashboardTab() : `
     ${AdminPageHeader(tabTitle[astate.tab]||"Dashboard",tabSubtitle[astate.tab]||"",`<button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing ? "disabled" : ""}>${astate.dashboardRefreshing ? "Refreshing…" : "↻ Refresh"}</button><a class="btn-secondary" href="${ADMIN_CUSTOMER_SHOP_URL}" target="_blank" rel="noopener">View store ↗</a>`)}
