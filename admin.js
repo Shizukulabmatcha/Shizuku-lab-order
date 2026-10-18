@@ -47,6 +47,7 @@ const astate = {
   menu: [],
   productGroups: [],
   optionGroups: [],
+  accordionOpen: {},
   options: [],
   productOptionGroups: [],
   realtimeChannel: null,
@@ -826,7 +827,7 @@ async function deleteCancelledOrder(id) {
 /* ---- menu (products) CRUD — unchanged from before ---- */
 function newMenuItem() {
   const firstGroup = astate.productGroups[0];
-  astate.editing = { id: null, enabled_option_group_ids: [], enabled_partner_ids: [], group_id: firstGroup?.id || null, category: firstGroup?.name || "Signature", name: "", description: "", price: 0, discount_price: null, image_url: "", is_available: true, is_b2b:false, sold_out: false, show_price_on_menu: true, is_bundle: false, bundle_product_ids: [], bundle_pricing_mode: "fixed", bundle_selection_count: 2, bundle_option_prices: {}, bundle_show_choice_prices: false, bundle_display_from_price: null, malaysia_available: ADMIN_WORKSPACE_MARKET === "MY", myr_price: null, myr_discount_price: null, bundle_myr_option_prices: {}, bundle_myr_display_from_price: null, stock: 0, sort_order: astate.menu.length + 1 };
+  astate.editing = { id: null, enabled_option_group_ids: [], enabled_partner_ids: [], group_id: firstGroup?.id || null, category: firstGroup?.name || "Signature", name: "", description: "", menu_badge: null, price: 0, discount_price: null, image_url: "", is_available: true, is_b2b:false, sold_out: false, show_price_on_menu: true, is_bundle: false, bundle_product_ids: [], bundle_pricing_mode: "fixed", bundle_selection_count: 2, bundle_option_prices: {}, bundle_show_choice_prices: false, bundle_display_from_price: null, malaysia_available: ADMIN_WORKSPACE_MARKET === "MY", myr_price: null, myr_discount_price: null, bundle_myr_option_prices: {}, bundle_myr_display_from_price: null, stock: 0, sort_order: astate.menu.length + 1 };
   astate.productEditorSection = "basic"; render();
 }
 function editMenuItem(id) {
@@ -2397,7 +2398,7 @@ function openOfflineOrder() {
   astate.offlineOrderDraft = {
     customer_name: "", customer_phone: "", customer_email: "", collection_date: localDateText(new Date()), collection_time: "",
     collection_point: adminMarketCollectionPoints()[0] || "", offline_reason: "influencer_tasting", counts_as_sale: false,
-    notes: "", items: firstProduct ? [{ product_id: firstProduct.id, product_name: firstProduct.name, quantity: 1, unit_price: adminMarketProductPrice(firstProduct) }] : []
+    notes: "", promo_code: "", promo: null, promo_message: "", items: firstProduct ? [{ product_id: firstProduct.id, product_name: firstProduct.name, quantity: 1, unit_price: adminMarketProductPrice(firstProduct) }] : []
   };
   render();
 }
@@ -2407,19 +2408,75 @@ function offlineOrderField(key, value) {
   astate.offlineOrderDraft[key] = key === "counts_as_sale" ? !!value : value;
   if (key === "offline_reason" && value !== "manual_sale") astate.offlineOrderDraft.counts_as_sale = false;
   if (key === "offline_reason" && value === "manual_sale") astate.offlineOrderDraft.counts_as_sale = true;
+  if (["offline_reason", "counts_as_sale", "customer_phone"].includes(key)) clearOfflinePromo();
   render();
 }
-function addOfflineOrderItem() { const p = astate.menu.find((item) => ADMIN_WORKSPACE_MARKET === "MY" ? item.malaysia_available === true : item.is_available !== false) || astate.menu[0]; if (p) { astate.offlineOrderDraft.items.push({ product_id:p.id,product_name:p.name,quantity:1,unit_price:adminMarketProductPrice(p) }); render(); } }
-function chooseOfflineProduct(index, id) { const p=astate.menu.find((item)=>String(item.id)===String(id)); const row=astate.offlineOrderDraft?.items?.[index]; if(p&&row){row.product_id=p.id;row.product_name=p.name;row.unit_price=adminMarketProductPrice(p);render();} }
-function offlineItemField(index,key,value) { const row=astate.offlineOrderDraft?.items?.[index]; if(row){row[key]=Math.max(0,Number(value||0));render();} }
-function removeOfflineItem(index) { astate.offlineOrderDraft?.items?.splice(index,1); render(); }
+function clearOfflinePromo() { if (astate.offlineOrderDraft) { astate.offlineOrderDraft.promo = null; astate.offlineOrderDraft.promo_message = ""; } }
+function addOfflineOrderItem() { const p = astate.menu.find((item) => ADMIN_WORKSPACE_MARKET === "MY" ? item.malaysia_available === true : item.is_available !== false) || astate.menu[0]; if (p) { astate.offlineOrderDraft.items.push({ product_id:p.id,product_name:p.name,quantity:1,unit_price:adminMarketProductPrice(p) }); clearOfflinePromo(); render(); } }
+function chooseOfflineProduct(index, id) { const p=astate.menu.find((item)=>String(item.id)===String(id)); const row=astate.offlineOrderDraft?.items?.[index]; if(p&&row){row.product_id=p.id;row.product_name=p.name;row.unit_price=adminMarketProductPrice(p);clearOfflinePromo();render();} }
+function offlineItemField(index,key,value) { const row=astate.offlineOrderDraft?.items?.[index]; if(row){row[key]=Math.max(0,Number(value||0));clearOfflinePromo();render();} }
+function removeOfflineItem(index) { astate.offlineOrderDraft?.items?.splice(index,1); clearOfflinePromo(); render(); }
 function offlineOrderCode() { return `SL-O${Math.random().toString(36).slice(2,7).toUpperCase()}`; }
+function offlinePromoPhone(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (ADMIN_WORKSPACE_MARKET === "MY") {
+    if (digits.startsWith("60")) return digits;
+    if (digits.startsWith("0")) return "60" + digits.slice(1);
+    return "60" + digits;
+  }
+  return digits.length === 10 && digits.startsWith("65") ? digits.slice(2) : digits;
+}
+function offlineOrderSubtotal(d) { return Math.round((d.items || []).reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.unit_price || 0), 0) * 100) / 100; }
+function offlinePromoDiscount(promo, d) {
+  if (!promo || !d.counts_as_sale) return 0;
+  const ids = Array.isArray(promo.applicable_product_ids) ? promo.applicable_product_ids.map(String) : [];
+  const eligible = (d.items || []).filter((row) => !ids.length || ids.includes(String(row.product_id))).reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.unit_price || 0), 0);
+  const discount = promo.discount_type === "percent" ? eligible * Number(promo.discount_value || 0) / 100 : Number(promo.discount_value || 0);
+  return Math.round(Math.min(eligible, Math.max(0, discount)) * 100) / 100;
+}
+async function validateOfflinePromo(d) {
+  if (!d.counts_as_sale) throw new Error("Promo codes are for paid offline sales only.");
+  const phone = offlinePromoPhone(d.customer_phone);
+  if (phone.length < 8) throw new Error("Enter the customer's phone number before applying a promo code.");
+  const code = String(d.promo_code || "").trim().toUpperCase().replace(/^MY:/, "");
+  if (!code) throw new Error("Enter a promo code.");
+  const storedCode = ADMIN_WORKSPACE_MARKET === "MY" ? `MY:${code}` : code;
+  const { data, error } = await db.from("promo_codes").select("*").eq("market_code", ADMIN_WORKSPACE_MARKET).eq("code", storedCode).eq("is_active", true).limit(1);
+  if (error) throw error;
+  const promo = data?.[0];
+  if (!promo) throw new Error("This promo code is not active for this store.");
+  const now = new Date();
+  if (promo.valid_from && new Date(promo.valid_from) > now) throw new Error("This promo code is not active yet.");
+  if (promo.valid_until && new Date(promo.valid_until) < now) throw new Error("This promo code has expired.");
+  if (promo.usage_limit != null && Number(promo.used_count || 0) >= Number(promo.usage_limit)) throw new Error("This promo code has reached its usage limit.");
+  const ids = Array.isArray(promo.applicable_product_ids) ? promo.applicable_product_ids.map(String) : [];
+  const eligible = (d.items || []).filter((row) => !ids.length || ids.includes(String(row.product_id))).reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.unit_price || 0), 0);
+  if (eligible <= 0) throw new Error("This promo code does not apply to the selected products.");
+  if (eligible < Number(promo.minimum_spend || 0)) throw new Error(`Minimum eligible spend is ${money(promo.minimum_spend)}.`);
+  const { count, error: useError } = await db.from("promo_redemptions").select("id", { count: "exact", head: true }).eq("market_code", ADMIN_WORKSPACE_MARKET).eq("code", storedCode).eq("phone", phone);
+  if (useError) throw useError;
+  if (count > 0) throw new Error("This phone number has already used the promo code.");
+  return { ...promo, discount: offlinePromoDiscount(promo, d), phone };
+}
+async function applyOfflinePromoCode() {
+  const d = astate.offlineOrderDraft;
+  if (!d) return;
+  try { d.promo = await validateOfflinePromo(d); d.promo_message = `${visiblePromoCode(d.promo.code)} applied · −${money(d.promo.discount)}`; }
+  catch (error) { d.promo = null; d.promo_message = error?.message || String(error); }
+  render();
+}
 async function saveOfflineOrder() {
   const d=astate.offlineOrderDraft; if(!d||!String(d.customer_name).trim()) return alert("Enter a customer or contact name.");
   const customerEmail=String(d.customer_email||"").trim().toLowerCase();
   if(customerEmail&&!/^\S+@\S+\.\S+$/.test(customerEmail)) return alert("Enter a valid customer email address, or leave it blank.");
   const items=(d.items||[]).filter((row)=>Number(row.quantity)>0); if(!items.length) return alert("Add at least one product.");
-  const total=d.counts_as_sale ? items.reduce((sum,row)=>sum+Number(row.quantity)*Number(row.unit_price),0) : 0;
+  if (String(d.promo_code || "").trim() && !d.promo) return alert("Apply the promo code first, or clear the code to continue without a discount.");
+  let promo = null;
+  if (d.promo) {
+    try { promo = await validateOfflinePromo(d); }
+    catch (error) { clearOfflinePromo(); d.promo_message = error?.message || String(error); render(); return; }
+  }
+  const total=d.counts_as_sale ? Math.max(0, offlineOrderSubtotal(d) - Number(promo?.discount || 0)) : 0;
   const payload={order_number:offlineOrderCode(),customer_name:String(d.customer_name).trim(),customer_phone:String(d.customer_phone||"").trim(),customer_email:customerEmail||null,instagram:"",collection_date:d.collection_date||null,collection_time:String(d.collection_time||"").trim()||null,collection_point:String(d.collection_point||"").trim()||null,total,payment_status:"paid",order_status:"confirmed",notes:String(d.notes||"").trim()||null,payment_method:"Offline",payment_reference:null,is_offline:true,offline_reason:d.offline_reason,counts_as_sale:!!d.counts_as_sale};
   const button=document.getElementById("save-offline-order"); if(button){button.disabled=true;button.textContent="Saving…";}
   let order=null;
@@ -2427,9 +2484,15 @@ async function saveOfflineOrder() {
     const result=await db.from("orders").insert(payload).select("*").single(); if(result.error) throw result.error; order=result.data;
     const rows=items.map((row)=>({order_id:order.id,product_id:row.product_id,product_name:row.product_name,quantity:Number(row.quantity),unit_price:d.counts_as_sale?Number(row.unit_price):0,subtotal:d.counts_as_sale?Number(row.quantity)*Number(row.unit_price):0}));
     const inserted=await db.from("order_items").insert(rows); if(inserted.error) throw inserted.error;
+    if (promo) {
+      const redemption = await db.from("promo_redemptions").insert({ market_code: ADMIN_WORKSPACE_MARKET, code: promo.code, phone: promo.phone, order_id: order.id });
+      if (redemption.error) throw redemption.error;
+      const counted = await db.from("promo_codes").update({ used_count: Number(promo.used_count || 0) + 1 }).eq("id", promo.id);
+      if (counted.error) throw counted.error;
+    }
     await db.rpc("reconcile_shizuku_order_inventory",{p_order_id:order.id});
     astate.offlineOrderDraft=null; await loadAll(); alert(customerEmail?"Offline order created. Inventory was updated and the customer confirmation email was queued.":"Offline order created. Inventory has been updated.");
-  } catch(error) { if(order?.id) await db.from("orders").delete().eq("id",order.id); alert("Could not create offline order: "+(error?.message||error)); if(button){button.disabled=false;button.textContent="Create offline order";} }
+  } catch(error) { if(order?.id) { await db.from("promo_redemptions").delete().eq("order_id",order.id); await db.from("orders").delete().eq("id",order.id); } alert("Could not create offline order: "+(error?.message||error)); if(button){button.disabled=false;button.textContent="Create offline order";} }
 }
 
 function salesOrders() {
@@ -4440,7 +4503,7 @@ function renderProductSettingsEditor(item) {
   const section = ["basic","pricing","availability","options","advanced"].includes(astate.productEditorSection) ? astate.productEditorSection : "basic";
   const type = item.is_b2b ? "b2b" : item.is_bundle ? "bundle" : "standard";
   const title = astate.menu.some((product)=>String(product.id)===String(item.id)) ? "Edit product" : "Add product";
-  const basic = `${FormSection("Product details",`<div class="field"><label>Product name</label><input value="${escapeHtml(item.name||"")}" oninput="onEditField('name',this.value)"></div><div class="field"><label>Category</label><select onchange="onEditGroup(this.value)"><option value="">Other</option>${astate.productGroups.map((group)=>`<option value="${group.id}" ${(String(item.group_id)===String(group.id)||(!item.group_id&&String(item.category||"").toLowerCase()===String(group.name||"").toLowerCase()))?"selected":""}>${escapeHtml(group.name)}</option>`).join("")}</select></div><div class="field"><label>Description</label><textarea rows="4" oninput="onEditField('description',this.value)">${escapeHtml(item.description||"")}</textarea></div><div class="field"><label>Small menu label (optional)</label><input maxlength="80" value="${escapeHtml(item.menu_tag||"")}" placeholder="e.g. First harvest" oninput="onEditField('menu_tag',this.value)"><div class="hint" style="text-align:left;margin-top:5px;">Shown in small green text below this product on the customer menu.</div></div>${productImageEditor(item)}`,"Existing product ID, Category relationship and costing links stay unchanged.")}`;
+  const basic = `${FormSection("Product details",`<div class="field"><label>Product name</label><input value="${escapeHtml(item.name||"")}" oninput="onEditField('name',this.value)"></div><div class="field"><label>Category</label><select onchange="onEditGroup(this.value)"><option value="">Other</option>${astate.productGroups.map((group)=>`<option value="${group.id}" ${(String(item.group_id)===String(group.id)||(!item.group_id&&String(item.category||"").toLowerCase()===String(group.name||"").toLowerCase()))?"selected":""}>${escapeHtml(group.name)}</option>`).join("")}</select></div><div class="field"><label>Description</label><textarea rows="4" oninput="onEditField('description',this.value)">${escapeHtml(item.description||"")}</textarea></div><div class="field"><label>Photo badge (optional)</label><input maxlength="24" value="${escapeHtml(({best_seller:"Best Seller",new:"New"}[String(item.menu_badge||"").toLowerCase()]||item.menu_badge||""))}" placeholder="e.g. Best Seller, New, Limited" oninput="onEditField('menu_badge',this.value.trim()||null)"><div class="admin-badge-presets"><button type="button" class="btn-secondary" onclick="onEditField('menu_badge','Best Seller');render()">Best Seller</button><button type="button" class="btn-secondary" onclick="onEditField('menu_badge','New');render()">New</button><button type="button" class="btn-secondary" onclick="onEditField('menu_badge',null);render()">Clear</button></div><div class="hint" style="text-align:left;margin-top:5px;">Create your own short badge. It appears on the top-left of the product photo; the product name stays unchanged.</div></div><div class="field"><label>Small menu label (optional)</label><input maxlength="80" value="${escapeHtml(item.menu_tag||"")}" placeholder="e.g. First harvest" oninput="onEditField('menu_tag',this.value)"><div class="hint" style="text-align:left;margin-top:5px;">Shown in small green text below this product on the customer menu.</div></div>${productImageEditor(item)}`,"Existing product ID, Category relationship and costing links stay unchanged.")}`;
   const pricing = `${FormSection("Pricing",`<div class="product-editor-grid"><div class="field"><label>${type==="bundle"&&item.bundle_pricing_mode==="sum_selected"?`Base price / service fee (${currency})`:`Regular price (${currency})`}</label><input type="number" min="0" step="0.01" value="${price??""}" oninput="onEditField('${priceKey}',this.value)"></div><div class="field"><label>Sale price (${currency}, optional)</label><input type="number" min="0" step="0.01" value="${discount??""}" placeholder="No sale price" oninput="onEditField('${discountKey}',this.value)">${type==="bundle"&&item.bundle_pricing_mode==="sum_selected"?`<div class="hint">Not used for Add selected item prices; checkout adds the chosen item prices. Switch to Fixed bundle price if you want one set price.</div>`:""}</div></div>${type==="bundle"?`<div class="product-editor-grid"><div class="field"><label>Items included</label><input type="number" min="2" max="8" value="${Number(item.bundle_selection_count||2)}" oninput="onEditField('bundle_selection_count',this.value)"></div><div class="field"><label>Bundle pricing style</label><select onchange="onEditField('bundle_pricing_mode',this.value);render()"><option value="fixed" ${item.bundle_pricing_mode!=="sum_selected"?"selected":""}>Fixed bundle price</option><option value="sum_selected" ${item.bundle_pricing_mode==="sum_selected"?"selected":""}>Add selected item prices</option></select></div></div>${item.bundle_pricing_mode==="sum_selected"?`<div class="field"><label>Menu “From” price (${currency})</label><input type="number" min="0" step="0.01" value="${item[fromKey]??""}" placeholder="${bundleStartingPriceAdmin(item).toFixed(2)}" oninput="onEditField('${fromKey}',this.value)"><div class="hint">Display only; final checkout total still uses the existing bundle calculation.</div></div>${Toggle(item.bundle_show_choice_prices===true,"Show individual item prices","onEditField('bundle_show_choice_prices',this.checked)")}`:""}`:""}`,"Only settings for the selected Product Type are shown.")}`;
   const availability = `${FormSection("Store availability",`${Toggle(item.is_available!==false,"Singapore Store","onEditField('is_available',this.checked)")}${Toggle(item.malaysia_available===true,"Malaysia Store","onEditField('malaysia_available',this.checked)")}${ADMIN_WORKSPACE_MARKET==="SG"&&astate.partners.length?`<div class="field"><label>Partner Stores</label>${astate.partners.map((partner)=>Toggle((item.enabled_partner_ids||[]).map(String).includes(String(partner.id)),partner.name,`toggleProductPartner('${partner.id}',this.checked)`)).join("")}</div>`:""}${Toggle(item.sold_out===true,"Sold out","onEditField('sold_out',this.checked)","Keeps the product visible but prevents ordering.")}${Toggle(item.show_price_on_menu!==false,"Show price on menu","onEditField('show_price_on_menu',this.checked)")}<div class="field"><label>Weekly stock</label><input type="number" min="0" value="${Number(item.stock||0)}" oninput="onEditField('stock',this.value)"><div class="hint">Uses the existing weekly stock reset and deduction logic.</div></div>`)}`;
   const options = `${FormSection("Options / customisation",`<div class="hint" style="text-align:left;margin-bottom:10px">Choose only the existing option groups that apply to this product.</div>${astate.optionGroups.filter((group)=>group.is_visible!==false).map((group)=>Toggle((item.enabled_option_group_ids||[]).map(String).includes(String(group.id)),group.name,`toggleProductOptionGroup('${group.id}',this.checked)`,[group.required?"Required":"Optional",group.show_in_partner_referral===true?"Partner":"Normal stores"].join(" · "))).join("")||EmptyState("No visible option groups","Create them under Products → Options.")}`)}`;
@@ -4457,10 +4520,40 @@ renderEditOverlay = function () {
   return Number(astate.editing.ritual_validity_weeks||0)>0 ? renderMatchaPassSettingsEditor(astate.editing) : renderProductSettingsEditor(astate.editing);
 };
 
-function renderOfflineOrderEditor() {
+function renderOfflineOrderEditorLegacy() {
   const d=astate.offlineOrderDraft; const pointKey=ADMIN_WORKSPACE_MARKET === "MY" ? "malaysia_collection_points" : "collection_points"; const points=Array.isArray(astate.settings?.[pointKey])?astate.settings[pointKey]:[];
   const subtotal=(d.items||[]).reduce((sum,row)=>sum+Number(row.quantity||0)*Number(row.unit_price||0),0);
   return `<div class="overlay"><div class="overlay-card" style="max-width:720px;max-height:88vh;overflow-y:auto"><div class="display overlay-title" style="font-size:20px">Create offline order</div><div class="hint" style="text-align:left;margin:0 0 14px">Use for influencer tasting, complimentary drinks, replacements or a paid walk-in sale. Inventory is still deducted.</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="field"><label>Name / contact</label><input value="${escapeHtml(d.customer_name)}" oninput="astate.offlineOrderDraft.customer_name=this.value"></div><div class="field"><label>Phone (optional)</label><input value="${escapeHtml(d.customer_phone)}" oninput="astate.offlineOrderDraft.customer_phone=this.value"></div><div class="field"><label>Email (optional)</label><input type="email" value="${escapeHtml(d.customer_email||"")}" placeholder="customer@email.com" oninput="astate.offlineOrderDraft.customer_email=this.value"><div class="hint" style="text-align:left;margin-top:5px">If filled, the customer receives confirmation and Ready for Collection emails.</div></div><div class="field"><label>Date</label><input type="date" value="${escapeHtml(d.collection_date)}" oninput="astate.offlineOrderDraft.collection_date=this.value"></div><div class="field"><label>Time</label><input value="${escapeHtml(d.collection_time)}" placeholder="11:30 AM" oninput="astate.offlineOrderDraft.collection_time=this.value"></div><div class="field"><label>Collection point</label><select onchange="astate.offlineOrderDraft.collection_point=this.value"><option value="">Not specified</option>${points.map(point=>`<option ${d.collection_point===point?"selected":""}>${escapeHtml(point)}</option>`).join("")}</select></div><div class="field"><label>Reason</label><select onchange="offlineOrderField('offline_reason',this.value)">${[["influencer_tasting","Influencer tasting"],["complimentary","Complimentary"],["replacement","Replacement"],["manual_sale","Offline paid sale"],["other","Other"]].map(([v,l])=>`<option value="${v}" ${d.offline_reason===v?"selected":""}>${l}</option>`).join("")}</select></div></div><label class="slot" style="margin:4px 0 16px"><input type="checkbox" style="width:auto" ${d.counts_as_sale?"checked":""} onchange="offlineOrderField('counts_as_sale',this.checked)"><span><b>Count as sales revenue</b><br><span class="hint" style="margin:0">Leave off for free tasting, complimentary or replacement orders.</span></span></label><div class="order-top"><b>Products</b><button class="link-btn" onclick="addOfflineOrderItem()">+ Add product</button></div>${(d.items||[]).map((row,index)=>`<div style="display:grid;grid-template-columns:minmax(180px,1fr) 90px 110px auto;gap:8px;align-items:end;margin:9px 0"><div><label>Product</label><select onchange="chooseOfflineProduct(${index},this.value)">${astate.menu.map(p=>`<option value="${p.id}" ${String(p.id)===String(row.product_id)?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}</select></div><div><label>Qty</label><input type="number" min="1" value="${row.quantity}" oninput="offlineItemField(${index},'quantity',this.value)"></div><div><label>Price</label><input type="number" min="0" step=".01" value="${row.unit_price}" oninput="offlineItemField(${index},'unit_price',this.value)"></div><button class="link-danger" onclick="removeOfflineItem(${index})">Remove</button></div>`).join("")}<div class="field"><label>Internal notes</label><textarea rows="2" oninput="astate.offlineOrderDraft.notes=this.value">${escapeHtml(d.notes)}</textarea></div><div class="row bold"><span>${d.counts_as_sale?"Sales total":"Recorded as free / non-revenue"}</span><span>${money(d.counts_as_sale?subtotal:0)}</span></div><div class="btn-row" style="margin-top:15px"><button class="btn-secondary" onclick="closeOfflineOrder()">Cancel</button><button class="btn-primary" id="save-offline-order" onclick="saveOfflineOrder()">Create offline order</button></div></div></div>`;
+}
+
+function renderOfflineOrderEditor() {
+  const d = astate.offlineOrderDraft;
+  const pointKey = ADMIN_WORKSPACE_MARKET === "MY" ? "malaysia_collection_points" : "collection_points";
+  const points = Array.isArray(astate.settings?.[pointKey]) ? astate.settings[pointKey] : [];
+  const subtotal = offlineOrderSubtotal(d);
+  const discount = d.promo ? offlinePromoDiscount(d.promo, d) : 0;
+  const total = d.counts_as_sale ? Math.max(0, subtotal - discount) : 0;
+  return `<div class="overlay"><div class="overlay-card" style="max-width:720px;max-height:88vh;overflow-y:auto">
+    <div class="display overlay-title" style="font-size:20px">Create offline order</div>
+    <div class="hint" style="text-align:left;margin:0 0 14px">Use for influencer tasting, complimentary drinks, replacements or a paid walk-in sale. Inventory is still deducted.</div>
+    <div class="offline-order-fields">
+      <div class="field"><label>Name / contact</label><input value="${escapeHtml(d.customer_name)}" oninput="astate.offlineOrderDraft.customer_name=this.value"></div>
+      <div class="field"><label>Phone ${d.counts_as_sale ? "(needed for promo)" : "(optional)"}</label><input value="${escapeHtml(d.customer_phone)}" oninput="astate.offlineOrderDraft.customer_phone=this.value;clearOfflinePromo()"></div>
+      <div class="field"><label>Email (optional)</label><input type="email" value="${escapeHtml(d.customer_email || "")}" placeholder="customer@email.com" oninput="astate.offlineOrderDraft.customer_email=this.value"><div class="hint" style="text-align:left;margin-top:5px">If filled, the customer receives confirmation and Ready for Collection emails.</div></div>
+      <div class="field"><label>Date</label><input type="date" value="${escapeHtml(d.collection_date)}" oninput="astate.offlineOrderDraft.collection_date=this.value"></div>
+      <div class="field"><label>Time</label><input value="${escapeHtml(d.collection_time)}" placeholder="11:30 AM" oninput="astate.offlineOrderDraft.collection_time=this.value"></div>
+      <div class="field"><label>Collection point</label><select onchange="astate.offlineOrderDraft.collection_point=this.value"><option value="">Not specified</option>${points.map((point) => `<option ${d.collection_point === point ? "selected" : ""}>${escapeHtml(point)}</option>`).join("")}</select></div>
+      <div class="field"><label>Reason</label><select onchange="offlineOrderField('offline_reason',this.value)">${[["influencer_tasting","Influencer tasting"],["complimentary","Complimentary"],["replacement","Replacement"],["manual_sale","Offline paid sale"],["other","Other"]].map(([value,label]) => `<option value="${value}" ${d.offline_reason === value ? "selected" : ""}>${label}</option>`).join("")}</select></div>
+    </div>
+    <label class="slot" style="margin:4px 0 16px"><input type="checkbox" style="width:auto" ${d.counts_as_sale ? "checked" : ""} onchange="offlineOrderField('counts_as_sale',this.checked)"><span><b>Count as sales revenue</b><br><span class="hint" style="margin:0">Leave off for free tasting, complimentary or replacement orders.</span></span></label>
+    <div class="order-top"><b>Products</b><button class="link-btn" onclick="addOfflineOrderItem()">+ Add product</button></div>
+    ${(d.items || []).map((row,index) => `<div class="offline-order-item"><div><label>Product</label><select onchange="chooseOfflineProduct(${index},this.value)">${astate.menu.map((product) => `<option value="${product.id}" ${String(product.id) === String(row.product_id) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div><div><label>Qty</label><input type="number" min="1" value="${row.quantity}" oninput="offlineItemField(${index},'quantity',this.value)"></div><div><label>Price</label><input type="number" min="0" step=".01" value="${row.unit_price}" oninput="offlineItemField(${index},'unit_price',this.value)"></div><button class="link-danger" onclick="removeOfflineItem(${index})">Remove</button></div>`).join("")}
+    ${d.counts_as_sale ? `<div class="field"><label>Promo code (optional)</label><div class="offline-promo-row"><input value="${escapeHtml(d.promo_code || "")}" placeholder="Enter a code" oninput="astate.offlineOrderDraft.promo_code=this.value.toUpperCase();this.value=this.value.toUpperCase();clearOfflinePromo()"><button class="btn-secondary" onclick="applyOfflinePromoCode()">Apply</button></div>${d.promo_message ? `<div class="hint" role="status" style="text-align:left;margin-top:5px">${escapeHtml(d.promo_message)}</div>` : ""}<div class="hint" style="text-align:left;margin-top:5px">Uses the promo rules for this store; a customer phone number is required to check one-time use.</div></div>` : ""}
+    <div class="field"><label>Internal notes</label><textarea rows="2" oninput="astate.offlineOrderDraft.notes=this.value">${escapeHtml(d.notes)}</textarea></div>
+    ${d.counts_as_sale && discount ? `<div class="row"><span>Subtotal</span><span>${money(subtotal)}</span></div><div class="row"><span>Promo · ${escapeHtml(visiblePromoCode(d.promo.code))}</span><span>−${money(discount)}</span></div>` : ""}
+    <div class="row bold"><span>${d.counts_as_sale ? "Sales total" : "Recorded as free / non-revenue"}</span><span>${money(total)}</span></div>
+    <div class="btn-row" style="margin-top:15px"><button class="btn-secondary" onclick="closeOfflineOrder()">Cancel</button><button class="btn-primary" id="save-offline-order" onclick="saveOfflineOrder()">Create offline order</button></div>
+  </div></div>`;
 }
 
 function renderOrderEditor() {
@@ -4511,7 +4604,10 @@ function ActionMenu(id, items) {
   return `<div class="ui-action-menu"><button class="ui-icon-button" aria-label="Open actions" onclick="event.stopPropagation();toggleAdminActionMenu('${escapeHtml(id)}')">•••</button>${astate.openActionMenu === id ? `<div class="ui-action-popover">${items.join("")}</div>` : ""}</div>`;
 }
 function FormSection(title, content, description = "") { return `<div class="ui-form-section"><h3>${escapeHtml(title)}</h3>${description ? `<p>${escapeHtml(description)}</p>` : ""}${content}</div>`; }
-function Accordion(title, content, open = false, summary = "") { return `<details class="ui-accordion" ${open ? "open" : ""}><summary><span><b>${escapeHtml(title)}</b>${summary ? `<small>${escapeHtml(summary)}</small>` : ""}</span><i>⌄</i></summary><div class="ui-accordion-body">${content}</div></details>`; }
+function Accordion(title, content, open = false, summary = "") {
+  const expanded = astate.accordionOpen[title] ?? open;
+  return `<details class="ui-accordion" data-accordion-title="${escapeHtml(title)}" ${expanded ? "open" : ""}><summary onclick="astate.accordionOpen[this.parentElement.dataset.accordionTitle]=!this.parentElement.open"><span><b>${escapeHtml(title)}</b>${summary ? `<small>${escapeHtml(summary)}</small>` : ""}</span><i>⌄</i></summary><div class="ui-accordion-body">${content}</div></details>`;
+}
 function Drawer(title, content, closeHandler) { return `<div class="ui-drawer-backdrop" onclick="${closeHandler}"></div><aside class="ui-drawer"><div class="ui-drawer-head"><h2>${escapeHtml(title)}</h2><button class="ui-icon-button" onclick="${closeHandler}" aria-label="Close">×</button></div><div class="ui-drawer-body">${content}</div></aside>`; }
 function EmptyState(title, note = "") { return `<div class="ui-empty"><b>${escapeHtml(title)}</b>${note ? `<span>${escapeHtml(note)}</span>` : ""}</div>`; }
 function onBrandColourInput(key, value, input) {
