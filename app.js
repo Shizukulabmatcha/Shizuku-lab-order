@@ -2073,12 +2073,17 @@ function productMenuTag(item) {
   };
   return previewTags[name] || "";
 }
+function productMenuBadge(item) {
+  const saved = String(item.menu_badge || "").trim();
+  const label = { best_seller: "Best Seller", new: "New" }[saved.toLowerCase()] || saved;
+  return label ? `<span class="ordering-product-badge">${escapeHtml(label.slice(0, 24))}</span>` : "";
+}
 function renderMenuCard(item) {
   const soldOut = isSoldOut(item);
   const menuTag = productMenuTag(item);
   if (state.menuView === "gallery") return `
     <button type="button" class="ordering-gallery-card ordering-card-action" ${soldOut ? "disabled" : ""} onclick="openProductOptions('${escapeHtml(item.id)}')" aria-label="View ${escapeHtml(item.name)}">
-      <span class="ordering-gallery-open"><img src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="" loading="lazy"></span>
+      <span class="ordering-gallery-open"><img src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="" loading="lazy">${productMenuBadge(item)}</span>
       <div class="ordering-gallery-copy">
         <span class="ordering-product-name">${escapeHtml(item.name)}</span>
         <p class="ordering-product-desc">${escapeHtml(item.description)}</p>
@@ -2088,7 +2093,7 @@ function renderMenuCard(item) {
     </button>`;
   return `
     <button type="button" class="item-card ordering-list-card ordering-card-action" ${soldOut ? "disabled" : ""} onclick="openProductOptions('${escapeHtml(item.id)}')" aria-label="View ${escapeHtml(item.name)}">
-      <span class="ordering-list-open"><img class="item-thumb" src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="" loading="lazy"></span>
+      <span class="ordering-list-open"><img class="item-thumb" src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="" loading="lazy">${productMenuBadge(item)}</span>
       <div class="item-info"><span class="item-name ordering-product-name">${escapeHtml(item.name)}</span><div class="item-desc ordering-product-desc">${escapeHtml(item.description)}</div>${menuTag ? `<span class="ordering-product-tag">${escapeHtml(menuTag)}</span>` : ""}<div class="stock-line">${stockMarkup(item)}</div></div>
       <div class="ordering-list-side">${productPriceMarkup(item)}</div>
     </button>`;
@@ -2102,7 +2107,7 @@ function renderMenuItemsMarkup() {
   if (!items.length) return `<div class="empty">No items available yet.</div>`;
   const groups = state.activeCategory === "All" ? categories.slice(1) : [state.activeCategory];
   if (partnerModeActive()) return `<section class="product-group"><div class="product-group-items ${state.menuView === "gallery" ? "ordering-product-grid" : "ordering-product-list"}">${items.map(renderMenuCard).join("")}</div></section>`;
-  return groups.map((group) => { const groupItems = items.filter((item) => productGroupName(item) === group); if (!groupItems.length) return ""; return `<section class="product-group"><h2 class="product-group-title">${escapeHtml(group.replace(/[✨🌟🫧]/gu, "").trim())}</h2><div class="product-group-items ${state.menuView === "gallery" ? "ordering-product-grid" : "ordering-product-list"}">${groupItems.map(renderMenuCard).join("")}</div></section>`; }).join("");
+  return groups.map((group) => { const groupItems = items.filter((item) => productGroupName(item) === group); if (!groupItems.length) return ""; return `<section class="product-group"><h2 class="product-group-title">${escapeHtml(group)}</h2><div class="product-group-items ${state.menuView === "gallery" ? "ordering-product-grid" : "ordering-product-list"}">${groupItems.map(renderMenuCard).join("")}</div></section>`; }).join("");
 }
 function renderMenu() {
   const browseMenu = state.menu.filter((item) => (isRitualRedemptionMode() ? ritualEligibleProduct(item) : !isRitualProduct(item)) && partnerVisibleProduct(item));
