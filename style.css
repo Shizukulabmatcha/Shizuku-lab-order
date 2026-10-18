@@ -407,6 +407,11 @@ img{display:block;max-width:100%;}
 .ordering-menu-products .ordering-product-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
 .ordering-gallery-card{min-width:0;display:flex;flex-direction:column;overflow:hidden;padding:0;border:1px solid var(--line);border-radius:4px;background:var(--card)}
 .ordering-gallery-open{display:block;width:100%;padding:0;border:0;background:var(--matcha-bg);cursor:pointer}
+.ordering-gallery-open,.ordering-list-open{position:relative}
+.ordering-product-badge{position:absolute;top:9px;left:9px;z-index:1;display:inline-block;padding:5px 9px;background:#302f2a;color:#fffaf1;font:700 10px/1.1 'Fraunces',Georgia,serif;letter-spacing:.04em;white-space:nowrap;box-shadow:0 2px 7px rgba(0,0,0,.12)}
+.ordering-list-open .ordering-product-badge{top:auto;bottom:-4px;left:50%;transform:translateX(-50%);font-size:8px;padding:3px 5px}
+.admin-badge-presets{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
+.admin-badge-presets .btn-secondary{width:auto;min-height:34px;padding:6px 11px;font-size:12px}
 .ordering-gallery-open img{display:block;width:100%;aspect-ratio:1/1;object-fit:cover}
 .ordering-gallery-copy{display:flex;flex:1;flex-direction:column;padding:11px}
 .ordering-gallery-copy .ordering-product-name{font-size:18px}
@@ -416,6 +421,11 @@ img{display:block;max-width:100%;}
 .ordering-menu-products .ordering-card-action{box-sizing:border-box;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;appearance:none;-webkit-appearance:none}
 .ordering-menu-products .ordering-card-action:disabled{cursor:not-allowed}
 .ordering-menu-products .ordering-card-action:focus-visible{outline:2px solid var(--matcha);outline-offset:3px}
+.offline-order-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.offline-order-item{display:grid;grid-template-columns:minmax(180px,1fr) 90px 110px auto;gap:8px;align-items:end;margin:9px 0}
+.offline-promo-row{display:flex;gap:8px}
+.offline-promo-row input{min-width:0;flex:1}
+@media(max-width:600px){.offline-order-fields{grid-template-columns:1fr}.offline-order-item{grid-template-columns:minmax(0,1fr) 70px 90px}.offline-order-item>button{grid-column:1/-1;justify-self:end}}
 @media(max-width:390px){.ordering-menu-toolbar{align-items:stretch;flex-direction:column}.ordering-view-switch{align-self:flex-end}.ordering-menu-products .ordering-product-name{font-size:17px}.ordering-menu-products .ordering-list-card{grid-template-columns:60px minmax(0,1fr) auto;gap:9px}.ordering-list-open{width:60px;height:60px}.ordering-menu-products .ordering-list-card .item-thumb{width:60px;height:60px}}
 
 /* Match the approved ordering preview on the real product configuration flow. */
