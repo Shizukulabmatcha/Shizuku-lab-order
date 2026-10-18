@@ -3908,6 +3908,8 @@ async function attachRewardToOrder() {
   alert(`${order.order_number} is now linked to the customer's Rewards history.`);
 }
 function renderRewardsTab() {
+  // Malaysia has referral credits, but the stamp-card programme below is Singapore-only.
+  if (DASHBOARD_MARKET === "MY") return `<div class="rewards-page">${renderReferralSettings()}</div>`;
   const d = astate.loyaltyDraft || { enabled: false, reward_type: "stamps", stamps_required: 10, minimum_spend: 5, points_per_dollar: 1, points_required: 50, reward_description: "A free drink is on us." };
   const points = d.reward_type === "points";
   const goal = Math.max(1, Number(points ? d.points_required || 50 : d.stamps_required || 10));
@@ -4833,8 +4835,12 @@ function customerReferralEditor(customer) {
   const referral = (astate.referralCodes || []).find((item) => item.owner_phone === storedPhone && String(item.market_code || "SG") === DASHBOARD_MARKET);
   const paid = customer.orders.some((order) => order.payment_status === "paid" && order.order_status !== "cancelled" && order.deleted_at == null);
   const currency = DASHBOARD_MARKET === "MY" ? "MYR" : "SGD";
+  const [friendKey, ownerKey] = referralSettingsKeys();
+  const friendAmount = Number(astate.settingsDraft?.[friendKey] ?? 1).toFixed(2);
+  const ownerAmount = Number(astate.settingsDraft?.[ownerKey] ?? 1).toFixed(2);
   return `<div class="divider" style="margin:20px 0 12px"></div><b>Refer a friend · ${currency}</b>
     <div class="hint" style="text-align:left;margin:8px 0 14px">Choose what this customer shares. Both their system code and Instagram name will work at checkout; the selected one appears in Rewards.</div>
+    <div class="ref-note" style="margin-bottom:12px">Friend's first order: <b>${currency} ${friendAmount} off</b> · Referrer's future credit: <b>${currency} ${ownerAmount}</b><br><button class="link-btn" style="padding:8px 0 0" onclick="setTab('rewards')">Edit referral amounts in Rewards &amp; referrals →</button></div>
     ${referral ? `<div class="ref-note">System code: <b>${escapeHtml(referral.code)}</b></div>` : ""}
     <div class="field"><label>Instagram referral name</label><input id="customer-referral-alias" value="${escapeHtml(referral?.instagram_alias || customer.instagram || "")}" placeholder="e.g. shizukulab.matcha" autocomplete="off"></div>
     <div class="field"><label>Share as</label><select id="customer-referral-mode"><option value="code" ${referral?.share_mode !== "instagram" ? "selected" : ""}>System code (SHZ…)</option><option value="instagram" ${referral?.share_mode === "instagram" ? "selected" : ""}>Instagram name (@…)</option></select></div>
@@ -4950,7 +4956,16 @@ renderDashboardTab = function () {
   return `${AdminPageHeader(`Good ${now.getHours()<12?"morning":now.getHours()<18?"afternoon":"evening"}, ${name}`,`${DASHBOARD_MARKET==="MY"?"Malaysia · MYR":"Singapore · SGD"} · ${role}`,`<span class="dashboard-refresh-meta">Last updated ${escapeHtml(updated)}</span><button class="btn-secondary" onclick="refreshDashboard()" ${astate.dashboardRefreshing?"disabled":""}>${astate.dashboardRefreshing?"Refreshing…":"Refresh"}</button><a class="btn-primary" href="${ADMIN_CUSTOMER_SHOP_URL}" target="_blank" rel="noopener">View store ↗</a>`)}<div class="ui-kpi-grid">${AdminCard("Revenue",money(stats.monthlyRevenue),"This month")}${AdminCard("Orders",String(stats.orders),"Paid orders this month")}${AdminCard("Average order",money(average),"This month")}${AdminCard("Gross profit",money(stats.monthlyGrossProfit),`${stats.monthlyProfitMargin.toFixed(1)}% margin`)}</div><div class="ui-summary-strip"><span>All-time revenue <b>${money(stats.totalRevenue)}</b></span><span><b>${stats.totalOrders}</b> paid orders</span><span><b>${stats.customers}</b> customers</span></div>${low.length?AdminSection(`${low.length} low-stock item${low.length===1?"":"s"}`,`<div class="ui-low-stock"><span>${escapeHtml(low.slice(0,3).map((item)=>item.name).join(" · "))}${low.length>3?` +${low.length-3}`:""}</span><button class="link-btn" onclick="setTab('inventory')">View Inventory</button></div>`,"Needs attention", "", "ui-low-stock-section"):""}<div class="ui-kpi-grid ui-today-grid">${AdminCard("Orders to prepare",String(prep.length),"Today")}${AdminCard("Store payment reviews",String(storeReviews.length),"Direct orders · Open →",storeReviews.length?"warn":"","focusDashboardIssue('payment_review_store')")}${AdminCard("Partner payment reviews",String(partnerReviews.length),"Partner orders · Open →",partnerReviews.length?"warn":"","focusDashboardIssue('payment_review_partner')")}${AdminCard("Overdue pickups",String(overdue.length),"Past collection date",overdue.length?"warn":"")}${AdminCard("Completed this week",String(weeklyCompleted),"Collected normal-store orders")}${AdminCard("Partner sales",money(partnerTotals.sales),`${partnerTotals.orders} completed partner orders`)}</div><div class="ui-two-column">${AdminSection("Store orders",AdminTable(["Order","Customer","Collection","Total","Status"],rows,"No store orders yet."),"Recent direct orders",`<button class="link-btn" onclick="openDashboardOrders('direct')">View all</button>`)}${AdminSection("Partner orders",AdminTable(["Order","Customer","Partner","Collection","Total","Status"],partnerRows,"No Partner orders yet."),"Recent Partner orders · separate from store sales",`<button class="link-btn" onclick="openDashboardOrders('partner')">View all</button><button class="link-btn" onclick="setTab('partner_report')">Sales report</button>`)}</div>`;
 };
 
-const renderAvailabilityTabBeforeSimplification = renderAvailabilityTab;
+const renderAvailabilityTabLegacy = renderAvailabilityTab;
+function renderAvailabilityCalendarOnly() {
+  const legacyMarkup = renderAvailabilityTabLegacy();
+  const calendarHeading = '<div class="display" style="font-size:20px;margin:16px 0 8px;">Opening calendar</div>';
+  const start = legacyMarkup.indexOf(calendarHeading);
+  // The compact page owns market, ordering window and weekly schedule controls.
+  // Only calendar exceptions belong inside the advanced accordion.
+  return start < 0 ? `<div class="ui-empty">Opening calendar is unavailable.</div>` : legacyMarkup.slice(start);
+}
+const renderAvailabilityTabBeforeSimplification = renderAvailabilityCalendarOnly;
 function editWeeklyAvailabilityDay(day){astate.availabilityEditingDay=Number(day);render();}
 renderAvailabilityTab = function () {
   if(!astate.settingsDraft||!astate.availabilityDraft)return `<div class="ui-empty">Loading availability…</div>`;
@@ -5095,7 +5110,7 @@ function render() {
   const navGroups = [
     { label:"OVERVIEW", tabs:[["dashboard","⌂","Dashboard"],["orders","▣","Orders"],["preparation","☷","Today’s Prep"]] },
     { label:"STORE", tabs:[["menu","◇","Products"],["availability","◷","Availability"],["inventory","▤","Inventory & Costing",lowStockCount]] },
-    { label:"CUSTOMERS", tabs:[["customers","◉","Customers"],["messages","✉",`Messages${unreadMessageCount()?` (${unreadMessageCount()})`:""}`],...(DASHBOARD_MARKET==="SG"?[["matcha_passes","🍵","Matcha Pass"],["rewards","♧","Rewards & referrals"]]:[])] },
+    { label:"CUSTOMERS", tabs:[["customers","◉","Customers"],["messages","✉",`Messages${unreadMessageCount()?` (${unreadMessageCount()})`:""}`],...(DASHBOARD_MARKET==="SG"?[["matcha_passes","🍵","Matcha Pass"]]:[]),["rewards","♧","Rewards & referrals"]] },
     { label:"MARKETING", tabs:[["promos","✦","Promos"],["marketing","✉","Campaigns"],["events","✧","Events"],...(DASHBOARD_MARKET==="SG"?[["partners","↗","Partners"]]:[]),["reviews","★","Reviews"]] },
     { label:"DESIGN", tabs:[["brand","◈","Brand Colours"],["customer_page","☏","Customer Page"],["wording","Aa","Wording"],["faq","?","FAQ"],["store_details","⚙","Store Details"]] },
     { label:"REPORTS", tabs:[["analytics","▥","Analytics"],...(DASHBOARD_MARKET==="SG"?[["partner_report","↗","Partner Report"]]:[])] },
