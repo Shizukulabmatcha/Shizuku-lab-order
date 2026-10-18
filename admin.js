@@ -1079,6 +1079,13 @@ async function deleteMenuItem(id) {
 
 
 let adminDragState = null;
+function reorderDisplayedProducts(items, orderedKeys) {
+  const map = new Map(items.map((item) => [String(item.id), item]));
+  const visibleKeys = new Set(orderedKeys);
+  const reorderedVisible = orderedKeys.map((key) => map.get(key)).filter(Boolean);
+  let nextVisible = 0;
+  return items.map((item) => visibleKeys.has(String(item.id)) ? reorderedVisible[nextVisible++] : item);
+}
 function startAdminDrag(event, scope, index) {
   if (event.button != null && event.button !== 0) return;
   event.preventDefault();
@@ -1087,7 +1094,11 @@ function startAdminDrag(event, scope, index) {
   if (!row) return;
   const list = row.parentElement;
   const rect = row.getBoundingClientRect();
-  const ghost = row.cloneNode(true);
+  const ghost = row.tagName === 'TR' ? document.createElement('div') : row.cloneNode(true);
+  if (row.tagName === 'TR') {
+    ghost.textContent = row.querySelector('.product-name-copy b')?.textContent || 'Product';
+    ghost.style.cssText = 'display:flex;align-items:center;padding:12px 18px;background:#fffdf9;border:1px solid #ded7ca;border-radius:9px;font-weight:700;box-sizing:border-box;';
+  }
   ghost.classList.add('admin-drag-ghost');
   ghost.style.width = `${rect.width}px`;
   ghost.style.height = `${rect.height}px`;
@@ -1130,8 +1141,8 @@ function endAdminDrag() {
     astate.optionGroups = orderedKeys.map((key) => map.get(key)).filter(Boolean);
     astate.optionGroups.forEach((item, index) => { item.sort_order = index + 1; });
   } else if (scope === 'products') {
-    const map = new Map(astate.menu.map((item) => [String(item.id), item]));
-    astate.menu = orderedKeys.map((key) => map.get(key)).filter(Boolean);
+    // A filtered table only contains some products. Keep all other products in place.
+    astate.menu = reorderDisplayedProducts(astate.menu, orderedKeys);
     astate.menu.forEach((item, index) => { item.sort_order = index + 1; });
   }
   ghost.remove();
@@ -4796,7 +4807,7 @@ renderMenuTab = function () {
   if (astate.productStatusFilter === "hidden") products = products.filter((item)=>item.sold_out === true || !(ADMIN_WORKSPACE_MARKET === "MY" ? item.malaysia_available : item.is_available));
   if (astate.productSort === "name") products.sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")));
   if (astate.productSort === "price") products.sort((a,b)=>Number(a.price||0)-Number(b.price||0));
-  const rows = products.map((item,index)=>{const visible=item.sold_out!==true&&(ADMIN_WORKSPACE_MARKET==="MY"?item.malaysia_available:item.is_available);const regular=Number(ADMIN_WORKSPACE_MARKET==="MY"?(item.myr_price||0):(item.price||0));const sale=Number(ADMIN_WORKSPACE_MARKET==="MY"?(item.myr_discount_price||0):(item.discount_price||0));const price=sale>0&&sale<regular?sale:regular;const recipe=AdminMarketRules.recipesForProductMarket(astate.recipes,item.id,ADMIN_WORKSPACE_MARKET);const partnerVisible=astate.partnerProducts.some((row)=>String(row.product_id)===String(item.id));const stores=[item.is_available!==false?"SG":"",item.malaysia_available===true?"MY":"",partnerVisible?"Partner":""].filter(Boolean).join(" / ")||"None";const type=item.is_b2b?"B2B":item.is_bundle?"Bundle":"Standard";return `<tr data-sort-scope="products" data-sort-key="${escapeHtml(String(item.id))}"><td>${astate.productSort==="manual"?dragHandle("products",index):""}</td><td><div class="product-name-cell">${ProductThumbnail(item)}<div class="product-name-copy"><b>${escapeHtml(item.name)}</b><small>${escapeHtml(type)}</small>${item.description?`<small>${escapeHtml(item.description)}</small>`:""}</div></div></td><td>${escapeHtml(item.category||"Other")}</td><td>${escapeHtml(productListPriceLabel(item,price))}</td><td>${ProductStatusButton(item,visible)}${item.sold_out===true?` ${StatusBadge("Sold out","danger")}`:""}</td><td>${escapeHtml(stores)}</td><td>${ProductCostButton(item,recipe.length>0)}</td><td>${ActionMenu(`product-${item.id}`,[`<button onclick="editMenuItem('${item.id}')">Edit</button>`,`<button onclick="duplicateMenuItem('${item.id}')">Duplicate</button>`,`<button onclick="openProductAvailability('${item.id}')">${visible?"Hide / availability":"Show / availability"}</button>`,`<button class="danger" onclick="deleteMenuItem('${item.id}')">Delete</button>`])}</td></tr>`}).join("");
+  const rows = products.map((item,index)=>{const visible=item.sold_out!==true&&(ADMIN_WORKSPACE_MARKET==="MY"?item.malaysia_available:item.is_available);const regular=Number(ADMIN_WORKSPACE_MARKET==="MY"?(item.myr_price||0):(item.price||0));const sale=Number(ADMIN_WORKSPACE_MARKET==="MY"?(item.myr_discount_price||0):(item.discount_price||0));const price=sale>0&&sale<regular?sale:regular;const recipe=AdminMarketRules.recipesForProductMarket(astate.recipes,item.id,ADMIN_WORKSPACE_MARKET);const partnerVisible=astate.partnerProducts.some((row)=>String(row.product_id)===String(item.id));const stores=[item.is_available!==false?"SG":"",item.malaysia_available===true?"MY":"",partnerVisible?"Partner":""].filter(Boolean).join(" / ")||"None";const type=item.is_b2b?"B2B":item.is_bundle?"Bundle":"Standard";return `<tr class="admin-sortable-item" data-sort-scope="products" data-sort-key="${escapeHtml(String(item.id))}"><td>${astate.productSort==="manual"?dragHandle("products",index):""}</td><td><div class="product-name-cell">${ProductThumbnail(item)}<div class="product-name-copy"><b>${escapeHtml(item.name)}</b><small>${escapeHtml(type)}</small>${item.description?`<small>${escapeHtml(item.description)}</small>`:""}</div></div></td><td>${escapeHtml(item.category||"Other")}</td><td>${escapeHtml(productListPriceLabel(item,price))}</td><td>${ProductStatusButton(item,visible)}${item.sold_out===true?` ${StatusBadge("Sold out","danger")}`:""}</td><td>${escapeHtml(stores)}</td><td>${ProductCostButton(item,recipe.length>0)}</td><td>${ActionMenu(`product-${item.id}`,[`<button onclick="editMenuItem('${item.id}')">Edit</button>`,`<button onclick="duplicateMenuItem('${item.id}')">Duplicate</button>`,`<button onclick="openProductAvailability('${item.id}')">${visible?"Hide / availability":"Show / availability"}</button>`,`<button class="danger" onclick="deleteMenuItem('${item.id}')">Delete</button>`])}</td></tr>`}).join("");
   const mobileCards = products.map((item)=>{const visible=item.sold_out!==true&&(ADMIN_WORKSPACE_MARKET==="MY"?item.malaysia_available:item.is_available);const regular=Number(ADMIN_WORKSPACE_MARKET==="MY"?(item.myr_price||0):(item.price||0));const sale=Number(ADMIN_WORKSPACE_MARKET==="MY"?(item.myr_discount_price||0):(item.discount_price||0));const price=sale>0&&sale<regular?sale:regular;const partnerVisible=astate.partnerProducts.some((row)=>String(row.product_id)===String(item.id));const stores=[item.is_available!==false?"SG":"",item.malaysia_available===true?"MY":"",partnerVisible?"Partner":""].filter(Boolean).join(" / ")||"None";const type=item.is_b2b?"B2B":item.is_bundle?"Bundle":"Standard";return `<article class="product-mobile-card"><div class="product-mobile-card-head"><div class="product-mobile-identity">${ProductThumbnail(item)}<div><h3>${escapeHtml(item.name)}</h3><div class="product-mobile-meta"><span>${escapeHtml(type)} product</span><span>${escapeHtml(item.description||"No description")}</span></div></div></div><b>${escapeHtml(productListPriceLabel(item,price))}</b></div><div class="product-mobile-meta"><span><b>Category:</b> ${escapeHtml(item.category||"Other")}</span><span><b>Store:</b> ${escapeHtml(stores)}</span><span class="product-mobile-costing"><b>Costing:</b> ${ProductCostButton(item,AdminMarketRules.recipesForProductMarket(astate.recipes,item.id,ADMIN_WORKSPACE_MARKET).length>0)}</span><span class="product-mobile-status"><b>Status:</b> ${ProductStatusButton(item,visible)}${item.sold_out===true?" · Sold out":""}</span></div><div class="product-mobile-actions"><button class="btn-secondary" onclick="openProductAvailability('${item.id}')">Availability</button><button class="btn-primary" onclick="editMenuItem('${item.id}')">Edit product</button></div></article>`}).join("");
   const groups = Accordion("Categories", `<div class="admin-sortable-list">${astate.productGroups.map((group,index)=>`<div class="admin-sortable-item" data-sort-scope="productGroups" data-sort-key="${escapeHtml(String(group.id??`new-${index}`))}">${dragHandle("productGroups",index)}<div class="admin-sortable-content admin-product-group-fields"><input value="${escapeHtml(group.name||"")}" oninput="onGroupField(${index},'name',this.value)">${Toggle(group.is_visible,"Visible",`onGroupField(${index},'is_visible',this.checked)`)}<button class="link-danger" onclick="deleteProductGroup(${index})">Delete</button></div></div>`).join("")}</div><div class="btn-row"><button class="btn-secondary" onclick="addProductGroup()">+ Add category</button><button class="btn-primary" onclick="saveProductGroups()">Save categories</button></div>`,false,`${astate.productGroups.length} categories`);
   const options = Accordion("Options",renderDrinkOptionsManager(),false,`${astate.optionGroups.length} option groups · ice, sweetness, milk and toppings`);
