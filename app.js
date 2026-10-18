@@ -1183,7 +1183,7 @@ async function init() {
 
   const requestedScreen = new URLSearchParams(window.location.search).get("screen");
   const sharedReferralCode = String(new URLSearchParams(window.location.search).get("ref") || "").toUpperCase();
-  if (state.market === "SG" && /^(?:SHZ[A-F0-9]{9}|@[A-Z0-9._]{2,30})$/.test(sharedReferralCode)) {
+  if (/^(?:SHZ[A-F0-9]{9}|@[A-Z0-9._]{2,30})$/.test(sharedReferralCode)) {
     state.form.referralCode = sharedReferralCode;
     state.checkoutDiscountOpen = true;
     state.checkoutDiscountChoice = "referral";
@@ -1584,6 +1584,22 @@ function promoStorageCode(code) {
   const visible = String(code || "").trim().toUpperCase().replace(/^MY:/, "");
   return state.market === "MY" ? `MY:${visible}` : visible;
 }
+function referralFriendAmount() {
+  return Number(state.market === "MY" ? state.store.referral_friend_discount_myr : state.store.referral_friend_discount_sgd) || 1;
+}
+function referralOwnerAmount() {
+  return Number(state.market === "MY" ? state.store.referral_owner_reward_myr : state.store.referral_owner_reward_sgd) || 1;
+}
+function referralPromo(referral) {
+  return { kind: "referral", referralKind: referral.kind, code: referral.code,
+    discount_type: "fixed", discount_value: Number(referral.amount), minimum_spend: 0.01,
+    appliedPhone: normalisePhone(state.form.phone) };
+}
+function referralAppliedMessage(referral) {
+  return referral.kind === "friend"
+    ? `First order — ${money(referral.amount)} off. Your friend earns ${money(referral.owner_amount || referralOwnerAmount())} after your payment is confirmed.`
+    : `Your earned referral credit — up to ${money(referral.amount)} off.`;
+}
 async function applyPromoCode() {
   if (partnerModeActive()) { state.promo = null; state.promoMsg = "Partner member pricing cannot be combined with promo codes."; render(); return; }
   const code = (state.form.promoCode || "").trim().toUpperCase();
@@ -1597,20 +1613,20 @@ async function applyPromoCode() {
     if (error) throw error;
     const promo = data?.[0];
     if (!promo) {
-      if (state.market === "SG" && /^SHZ[A-F0-9]{9}$/.test(code)) {
+      if (/^SHZ[A-F0-9]{9}$/.test(code)) {
         if (cartB2BType() !== "drinks" || cartIsRitualPassOnly()) {
           state.promoMsg = "Referral discounts are for regular drink orders only.";
           render(); return;
         }
-        const { data: referral, error: referralError } = await db.rpc("check_shizuku_referral", { p_code: code, p_phone: normalisePhone(state.form.phone) });
+        const { data: referral, error: referralError } = await db.rpc("check_shizuku_referral", { p_code: code, p_phone: normalisePhone(state.form.phone), p_market_code: state.market });
         if (referralError) throw referralError;
         if (!referral || cartTotal() < 1) {
           state.promo = null;
           state.promoMsg = "This referral code is unavailable for this phone number. Friends can use it on their first order; earned credits can be used on a later order.";
           render(); return;
         }
-        state.promo = { kind: "referral", referralKind: referral.kind, code: referral.code, discount_type: "fixed", discount_value: 1, minimum_spend: 1, appliedPhone: normalisePhone(state.form.phone) };
-        state.promoMsg = referral.kind === "friend" ? "Friend's first order — SGD $1 off. Your friend earns SGD $1 after your payment is confirmed." : "Your earned referral credit — SGD $1 off.";
+        state.promo = referralPromo(referral);
+        state.promoMsg = referralAppliedMessage(referral);
         render(); return;
       }
       state.promo = null; state.promoMsg = "That promo code isn't valid."; render(); return;
@@ -1653,20 +1669,20 @@ async function applyReferralCode() {
   const code = String(state.form.referralCode || "").trim();
   if (!code) { state.promoMsg = "Please enter your friend's referral code."; render(); return; }
   if (!/^(?:SHZ[A-F0-9]{9}|@?[A-Z0-9._]{2,30})$/i.test(code)) { state.promoMsg = "Check the Instagram name or referral code and try again."; render(); return; }
-  if (!isValidPhone(state.form.phone)) { state.promoMsg = "Enter your Singapore phone number first."; render(); return; }
-  if (partnerModeActive() || state.market !== "SG" || cartB2BType() !== "drinks" || cartIsRitualPassOnly() || cartTotal() < 1) {
-    state.promoMsg = "Referral discounts are for regular Singapore drink orders only."; render(); return;
+  if (!isValidPhone(state.form.phone)) { state.promoMsg = `Enter your ${state.market === "MY" ? "Malaysia" : "Singapore"} phone number first.`; render(); return; }
+  if (partnerModeActive() || cartB2BType() !== "drinks" || cartIsRitualPassOnly() || cartTotal() <= 0) {
+    state.promoMsg = "Referral discounts are for regular drink orders only."; render(); return;
   }
   try {
-    const { data: referral, error } = await db.rpc("check_shizuku_referral", { p_code: code, p_phone: normalisePhone(state.form.phone) });
+    const { data: referral, error } = await db.rpc("check_shizuku_referral", { p_code: code, p_phone: normalisePhone(state.form.phone), p_market_code: state.market });
     if (error) throw error;
     if (!referral) {
       state.promo = null;
       state.promoMsg = "This referral is unavailable for this phone number. Friends can use it on their first order; earned credits can be used on a later order.";
       render(); return;
     }
-    state.promo = { kind: "referral", referralKind: referral.kind, code: referral.code, discount_type: "fixed", discount_value: 1, minimum_spend: 1, appliedPhone: normalisePhone(state.form.phone) };
-    state.promoMsg = referral.kind === "friend" ? "Friend's first order — SGD $1 off. Your friend earns SGD $1 after your payment is confirmed." : "Your earned referral credit — SGD $1 off.";
+    state.promo = referralPromo(referral);
+    state.promoMsg = referralAppliedMessage(referral);
   } catch (error) {
     state.promo = null;
     state.promoMsg = "Could not check referral: " + (error?.message || String(error));
@@ -1776,13 +1792,13 @@ async function submitOrder() {
       return;
     }
     if (state.promo.kind === "referral") {
-      if (state.market !== "SG" || cartB2BType() !== "drinks" || cartIsRitualPassOnly() || state.promo.appliedPhone !== normalisePhone(f.phone)) {
+      if (cartB2BType() !== "drinks" || cartIsRitualPassOnly() || state.promo.appliedPhone !== normalisePhone(f.phone)) {
         state.promo = null;
         state.promoMsg = "Please apply the referral code again using the phone number for this order.";
         render(); return;
       }
-      const { data: latestReferral, error: referralError } = await db.rpc("check_shizuku_referral", { p_code: state.promo.code, p_phone: normalisePhone(f.phone) });
-      if (referralError || !latestReferral || latestReferral.kind !== state.promo.referralKind) {
+      const { data: latestReferral, error: referralError } = await db.rpc("check_shizuku_referral", { p_code: state.promo.code, p_phone: normalisePhone(f.phone), p_market_code: state.market });
+      if (referralError || !latestReferral || latestReferral.kind !== state.promo.referralKind || Number(latestReferral.amount) !== Number(state.promo.discount_value)) {
         state.promo = null;
         state.promoMsg = "This referral credit is no longer available. Please check your total.";
         render(); return;
@@ -2481,7 +2497,7 @@ function renderCheckoutDiscount(canRefer, f) {
   } else {
     const tabs = canRefer ? `<div role="group" aria-label="Code type" style="display:flex;gap:8px;margin-bottom:14px;"><button type="button" class="slot ${choice === "referral" ? "active" : ""}" style="justify-content:center;margin:0;cursor:pointer;" aria-pressed="${choice === "referral"}" onclick="chooseCheckoutDiscount('referral')">Referral code</button><button type="button" class="slot ${choice === "promo" ? "active" : ""}" style="justify-content:center;margin:0;cursor:pointer;" aria-pressed="${choice === "promo"}" onclick="chooseCheckoutDiscount('promo')">Promo code</button></div>` : "";
     const field = choice === "referral"
-      ? `<label for="f-referral">Friend referral code · SGD $1 off</label><div style="display:flex;gap:8px;"><input id="f-referral" value="${escapeHtml(f.referralCode || "")}" placeholder="@instagram or SHZ code" style="flex:1;min-width:0;" autocomplete="off" oninput="onFormInput('referralCode', this.value)"><button type="button" class="btn-primary" style="flex:none;padding:0 18px;" onclick="applyReferralCode()">Apply</button></div><div class="hint" style="text-align:left;margin-top:8px;">Your first drink order gets SGD $1 off. Your friend earns SGD $1 credit after your payment is confirmed.</div>`
+      ? `<label for="f-referral">Friend referral code · ${money(referralFriendAmount())} off</label><div style="display:flex;gap:8px;"><input id="f-referral" value="${escapeHtml(f.referralCode || "")}" placeholder="@instagram or SHZ code" style="flex:1;min-width:0;" autocomplete="off" oninput="onFormInput('referralCode', this.value)"><button type="button" class="btn-primary" style="flex:none;padding:0 18px;" onclick="applyReferralCode()">Apply</button></div><div class="hint" style="text-align:left;margin-top:8px;">Your first drink order gets up to ${money(referralFriendAmount())} off. Your friend earns ${money(referralOwnerAmount())} credit after your payment is confirmed.</div>`
       : `<label for="f-promo">${tr("promo")}</label><div style="display:flex;gap:8px;"><input id="f-promo" value="${escapeHtml(f.promoCode)}" placeholder="e.g. WELCOME10" style="flex:1;min-width:0;text-transform:uppercase;" oninput="this.value=this.value.toUpperCase();onFormInput('promoCode', this.value)"><button type="button" class="btn-primary" style="flex:none;padding:0 18px;" onclick="applyPromoCode()">Apply</button></div>`;
     content = tabs + field;
   }
@@ -2492,7 +2508,7 @@ function renderCheckout() {
   if(isRitualRedemptionMode())return renderRitualRedemptionCheckout();
   const isB2B=cartB2BType()==='b2b';
   const isRitualPass=cartIsRitualPassOnly();
-  const canRefer=state.market === "SG" && !isB2B && !isRitualPass;
+  const canRefer=!isB2B && !isRitualPass;
   const isSelfDelivery=isMalaysiaSelfDelivery();
   const canSubmit=checkoutReady();
   const collectionSettings = marketCollectionSettings();
@@ -2918,10 +2934,8 @@ async function findLoyalty() {
   loyalty.referral = null;
   render();
   const { data, error } = await db.rpc("check_shizuku_loyalty", { p_phone: phone, p_market_code: state.market });
-  if (state.market === "SG") {
-    const referralResult = await db.rpc("get_shizuku_referral", { p_phone: phone });
-    if (!referralResult.error) loyalty.referral = referralResult.data;
-  }
+  const referralResult = await db.rpc("get_shizuku_referral", { p_phone: phone, p_market_code: state.market });
+  if (!referralResult.error) loyalty.referral = referralResult.data;
   loyalty.loading = false;
   if (error) loyalty.message = "We couldn’t check your rewards right now. Please try again shortly.";
   else if (!data) loyalty.message = "We couldn’t find a rewards account for that phone number.";
@@ -2933,9 +2947,9 @@ async function findLoyalty() {
 async function shareReferralCode() {
   const code = state.loyalty.referral?.share_code || state.loyalty.referral?.code;
   if (!code) return;
-  const link = `${window.location.origin}/?ref=${encodeURIComponent(code)}`;
+  const link = `${window.location.origin}/?market=${state.market}&ref=${encodeURIComponent(code)}`;
   try {
-    if (navigator.share) await navigator.share({ title: "Shizuku Lab · Refer a friend", text: "Get SGD $1 off your first Shizuku Lab order with my referral code.", url: link });
+    if (navigator.share) await navigator.share({ title: "Shizuku Lab · Refer a friend", text: `Get ${money(state.loyalty.referral?.friend_amount || referralFriendAmount())} off your first Shizuku Lab order with my referral code.`, url: link });
     else { await navigator.clipboard.writeText(link); alert("Referral link copied. Send it to your friend!"); }
   } catch (error) {
     if (error?.name !== "AbortError") alert(`Your referral link: ${link}`);
@@ -2947,6 +2961,13 @@ async function copyReferralCode() {
   if (!code) return;
   try { await navigator.clipboard.writeText(code); alert("Referral code copied. Send it to your friend!"); }
   catch (_) { window.prompt("Copy your referral code", code); }
+}
+function renderReferralLoyaltyCard(referral) {
+  if (!referral) return `<div class="summary-card" style="margin-top:16px;"><div class="display" style="font-size:20px;">Refer a friend</div><p style="line-height:1.5;margin:8px 0 0;">Enter your order phone number above to see your referral link and code. Your friend can save ${money(referralFriendAmount())} on their first drink order; after payment is confirmed, you earn ${money(referralOwnerAmount())} credit.</p></div>`;
+  const friendAmount = money(referral.friend_amount || referralFriendAmount());
+  const ownerAmount = money(referral.owner_amount || referralOwnerAmount());
+  const availableTotal = money(referral.available_total || 0);
+  return `<div class="summary-card" style="margin-top:16px;"><div class="display" style="font-size:22px;">Refer a friend</div><p style="line-height:1.5;margin:8px 0 15px;">Share your link or code. Your friend gets up to ${friendAmount} off their first drink order; you earn ${ownerAmount} credit after their payment is confirmed.</p><div class="slot" style="justify-content:space-between;"><b style="letter-spacing:.1em;">${escapeHtml(referral.share_code || referral.code)}</b><span>${Number(referral.successful || 0)} successful</span></div>${referral.share_mode === "instagram" ? `<div class="hint" style="text-align:left;margin-top:7px;">System code also works: ${escapeHtml(referral.code)}</div>` : ""}<p style="margin:12px 0;">Available referral credits: <b>${Number(referral.available || 0)} · ${availableTotal} total</b></p><button class="primary-btn" onclick="shareReferralCode()">Share referral link</button><button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="copyReferralCode()">Copy code only</button><div class="hint" style="text-align:left;margin-top:10px;">Use your own code at checkout with the same phone number. One credit per order; no stacking with another promo or Partner pricing. Previously earned credits keep their original amount.</div></div>`;
 }
 
 function renderLoyalty() {
@@ -2964,15 +2985,15 @@ function renderLoyalty() {
     ${header()}
     <div class="screen">
       <button class="back-link" onclick="setScreen('menu')">${ICONS.back} Back to menu</button>
-      <div class="display" style="font-size:23px;margin:4px 0 6px;">${state.market === "SG" ? "Rewards & referrals" : "Check my loyalty"}</div>
-      <div class="hint" style="text-align:left;line-height:1.5;">Use the same phone number entered when you placed your order.${state.market === "SG" ? " See your rewards and find your personal referral link here." : ""}</div>
+      <div class="display" style="font-size:23px;margin:4px 0 6px;">Rewards & referrals</div>
+      <div class="hint" style="text-align:left;line-height:1.5;">Use the same phone number entered when you placed your order. See your rewards and find your personal referral link here.</div>
       <div class="summary-card" style="margin-top:16px;">
         <div class="field" style="margin-bottom:0;"><label>Phone number</label><input value="${escapeHtml(loyalty.phone)}" placeholder="${state.market === "MY" ? "Malaysia" : "Singapore"} phone number" inputmode="tel" oninput="this.value=cleanPhoneInput(this.value);state.loyalty.phone=this.value"></div>
-        <button class="primary-btn" style="margin-top:16px;" ${loyalty.loading ? "disabled" : ""} onclick="findLoyalty()">${loyalty.loading ? "Checking…" : state.market === "SG" ? "View my rewards & referral" : "Check loyalty"}</button>
+        <button class="primary-btn" style="margin-top:16px;" ${loyalty.loading ? "disabled" : ""} onclick="findLoyalty()">${loyalty.loading ? "Checking…" : "View my rewards & referral"}</button>
         ${loyalty.message ? `<div class="ref-note" style="color:#B33333;">${escapeHtml(loyalty.message)}</div>` : ""}
       </div>
       ${account ? `<div style="margin-top:16px;padding:24px;background:linear-gradient(135deg,#1e473e,#294c44 55%,#19362f);border-radius:20px;color:#f9f4e8;box-shadow:0 14px 30px rgba(30,71,62,.18);"><div style="font-size:10px;font-weight:800;letter-spacing:.15em;color:#b7d2bb;">SHIZUKU LAB · MEMBER</div><div class="display" style="font-size:25px;margin-top:9px;color:#f9f4e8;">Shizuku Club</div>${pointsMode ? `<div style="font:700 48px/1 Georgia,serif;margin:24px 0 8px;">${value} <span style="font:600 15px/1 inherit;color:#cce0ca;">points</span></div><div style="height:9px;background:rgba(255,255,255,.2);border-radius:99px;margin:18px 0;overflow:hidden;"><div style="height:100%;width:${progress}%;background:#cae4b3;border-radius:99px;"></div></div><div style="font-size:12px;color:#d6e4d4;">Current balance: <b>${value} points</b></div>` : `<div style="margin:22px 0 17px;display:grid;grid-template-columns:repeat(5,1fr);gap:8px;">${dots}</div><div style="font-size:12px;color:#d6e4d4;">Current balance: <b>${value} stamps</b></div>`}<div style="border-top:1px solid rgba(255,255,255,.2);margin:20px 0 16px;"></div><div style="font-size:10px;font-weight:800;letter-spacing:.12em;color:#b7d2bb;">NEXT REWARD</div><div style="font-size:15px;font-weight:700;margin-top:6px;">${escapeHtml(account.reward_description || "A free drink is on us.")}</div><div style="margin-top:15px;font-size:13px;color:#d6e4d4;">Rewards ready: <b style="color:#fff;">${Number(account.rewards_available || 0)}</b></div>${history.length ? `<div style="border-top:1px solid rgba(255,255,255,.2);margin:20px 0 12px;"></div><div style="font-size:10px;font-weight:800;letter-spacing:.12em;color:#b7d2bb;margin-bottom:7px;">RECENT ACTIVITY</div>${history.slice(0,8).map((item) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:12px;color:#f9f4e8;"><span><b>+${escapeHtml(item.amount)}</b> — Order ${escapeHtml(item.order_number)}</span><span style="color:#b7d2bb;white-space:nowrap;">${new Date(item.created_at).toLocaleDateString("en-SG", { day:"numeric", month:"short" })}</span></div>`).join("")}` : ""}</div>` : ""}
-      ${state.market === "SG" && loyalty.referral ? `<div class="summary-card" style="margin-top:16px;"><div class="display" style="font-size:22px;">Refer a friend · both get SGD $1</div><p style="line-height:1.5;margin:8px 0 15px;">Send your link or code to a friend. At checkout, they open <b>Promo / Referral code</b>, choose <b>Referral code</b> and apply it to their first drink order. They save SGD $1; you earn SGD $1 credit after their payment is confirmed.</p><div class="slot" style="justify-content:space-between;"><b style="letter-spacing:.1em;">${escapeHtml(loyalty.referral.share_code || loyalty.referral.code)}</b><span>${Number(loyalty.referral.successful||0)} successful</span></div>${loyalty.referral.share_mode === "instagram" ? `<div class="hint" style="text-align:left;margin-top:7px;">System code also works: ${escapeHtml(loyalty.referral.code)}</div>` : ""}<p style="margin:12px 0;">Your available referral credits: <b>${Number(loyalty.referral.available||0)} × SGD $1</b></p><button class="primary-btn" onclick="shareReferralCode()">Share referral link</button><button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="copyReferralCode()">Copy code only</button><div class="hint" style="text-align:left;margin-top:10px;">To use your earned credit, enter your own code at checkout with the same phone number. One credit per order; it cannot be combined with another promo or Partner pricing.</div></div>` : state.market === "SG" ? `<div class="summary-card" style="margin-top:16px;"><div class="display" style="font-size:20px;">Refer a friend</div><p style="line-height:1.5;margin:8px 0 0;">Enter your order phone number above to see your personal referral link and code. Share either with a friend; you both get SGD $1 when their first drink order is confirmed.</p></div>` : ""}
+      ${renderReferralLoyaltyCard(loyalty.referral)}
     </div>`;
 }
 
