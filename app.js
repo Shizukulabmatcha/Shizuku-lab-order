@@ -702,8 +702,9 @@ function cartIsRitualPassOnly() {
   return lines.length > 0 && lines.every((line) => isRitualProduct(state.menu.find((item) => String(item.id) === String(line.productId))));
 }
 function productGroupName(product) {
-  const group = state.productGroups.find((item) => String(item.id) === String(product.group_id));
-  return group?.name || product.category || "Other";
+  const groupId = state.market === "MY" ? product.malaysia_group_id : product.group_id;
+  const group = state.productGroups.find((item) => String(item.id) === String(groupId));
+  return group?.name || (groupId == null && state.market === "SG" ? product.category || "Other" : "Other");
 }
 function getBundleDrinkProducts(bundle = state.selectedProduct) {
   const allowedIds = Array.isArray(bundle?.bundle_product_ids) ? bundle.bundle_product_ids.map(String) : [];
@@ -1112,7 +1113,7 @@ async function loadProducts() {
 function applyMarketMenu() {
   state.menu = state.allMenu.filter((item) => state.market !== "MY" || (item.malaysia_available === true && item.myr_price != null && Number.isFinite(Number(item.myr_price))));
 }
-function setMarket(market) {
+async function setMarket(market) {
   const next = market === "MY" && state.store.malaysia_enabled === true ? "MY" : "SG";
   if (next === state.market) return;
   state.market = next;
@@ -1124,6 +1125,8 @@ function setMarket(market) {
   state.form.pickupDate = "";
   state.form.slotId = "";
   applyMarketMenu();
+  state.activeCategory = "All";
+  await Promise.all([loadProductGroups(), loadOptions()]);
   render();
 }
 async function loadCustomerStockLevels() {
@@ -1162,7 +1165,7 @@ function startStockRefresh() {
   });
 }
 async function loadProductGroups() {
-  const { data, error } = await db.from("product_groups").select("*").eq("is_visible", true).order("sort_order").order("name");
+  const { data, error } = await db.from("product_groups").select("*").eq("market_code", state.market).eq("is_visible", true).order("sort_order").order("name");
   // The old shop continues to work before the one-time SQL upgrade is run.
   if (error) { console.warn("Could not load product groups:", error.message); state.productGroups = []; return; }
   state.productGroups = data || [];
