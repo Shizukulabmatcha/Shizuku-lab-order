@@ -505,13 +505,12 @@ async function loadAll(options = {}) {
         const passResult = await db.rpc("admin_list_shizuku_matcha_passes", { p_search: "" });
         if (passResult.error && !/does not exist|schema cache|function/i.test(passResult.error.message || "")) console.warn("Could not load Matcha Passes:", passResult.error.message);
         astate.matchaPasses = Array.isArray(passResult.data) ? passResult.data : [];
-        const referralResult = await db.rpc("admin_list_shizuku_referrals");
-        if (referralResult.error && !/does not exist|schema cache|function/i.test(referralResult.error.message || "")) console.warn("Could not load referrals:", referralResult.error.message);
-        astate.referralCodes = Array.isArray(referralResult.data) ? referralResult.data : [];
       } else {
         astate.matchaPasses = [];
-        astate.referralCodes = [];
       }
+      const referralResult = await db.rpc("admin_list_shizuku_referrals");
+      if (referralResult.error && !/does not exist|schema cache|function/i.test(referralResult.error.message || "")) console.warn("Could not load referrals:", referralResult.error.message);
+      astate.referralCodes = Array.isArray(referralResult.data) ? referralResult.data : [];
       astate.notificationSettings = notificationSettings || { id: 1, recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true, alert_live_chat: true };
       astate.notificationDraft = { ...astate.notificationSettings };
       const [inventoryResult, recipeResult, supplierResult, wholesaleResult, inspirationResult, marginGuideResult, teamResult, activityResult, studioSettingsResult] = await Promise.all([
@@ -3822,6 +3821,37 @@ function manualRewardOrdersForCustomer(customerKeyValue) {
   const key = String(customerKeyValue || "");
   return manualRewardOrders().filter((order) => String(customerKey(order)) === key);
 }
+function referralSettingsKeys() {
+  return DASHBOARD_MARKET === "MY"
+    ? ["referral_friend_discount_myr", "referral_owner_reward_myr"]
+    : ["referral_friend_discount_sgd", "referral_owner_reward_sgd"];
+}
+function renderReferralSettings() {
+  const [friendKey, ownerKey] = referralSettingsKeys();
+  const draft = astate.settingsDraft || {};
+  const currency = DASHBOARD_MARKET === "MY" ? "MYR" : "SGD";
+  return `<section class="dashboard-card" style="padding:20px;margin-bottom:16px;"><div class="dashboard-card-head" style="padding:0 0 14px;"><h2>Refer a friend · ${currency}</h2><span>Separate from ${DASHBOARD_MARKET === "MY" ? "Singapore" : "Malaysia"}</span></div><div class="hint" style="text-align:left;margin:0 0 14px;">Choose the first-order discount and the credit a referrer earns after that payment is confirmed. Existing earned credits keep their original value.</div><div class="dashboard-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;"><div class="field"><label>Friend's first order (${currency})</label><input type="number" min="0.01" max="100" step="0.01" value="${escapeHtml(draft[friendKey] ?? 1)}" oninput="astate.settingsDraft['${friendKey}']=this.value"></div><div class="field"><label>Referrer's future credit (${currency})</label><input type="number" min="0.01" max="100" step="0.01" value="${escapeHtml(draft[ownerKey] ?? 1)}" oninput="astate.settingsDraft['${ownerKey}']=this.value"></div></div><button class="btn-primary" id="save-referral-settings" onclick="saveReferralSettings()">Save referral amounts</button></section>`;
+}
+async function saveReferralSettings() {
+  if (!db || !astate.settings?.id) return alert("Store settings are unavailable.");
+  const [friendKey, ownerKey] = referralSettingsKeys();
+  const values = [Number(astate.settingsDraft?.[friendKey]), Number(astate.settingsDraft?.[ownerKey])];
+  if (values.some((value) => !Number.isFinite(value) || value < 0.01 || value > 100))
+    return alert("Enter an amount between 0.01 and 100 for each field.");
+  const button = document.getElementById("save-referral-settings");
+  if (button) { button.disabled = true; button.textContent = "Saving…"; }
+  const { data, error } = await db.from("store_settings")
+    .update({ [friendKey]: values[0], [ownerKey]: values[1] })
+    .eq("id", astate.settings.id).select().single();
+  if (error) {
+    if (button) { button.disabled = false; button.textContent = "Save referral amounts"; }
+    return alert("Could not save referral amounts: " + error.message);
+  }
+  astate.settings = data;
+  astate.settingsDraft = { ...astate.settingsDraft, ...data };
+  render();
+  alert("Referral amounts saved for " + DASHBOARD_MARKET + ".");
+}
 async function attachRewardToOrder() {
   const order = manualRewardOrders().find((item) => String(item.id) === String(astate.selectedManualRewardOrderId));
   if (!order || astate.manualRewardSaving) return alert("Choose a collected order first.");
@@ -3868,7 +3898,7 @@ function renderRewardsTab() {
     return '<div class="reward-picker-order"><span><strong>' + escapeHtml(order.order_number||String(order.id)) + '</strong><small>' + escapeHtml(order.collection_date||'No collection date') + ' · ' + money(order.total) + '</small></span><em>' + escapeHtml(reason) + '</em></div>';
   }).join('') + '</div>' : EmptyState('No orders found','No order currently matches this customer’s phone or account details.');
   const picker = pickerCustomer ? Drawer(`Add ${points ? "reward" : "1 stamp"} · ${pickerCustomer.name}`, `<div class="hint" style="text-align:left;margin:0 0 14px">Choose the paid, collected order that should receive this reward. The order number will be stored in the customer’s transaction history.</div>${pickerOrders.length ? `<div class="field"><label>Collected order</label><select onchange="selectManualRewardOrder(this.value)"><option value="">Choose order…</option>${pickerOrders.map((order) => `<option value="${escapeHtml(order.id)}" ${String(astate.selectedManualRewardOrderId)===String(order.id)?"selected":""}>${escapeHtml(order.order_number)} · ${escapeHtml(order.collection_date||"")} · ${money(order.total)}</option>`).join("")}</select></div><button class="btn-primary" id="manual-reward-confirm" style="width:100%" ${!astate.selectedManualRewardOrderId||astate.manualRewardSaving?"disabled":""} onclick="attachRewardToOrder()">${astate.manualRewardSaving?"Linking…":`Confirm and add ${points?"reward":"1 stamp"}`}</button>`:EmptyState("No eligible collected orders","Every paid, collected order for this customer is already linked, or the order is not eligible.")}<div class="reward-picker-audit">${allOrdersMarkup}</div>`, "closeRewardOrderPicker()") : "";
-  return `<div class="rewards-page">${manualReward}<div class="dashboard-grid rewards-layout" style="grid-template-columns:minmax(300px,.88fr) minmax(360px,1.12fr);align-items:start;margin-top:16px;">${settings}${members}</div>${picker}</div>`;
+  return `<div class="rewards-page">${renderReferralSettings()}${manualReward}<div class="dashboard-grid rewards-layout" style="grid-template-columns:minmax(300px,.88fr) minmax(360px,1.12fr);align-items:start;margin-top:16px;">${settings}${members}</div>${picker}</div>`;
 }
 
 function enhanceRewardOrderLinks() {
@@ -4762,35 +4792,36 @@ renderCustomersTab = function () {
 };
 
 function customerReferralEditor(customer) {
-  if (DASHBOARD_MARKET !== "SG") return "";
-  const phone = canonicalCustomerPhone(customer.phone, "SG");
+  const phone = canonicalCustomerPhone(customer.phone, DASHBOARD_MARKET);
   if (!phone) return "";
-  const referral = (astate.referralCodes || []).find((item) => item.owner_phone === phone);
+  const storedPhone = DASHBOARD_MARKET === "MY" ? `60${phone}` : phone;
+  const referral = (astate.referralCodes || []).find((item) => item.owner_phone === storedPhone && String(item.market_code || "SG") === DASHBOARD_MARKET);
   const paid = customer.orders.some((order) => order.payment_status === "paid" && order.order_status !== "cancelled" && order.deleted_at == null);
-  return `<div class="divider" style="margin:20px 0 12px"></div><b>Refer a friend · SGD $1</b>
+  const currency = DASHBOARD_MARKET === "MY" ? "MYR" : "SGD";
+  return `<div class="divider" style="margin:20px 0 12px"></div><b>Refer a friend · ${currency}</b>
     <div class="hint" style="text-align:left;margin:8px 0 14px">Choose what this customer shares. Both their system code and Instagram name will work at checkout; the selected one appears in Rewards.</div>
     ${referral ? `<div class="ref-note">System code: <b>${escapeHtml(referral.code)}</b></div>` : ""}
     <div class="field"><label>Instagram referral name</label><input id="customer-referral-alias" value="${escapeHtml(referral?.instagram_alias || customer.instagram || "")}" placeholder="e.g. shizukulab.matcha" autocomplete="off"></div>
     <div class="field"><label>Share as</label><select id="customer-referral-mode"><option value="code" ${referral?.share_mode !== "instagram" ? "selected" : ""}>System code (SHZ…)</option><option value="instagram" ${referral?.share_mode === "instagram" ? "selected" : ""}>Instagram name (@…)</option></select></div>
     <button class="btn-secondary" style="width:100%" data-phone="${escapeHtml(phone)}" onclick="saveCustomerReferral(this.dataset.phone)" ${paid ? "" : "disabled"}>Save referral setting</button>
-    ${paid ? "" : `<div class="hint" style="text-align:left;margin-top:7px">Available after this customer's first Singapore order is paid.</div>`}`;
+    ${paid ? "" : `<div class="hint" style="text-align:left;margin-top:7px">Available after this customer's first ${DASHBOARD_MARKET === "MY" ? "Malaysia" : "Singapore"} order is paid.</div>`}`;
 }
 
 async function saveCustomerReferral(phone) {
-  if (!db || !phone || DASHBOARD_MARKET !== "SG") return;
+  if (!db || !phone) return;
   const alias = String(document.getElementById("customer-referral-alias")?.value || "").trim();
   const mode = document.getElementById("customer-referral-mode")?.value || "code";
   const button = document.querySelector('button[data-phone="' + phone + '"]');
   if (button) { button.disabled = true; button.textContent = "Saving…"; }
   const { data, error } = await db.rpc("admin_set_shizuku_referral", {
-    p_phone: phone, p_instagram_alias: alias, p_share_mode: mode,
+    p_phone: phone, p_instagram_alias: alias, p_share_mode: mode, p_market_code: DASHBOARD_MARKET,
   });
   if (error) {
     if (button) { button.disabled = false; button.textContent = "Save referral setting"; }
     alert("Could not save referral: " + error.message);
     return;
   }
-  astate.referralCodes = [...(astate.referralCodes || []).filter((item) => item.owner_phone !== phone), data];
+  astate.referralCodes = [...(astate.referralCodes || []).filter((item) => !(item.owner_phone === data.owner_phone && String(item.market_code || "SG") === DASHBOARD_MARKET)), data];
   render();
   alert("Referral setting saved. The customer will see it in Rewards.");
 }
