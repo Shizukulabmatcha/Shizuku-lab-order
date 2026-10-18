@@ -234,6 +234,8 @@ const state = {
   form: { name: "", phone: "", email: "", instagram: "", pickupDate: "", slotId: "", collectionPoint: "", fulfilmentMethod: "collection", deliveryAddress: {}, notes: "", promoCode: "", referralCode: "", marketingOptIn: false },
   promo: null,
   promoMsg: "",
+  checkoutDiscountOpen: false,
+  checkoutDiscountChoice: "referral",
   payment: { transactionReference: "", proofFile: null, expiresAt: null },
   customerId: null,
   tracking: { orderNumber: "", phone: "", order: null, message: "", loading: false, live: false, lastCheckedAt: null },
@@ -1009,12 +1011,29 @@ function orderAdvanceDays() {
   return Math.max(0, Math.min(60, Number(configuredAdvanceDays ?? 14)));
 }
 
+function productPreorderHours(product) {
+  return Math.max(0, Math.min(168, Number(product?.preorder_notice_hours || 0)));
+}
+function cartPreorderHours() {
+  return cartLines().reduce((longest, line) => {
+    const product = state.menu.find((item) => String(item.id) === String(line.productId));
+    let hours = productPreorderHours(product);
+    if (isBundle(product)) {
+      for (const drink of line.options || []) {
+        const selected = state.menu.find((item) => String(item.id) === String(drink.productId));
+        hours = Math.max(hours, productPreorderHours(selected));
+      }
+    }
+    return Math.max(longest, hours);
+  }, 0);
+}
+
 function computeSlots() {
   const now = new Date();
   const weekly = new Map(getWeeklyConfig().map((item) => [item.day, item]));
   const configuredNoticeHours = state.market === "MY" ? state.store.malaysia_minimum_order_notice_hours : state.store.minimum_order_notice_hours;
   const maxDays = orderAdvanceDays();
-  const noticeHours = Math.max(0, Number(configuredNoticeHours ?? 0));
+  const noticeHours = Math.max(0, Number(configuredNoticeHours ?? 0), cartPreorderHours());
   const earliest = new Date(now.getTime() + noticeHours * 60 * 60 * 1000);
   const slots = [];
   for (let offset = 0; offset <= maxDays; offset++) {
@@ -1164,7 +1183,11 @@ async function init() {
 
   const requestedScreen = new URLSearchParams(window.location.search).get("screen");
   const sharedReferralCode = String(new URLSearchParams(window.location.search).get("ref") || "").toUpperCase();
-  if (state.market === "SG" && /^(?:SHZ[A-F0-9]{9}|@[A-Z0-9._]{2,30})$/.test(sharedReferralCode)) state.form.referralCode = sharedReferralCode;
+  if (state.market === "SG" && /^(?:SHZ[A-F0-9]{9}|@[A-Z0-9._]{2,30})$/.test(sharedReferralCode)) {
+    state.form.referralCode = sharedReferralCode;
+    state.checkoutDiscountOpen = true;
+    state.checkoutDiscountChoice = "referral";
+  }
   if (["track", "loyalty", "reviews"].includes(requestedScreen)) state.screen = requestedScreen;
   else {
     const pendingPayment = loadPendingPayment();
@@ -1528,7 +1551,18 @@ function changeCartQty(key, delta) {
 }
 
 /* ---------- screen ---------- */
-function setScreen(screen) { state.screen = screen; render(); }
+function refreshCheckoutSlots() {
+  state.slots = computeSlots();
+  if (state.form.slotId && !state.slots.some((slot) => slot.id === state.form.slotId)) {
+    state.form.slotId = "";
+    state.form.pickupDate = "";
+  }
+}
+function setScreen(screen) {
+  if (screen === "checkout") refreshCheckoutSlots();
+  state.screen = screen;
+  render();
+}
 function setCategory(category) {
   const pageY = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
   const categoryScroll = document.querySelector(".cats")?.scrollLeft || 0;
@@ -1640,6 +1674,13 @@ async function applyReferralCode() {
   render();
 }
 function removePromoCode() { state.promo = null; state.promoMsg = ""; state.form.promoCode = ""; state.form.referralCode = ""; render(); }
+function toggleCheckoutDiscount() { state.checkoutDiscountOpen = !state.checkoutDiscountOpen; render(); }
+function chooseCheckoutDiscount(choice) {
+  state.checkoutDiscountChoice = choice === "promo" ? "promo" : "referral";
+  state.checkoutDiscountOpen = true;
+  state.promoMsg = "";
+  render();
+}
 
 /* ---------- submit order ---------- */
 function cartB2BType(){return ShizukuB2B.classify(cartLines(),state.menu);}
@@ -1672,14 +1713,16 @@ function partnerOrderItemsPayload() {
   });
 }
 async function submitRitualRedemption(){
+  refreshCheckoutSlots();
   const pass=selectedRitualPass(),slot=state.slots.find((item)=>String(item.id)===String(state.form.slotId));
   if(!pass||!slot||!state.form.collectionPoint||!cartLines().length)return alert("Choose your drinks, collection date, time and collection point.");
   if(ritualCreditsInCart()>ritualAvailable(pass))return alert(`You only have ${ritualAvailable(pass)} unreserved Matcha Pass drinks available.`);
   if(!IS_CONFIGURED)return alert("Connect Supabase to redeem a Matcha Pass.");
+  if(!await ensureCustomerSession())return alert("We could not start a secure payment session. Please refresh and try again.");
   const items=cartLines().map((line)=>({product_id:String(line.productId),quantity:Number(line.qty||1)}));
   const {data,error}=await db.rpc("create_shizuku_matcha_redemption",{p_pass_id:pass.id,p_phone:normalisePhone(state.ritual.phone),p_items:items,p_collection_date:slot.date,p_collection_time:slot.time,p_collection_point:state.form.collectionPoint||defaultCollectionPoint(),p_idempotency_key:state.ritual.idempotencyKey});
   if(error)return alert(error.message||"Could not confirm this Matcha Pass redemption.");
-  state.lastOrder={...data,id:data.order_id,order_kind:"matcha_pass_redemption",total:Number(data.top_up_total||0),customer_name:data.customer_name,customer_phone:data.customer_phone,customer_email:data.customer_email,collection_date:data.collection_date,collection_time:data.collection_time,collection_point:data.collection_point,items:cartLines().map((line)=>({...line})),payment_status:data.payment_status,order_status:data.payment_status==="paid"?"confirmed":"pending",market_code:"SG",currency_code:"SGD",matcha_pass_credits_used:Number(data.credits_used||0),matcha_pass_remaining:Number(data.remaining||0)};
+  state.lastOrder={...data,id:data.order_id,order_kind:"matcha_pass_redemption",matcha_pass_id:pass.id,total:Number(data.top_up_total||0),customer_name:data.customer_name,customer_phone:data.customer_phone,customer_email:data.customer_email,collection_date:data.collection_date,collection_time:data.collection_time,collection_point:data.collection_point,items:cartLines().map((line)=>({...line})),payment_status:data.payment_status,order_status:data.payment_status==="paid"?"confirmed":"pending",market_code:"SG",currency_code:"SGD",matcha_pass_credits_used:Number(data.credits_used||0),matcha_pass_remaining:Number(data.remaining||0)};
   state.cart={};saveCart();state.ritual.redemptionMode=false;state.ritual.savedCart=null;
   const current=(state.ritual.passes||[]).find((item)=>String(item.id)===String(pass.id));if(current){current.remaining_credits=Number(data.remaining??ritualRemaining(current));current.reserved_credits=Number(data.reserved_credits??(ritualReserved(current)+Number(data.credits_used||0)));current.available_credits=Number(data.available_credits??Math.max(0,current.remaining_credits-current.reserved_credits));}
   state.screen=Number(data.top_up_total||0)>0?"payment":"confirmation";
@@ -1687,6 +1730,7 @@ async function submitRitualRedemption(){
   render();
 }
 async function submitOrder() {
+  refreshCheckoutSlots();
   const f = state.form;
   if (!cartLines().length) { alert("Your cart is empty."); setScreen("menu"); return; }
   if(isRitualRedemptionMode())return submitRitualRedemption();
@@ -1811,6 +1855,11 @@ async function submitOrder() {
       return;
     } catch (error) {
       console.error("Partner order submission error:", error);
+      if (/pre-order notice|pickup needs at least/i.test(error?.message || "")) {
+        refreshCheckoutSlots(); render();
+        alert("That pickup time is too soon for this order. Please choose a later available time.");
+        return;
+      }
       if (/partner offer is no longer available/i.test(error?.message || "")) {
         clearPartnerSession();
         repriceCartForPartner();
@@ -1884,6 +1933,11 @@ async function submitOrder() {
   } catch (error) {
     console.error("Order submission error:", error);
     if (createdOrderId) await db.from("orders").delete().eq("id", createdOrderId);
+    if (/pre-order notice|pickup needs at least/i.test(error?.message || "")) {
+      refreshCheckoutSlots(); render();
+      alert("That pickup time is too soon for this order. Please choose a later available time.");
+      return;
+    }
     if (/only\s+\d+\s+item/i.test(error?.message || "")) {
       await loadCustomerStockLevels();
       render();
@@ -1960,11 +2014,18 @@ async function markPaid() {
       alert("Could not upload your payment screenshot. Please try again.\n\n" + uploadError.message);
       return;
     }
-    const { error } = await db.rpc("submit_payment_proof", {
-      p_order_id: order.id,
-      p_transaction_reference: state.payment.transactionReference.trim() || null,
-      p_screenshot_path: upload.path,
-    });
+    const { error } = order.order_kind === "matcha_pass_redemption"
+      ? await db.rpc("submit_matcha_pass_payment_proof", {
+          p_order_id: order.id,
+          p_phone: normalisePhone(order.customer_phone),
+          p_transaction_reference: state.payment.transactionReference.trim() || null,
+          p_screenshot_path: upload.path,
+        })
+      : await db.rpc("submit_payment_proof", {
+          p_order_id: order.id,
+          p_transaction_reference: state.payment.transactionReference.trim() || null,
+          p_screenshot_path: upload.path,
+        });
     if (error) {
       alert("Could not update payment status.\n" + error.message);
       return;
@@ -2143,20 +2204,21 @@ function productMenuBadge(item) {
 function renderMenuCard(item) {
   const soldOut = isSoldOut(item);
   const menuTag = productMenuTag(item);
+  const preorderLabel = productPreorderHours(item) > 0 ? `<span class="ordering-product-tag">Pre-order · ${productPreorderHours(item)}h notice</span>` : "";
   if (state.menuView === "gallery") return `
     <button type="button" class="ordering-gallery-card ordering-card-action" ${soldOut ? "disabled" : ""} onclick="openProductOptions('${escapeHtml(item.id)}')" aria-label="View ${escapeHtml(item.name)}">
       <span class="ordering-gallery-open"><img src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="" loading="lazy">${productMenuBadge(item)}</span>
       <div class="ordering-gallery-copy">
         <span class="ordering-product-name">${escapeHtml(item.name)}</span>
         <p class="ordering-product-desc">${escapeHtml(item.description)}</p>
-        ${menuTag ? `<span class="ordering-product-tag">${escapeHtml(menuTag)}</span>` : ""}
+        ${menuTag ? `<span class="ordering-product-tag">${escapeHtml(menuTag)}</span>` : ""}${preorderLabel}
         <div class="ordering-gallery-foot"><div class="stock-line">${stockMarkup(item)}</div>${productPriceMarkup(item, "item-price gallery-price")}</div>
       </div>
     </button>`;
   return `
     <button type="button" class="item-card ordering-list-card ordering-card-action" ${soldOut ? "disabled" : ""} onclick="openProductOptions('${escapeHtml(item.id)}')" aria-label="View ${escapeHtml(item.name)}">
       <span class="ordering-list-open"><img class="item-thumb" src="${escapeHtml(item.image_url || "matcha-lab.jpg")}" alt="" loading="lazy">${productMenuBadge(item)}</span>
-      <div class="item-info"><span class="item-name ordering-product-name">${escapeHtml(item.name)}</span><div class="item-desc ordering-product-desc">${escapeHtml(item.description)}</div>${menuTag ? `<span class="ordering-product-tag">${escapeHtml(menuTag)}</span>` : ""}<div class="stock-line">${stockMarkup(item)}</div></div>
+      <div class="item-info"><span class="item-name ordering-product-name">${escapeHtml(item.name)}</span><div class="item-desc ordering-product-desc">${escapeHtml(item.description)}</div>${menuTag ? `<span class="ordering-product-tag">${escapeHtml(menuTag)}</span>` : ""}${preorderLabel}<div class="stock-line">${stockMarkup(item)}</div></div>
       <div class="ordering-list-side">${productPriceMarkup(item)}</div>
     </button>`;
 }
@@ -2306,6 +2368,7 @@ function renderOptions() {
           <div class="product-detail-kicker"><span>${escapeHtml(productGroupName(product))}</span><span>SHIZUKU LAB · 雫ラボ</span></div>
           <div class="item-name">${escapeHtml(product.name)}</div>
           <div class="item-desc">${escapeHtml(product.description)}</div>
+          ${productPreorderHours(product) > 0 ? `<div class="ref-note"><b>Pre-order · ${productPreorderHours(product)} hours notice</b><br>Collection times earlier than this will not be available at checkout.</div>` : ""}
           <div class="product-detail-price">${isRitualRedemptionMode() ? (price ? `+${money(price)}` : "Included with Matcha Pass") : `from ${money(partnerMemberBasePrice(product))}`}</div>
           <div class="stock-line">${stockMarkup(product)}</div>
         </div>
@@ -2339,6 +2402,7 @@ function renderBundle() {
           <div class="product-detail-kicker"><span>${escapeHtml(productGroupName(bundle))}</span><span>SHIZUKU LAB · 雫ラボ</span></div>
           <div class="item-name">${escapeHtml(bundle.name)}</div>
           <div class="item-desc">${escapeHtml(bundle.description || `Choose ${count} drinks from the selections below.`)}</div>
+          ${productPreorderHours(bundle) > 0 ? `<div class="ref-note"><b>Pre-order · ${productPreorderHours(bundle)} hours notice</b><br>Collection times earlier than this will not be available at checkout.</div>` : ""}
           ${bundle.ritual_validity_weeks?`<div class="ref-note"><b>${count} drinks · ${Number(bundle.ritual_validity_weeks)} weeks</b><br>Choose all ${count} drinks now. Your order keeps the Weekly Ritual together as one purchase.</div>`:""}
           ${isDynamicBundle(bundle) ? `<div class="item-price"><span class="discount-price">${bundleComplete ? money(currentBundlePrice) : `From ${money(currentBundlePrice)}`}</span></div>` : productPriceMarkup(bundle)}
           <div class="stock-line">${stockMarkup(bundle)}</div>
@@ -2405,11 +2469,30 @@ function renderCart() {
 }
 
 /* ---------- checkout ---------- */
+function renderCheckoutDiscount(canRefer, f) {
+  if (partnerModeActive()) return "";
+  const open = state.checkoutDiscountOpen;
+  const choice = canRefer ? state.checkoutDiscountChoice : "promo";
+  const header = `<button type="button" class="slot" aria-expanded="${open}" aria-controls="checkout-discount-options" onclick="toggleCheckoutDiscount()" style="cursor:pointer;justify-content:space-between;margin:0;border-radius:${open ? "12px 12px 0 0" : "12px"};background:var(--card);font:inherit;"><span style="font-weight:600;">${canRefer ? "Promo / Referral code" : "Promo code"}</span><span style="display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;">${state.promo ? `${escapeHtml(state.promo.code)} · −${money(promoDiscountAmount(state.promo))}` : "Optional"}<span aria-hidden="true" style="font-size:17px;line-height:1;">${open ? "⌃" : "⌄"}</span></span></button>`;
+  if (!open) return `<div class="field" style="margin-top:15px;">${header}</div>`;
+  let content = "";
+  if (state.promo) {
+    content = `<div class="slot active" style="justify-content:space-between;margin:0;"><span><b>${escapeHtml(state.promo.code)}</b> applied</span><button type="button" class="link-btn" style="border:none;background:none;color:#B33;" onclick="removePromoCode()">Remove</button></div>`;
+  } else {
+    const tabs = canRefer ? `<div role="group" aria-label="Code type" style="display:flex;gap:8px;margin-bottom:14px;"><button type="button" class="slot ${choice === "referral" ? "active" : ""}" style="justify-content:center;margin:0;cursor:pointer;" aria-pressed="${choice === "referral"}" onclick="chooseCheckoutDiscount('referral')">Referral code</button><button type="button" class="slot ${choice === "promo" ? "active" : ""}" style="justify-content:center;margin:0;cursor:pointer;" aria-pressed="${choice === "promo"}" onclick="chooseCheckoutDiscount('promo')">Promo code</button></div>` : "";
+    const field = choice === "referral"
+      ? `<label for="f-referral">Friend referral code · SGD $1 off</label><div style="display:flex;gap:8px;"><input id="f-referral" value="${escapeHtml(f.referralCode || "")}" placeholder="@instagram or SHZ code" style="flex:1;min-width:0;" autocomplete="off" oninput="onFormInput('referralCode', this.value)"><button type="button" class="btn-primary" style="flex:none;padding:0 18px;" onclick="applyReferralCode()">Apply</button></div><div class="hint" style="text-align:left;margin-top:8px;">Your first drink order gets SGD $1 off. Your friend earns SGD $1 credit after your payment is confirmed.</div>`
+      : `<label for="f-promo">${tr("promo")}</label><div style="display:flex;gap:8px;"><input id="f-promo" value="${escapeHtml(f.promoCode)}" placeholder="e.g. WELCOME10" style="flex:1;min-width:0;text-transform:uppercase;" oninput="this.value=this.value.toUpperCase();onFormInput('promoCode', this.value)"><button type="button" class="btn-primary" style="flex:none;padding:0 18px;" onclick="applyPromoCode()">Apply</button></div>`;
+    content = tabs + field;
+  }
+  return `<div class="field" style="margin-top:15px;">${header}<div id="checkout-discount-options" style="border:1px solid var(--line);border-top:0;border-radius:0 0 12px 12px;background:var(--card);padding:14px;">${content}${state.promoMsg ? `<div class="ref-note">${escapeHtml(state.promoMsg)}</div>` : ""}</div></div>`;
+}
 function renderCheckout() {
   const f = state.form;
   if(isRitualRedemptionMode())return renderRitualRedemptionCheckout();
   const isB2B=cartB2BType()==='b2b';
   const isRitualPass=cartIsRitualPassOnly();
+  const canRefer=state.market === "SG" && !isB2B && !isRitualPass;
   const isSelfDelivery=isMalaysiaSelfDelivery();
   const canSubmit=checkoutReady();
   const collectionSettings = marketCollectionSettings();
@@ -2425,7 +2508,7 @@ function renderCheckout() {
       ${state.store.show_checkout_email === false ? "" : `<div class="field"><label>${tr("email")}</label><input id="f-email" type="email" value="${escapeHtml(f.email)}" placeholder="you@example.com" autocomplete="email" oninput="onFormInput('email', this.value)"></div>`}
       ${state.store.show_checkout_instagram === false ? "" : `<div class="field"><label>${tr("instagram")}</label><input id="f-instagram" value="${escapeHtml(f.instagram)}" placeholder="@yourhandle" oninput="onFormInput('instagram', this.value)"></div>`}
       ${state.market === "MY" && state.store.malaysia_self_delivery_enabled === true && !isB2B && !isRitualPass ? `<div class="field"><label>Fulfilment</label><div class="fulfilment-choice"><button type="button" class="slot ${!isSelfDelivery ? "active" : ""}" onclick="onFormInput('fulfilmentMethod','collection')">${tr("collection")}</button><button type="button" class="slot ${isSelfDelivery ? "active" : ""}" onclick="onFormInput('fulfilmentMethod','delivery')">${tr("self_delivery")}</button></div>${state.store.malaysia_delivery_instructions ? `<div class="hint" style="text-align:left;margin-top:6px">${escapeHtml(state.store.malaysia_delivery_instructions)}</div>` : ""}${state.store.malaysia_delivery_areas ? `<div class="hint" style="text-align:left;margin-top:4px">Delivery area: ${escapeHtml(state.store.malaysia_delivery_areas)}</div>` : ""}</div>` : ""}
-      ${isRitualPass ? `<div class="ref-note"><b>Matcha Pass purchase</b><br>No collection booking is needed today. After payment is confirmed, return to the Matcha Pass banner and use this phone number to reserve each of your four drinks.</div>` : isB2B?b2bCheckoutFields():`      <div class="field"><label>${isSelfDelivery ? tr("delivery_date") : tr("collection_date")}</label>
+      ${isRitualPass ? `<div class="ref-note"><b>Matcha Pass purchase</b><br>No collection booking is needed today. After payment is confirmed, return to the Matcha Pass banner and use this phone number to reserve each of your four drinks.</div>` : isB2B?b2bCheckoutFields():`${cartPreorderHours() > 0 ? `<div class="ref-note"><b>Pre-order · ${cartPreorderHours()} hours notice</b><br>Only available ${isSelfDelivery ? "delivery" : "collection"} times after this notice period are shown.</div>` : ""}      <div class="field"><label>${isSelfDelivery ? tr("delivery_date") : tr("collection_date")}</label>
         <select class="checkout-select" onchange="onPickupDateChange(this.value)">
           <option value="">${tr("select_date")}</option>
           ${pickupDates.map(([date, label]) => `<option value="${escapeHtml(date)}" ${f.pickupDate === date ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
@@ -2445,22 +2528,7 @@ function renderCheckout() {
       </div>`}
 `}
       ${state.store.show_checkout_notes === false ? "" : `<div class="field"><label>${tr("notes")}</label><textarea id="f-notes" rows="2" placeholder="Less ice, allergies, etc." oninput="onFormInput('notes', this.value)">${escapeHtml(f.notes)}</textarea></div>`}
-      ${partnerModeActive() ? "" : `<div class="field">
-        ${state.market === "SG" && !isB2B && !isRitualPass && !state.promo ? `<label for="f-referral">Friend referral code (optional) · SGD $1 off</label>
-          <div style="display:flex;gap:8px;margin-bottom:12px;">
-            <input id="f-referral" value="${escapeHtml(f.referralCode || "")}" placeholder="@instagram or SHZ code" style="flex:1;" autocomplete="off" oninput="onFormInput('referralCode', this.value)">
-            <button type="button" class="btn-primary" style="flex:none;padding:0 18px;" onclick="applyReferralCode()">Apply</button>
-          </div>
-          <div class="hint" style="text-align:left;margin-bottom:16px;">New customers get SGD $1 off their first drink order. Your friend gets SGD $1 credit after your payment is confirmed.</div>` : ""}
-        <label>${state.market === "SG" ? "Other promo code (optional)" : tr("promo")}</label>
-        ${state.promo
-          ? `<div class="slot active" style="justify-content:space-between;"><span><b>${escapeHtml(state.promo.code)}</b> applied</span><button class="link-btn" style="border:none;background:none;color:#B33;" onclick="removePromoCode()">Remove</button></div>`
-          : `<div style="display:flex;gap:8px;">
-              <input id="f-promo" value="${escapeHtml(f.promoCode)}" placeholder="e.g. WELCOME10" style="flex:1;text-transform:uppercase;" oninput="this.value=this.value.toUpperCase();onFormInput('promoCode', this.value)">
-              <button class="btn-primary" style="flex:none;padding:0 18px;" onclick="applyPromoCode()">Apply</button>
-            </div>`}
-        ${state.promoMsg ? `<div class="ref-note">${escapeHtml(state.promoMsg)}</div>` : ""}
-      </div>`}
+      ${renderCheckoutDiscount(canRefer, f)}
       ${state.store.marketing_opt_in_enabled === false ? "" : `<label class="slot" style="align-items:flex-start;cursor:pointer;margin:10px 0 16px;"><input type="checkbox" style="width:auto;margin-top:3px;accent-color:var(--matcha);" ${f.marketingOptIn ? "checked" : ""} onchange="onFormInput('marketingOptIn',this.checked)"><span><b>${escapeHtml(state.store.marketing_checkout_heading || "Shizuku updates")}</b><br>${escapeHtml(state.store.marketing_opt_in_label || "Keep me in the loop about monthly opening dates, new drinks and special offers.")}<br><span class="hint" style="text-align:left;margin-top:5px;display:block;">${escapeHtml(state.store.marketing_opt_in_help_text || "Occasional Shizuku Lab updates by email. You can opt out anytime.")}</span></span></label>`}
       <div class="summary-card">
         ${cartLines().map((line) => `
@@ -2601,6 +2669,7 @@ function renderPayment() {
     <div class="screen ${state.store.payment_compact_layout ? "payment-compact" : ""}">
       <style>.payment-qr-size .qr-box{max-width:var(--payment-qr-size);margin-left:auto;margin-right:auto}.payment-qr-size .qr-box svg,.payment-qr-size .qr-box img{width:100%;height:auto}.payment-compact .summary-card{padding:14px}.payment-compact .qr-box{margin-bottom:8px}.payment-compact .divider{margin:12px 0}.payment-compact .row{padding:5px 0}</style>
       <button class="back-link" onclick="leavePaymentPage()">${ICONS.back} ${state.tracking.order?.order_number === order.order_number ? "Back to Track Order" : (malaysiaOrder ? tr("back_menu") : "Back to menu")}</button>
+      ${order.order_kind === "matcha_pass_redemption" ? `<div class="ref-note" style="margin-bottom:16px;"><b>Matcha Pass top-up · ${money(order.total)}</b><br>Pay only the extra amount for your selected drinks, then upload the payment screenshot below. Your Pass credit will be deducted after collection.</div>` : ""}
       <div class="summary-card">
         ${qrHtml}
         <div class="hint">${escapeHtml(malaysiaOrder ? tr("payment_scan_tng") : (state.store.payment_instructions || "Scan with your banking app, or PayNow to the account below."))}${(malaysiaOrder ? state.store.show_touchngo_name : state.store.show_paynow_name) === false ? "" : `<br><b>${escapeHtml(paynowName)}</b>`}${(malaysiaOrder ? state.store.show_touchngo_number : state.store.show_paynow_number) === false || !paynowNumber ? "" : `<br>${escapeHtml(paynowNumber)}`}</div>
@@ -2895,15 +2964,15 @@ function renderLoyalty() {
     ${header()}
     <div class="screen">
       <button class="back-link" onclick="setScreen('menu')">${ICONS.back} Back to menu</button>
-      <div class="display" style="font-size:23px;margin:4px 0 6px;">Check my loyalty</div>
-      <div class="hint" style="text-align:left;line-height:1.5;">Use the same phone number entered when you placed your order.</div>
+      <div class="display" style="font-size:23px;margin:4px 0 6px;">${state.market === "SG" ? "Rewards & referrals" : "Check my loyalty"}</div>
+      <div class="hint" style="text-align:left;line-height:1.5;">Use the same phone number entered when you placed your order.${state.market === "SG" ? " See your rewards and find your personal referral link here." : ""}</div>
       <div class="summary-card" style="margin-top:16px;">
         <div class="field" style="margin-bottom:0;"><label>Phone number</label><input value="${escapeHtml(loyalty.phone)}" placeholder="${state.market === "MY" ? "Malaysia" : "Singapore"} phone number" inputmode="tel" oninput="this.value=cleanPhoneInput(this.value);state.loyalty.phone=this.value"></div>
-        <button class="primary-btn" style="margin-top:16px;" ${loyalty.loading ? "disabled" : ""} onclick="findLoyalty()">${loyalty.loading ? "Checking…" : "Check loyalty"}</button>
+        <button class="primary-btn" style="margin-top:16px;" ${loyalty.loading ? "disabled" : ""} onclick="findLoyalty()">${loyalty.loading ? "Checking…" : state.market === "SG" ? "View my rewards & referral" : "Check loyalty"}</button>
         ${loyalty.message ? `<div class="ref-note" style="color:#B33333;">${escapeHtml(loyalty.message)}</div>` : ""}
       </div>
       ${account ? `<div style="margin-top:16px;padding:24px;background:linear-gradient(135deg,#1e473e,#294c44 55%,#19362f);border-radius:20px;color:#f9f4e8;box-shadow:0 14px 30px rgba(30,71,62,.18);"><div style="font-size:10px;font-weight:800;letter-spacing:.15em;color:#b7d2bb;">SHIZUKU LAB · MEMBER</div><div class="display" style="font-size:25px;margin-top:9px;color:#f9f4e8;">Shizuku Club</div>${pointsMode ? `<div style="font:700 48px/1 Georgia,serif;margin:24px 0 8px;">${value} <span style="font:600 15px/1 inherit;color:#cce0ca;">points</span></div><div style="height:9px;background:rgba(255,255,255,.2);border-radius:99px;margin:18px 0;overflow:hidden;"><div style="height:100%;width:${progress}%;background:#cae4b3;border-radius:99px;"></div></div><div style="font-size:12px;color:#d6e4d4;">Current balance: <b>${value} points</b></div>` : `<div style="margin:22px 0 17px;display:grid;grid-template-columns:repeat(5,1fr);gap:8px;">${dots}</div><div style="font-size:12px;color:#d6e4d4;">Current balance: <b>${value} stamps</b></div>`}<div style="border-top:1px solid rgba(255,255,255,.2);margin:20px 0 16px;"></div><div style="font-size:10px;font-weight:800;letter-spacing:.12em;color:#b7d2bb;">NEXT REWARD</div><div style="font-size:15px;font-weight:700;margin-top:6px;">${escapeHtml(account.reward_description || "A free drink is on us.")}</div><div style="margin-top:15px;font-size:13px;color:#d6e4d4;">Rewards ready: <b style="color:#fff;">${Number(account.rewards_available || 0)}</b></div>${history.length ? `<div style="border-top:1px solid rgba(255,255,255,.2);margin:20px 0 12px;"></div><div style="font-size:10px;font-weight:800;letter-spacing:.12em;color:#b7d2bb;margin-bottom:7px;">RECENT ACTIVITY</div>${history.slice(0,8).map((item) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:12px;color:#f9f4e8;"><span><b>+${escapeHtml(item.amount)}</b> — Order ${escapeHtml(item.order_number)}</span><span style="color:#b7d2bb;white-space:nowrap;">${new Date(item.created_at).toLocaleDateString("en-SG", { day:"numeric", month:"short" })}</span></div>`).join("")}` : ""}</div>` : ""}
-      ${state.market === "SG" && loyalty.referral ? `<div class="summary-card" style="margin-top:16px;"><div class="display" style="font-size:22px;">Refer a friend</div><p style="line-height:1.5;margin:8px 0 15px;">Share your code. Your friend gets SGD $1 off their first drink order. Once their payment is confirmed, you get SGD $1 off a future order too.</p><div class="slot" style="justify-content:space-between;"><b style="letter-spacing:.1em;">${escapeHtml(loyalty.referral.share_code || loyalty.referral.code)}</b><span>${Number(loyalty.referral.successful||0)} successful</span></div>${loyalty.referral.share_mode === "instagram" ? `<div class="hint" style="text-align:left;margin-top:7px;">System code also works: ${escapeHtml(loyalty.referral.code)}</div>` : ""}<p style="margin:12px 0;">Your available referral credits: <b>${Number(loyalty.referral.available||0)} × SGD $1</b></p><button class="primary-btn" onclick="shareReferralCode()">Share referral link</button><button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="copyReferralCode()">Copy code only</button><div class="hint" style="text-align:left;margin-top:10px;">To use your earned credit, enter your own code at checkout with the same phone number. One credit per order; it cannot be combined with another promo or Partner pricing.</div></div>` : ""}
+      ${state.market === "SG" && loyalty.referral ? `<div class="summary-card" style="margin-top:16px;"><div class="display" style="font-size:22px;">Refer a friend · both get SGD $1</div><p style="line-height:1.5;margin:8px 0 15px;">Send your link or code to a friend. At checkout, they open <b>Promo / Referral code</b>, choose <b>Referral code</b> and apply it to their first drink order. They save SGD $1; you earn SGD $1 credit after their payment is confirmed.</p><div class="slot" style="justify-content:space-between;"><b style="letter-spacing:.1em;">${escapeHtml(loyalty.referral.share_code || loyalty.referral.code)}</b><span>${Number(loyalty.referral.successful||0)} successful</span></div>${loyalty.referral.share_mode === "instagram" ? `<div class="hint" style="text-align:left;margin-top:7px;">System code also works: ${escapeHtml(loyalty.referral.code)}</div>` : ""}<p style="margin:12px 0;">Your available referral credits: <b>${Number(loyalty.referral.available||0)} × SGD $1</b></p><button class="primary-btn" onclick="shareReferralCode()">Share referral link</button><button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="copyReferralCode()">Copy code only</button><div class="hint" style="text-align:left;margin-top:10px;">To use your earned credit, enter your own code at checkout with the same phone number. One credit per order; it cannot be combined with another promo or Partner pricing.</div></div>` : state.market === "SG" ? `<div class="summary-card" style="margin-top:16px;"><div class="display" style="font-size:20px;">Refer a friend</div><p style="line-height:1.5;margin:8px 0 0;">Enter your order phone number above to see your personal referral link and code. Share either with a friend; you both get SGD $1 when their first drink order is confirmed.</p></div>` : ""}
     </div>`;
 }
 
