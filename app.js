@@ -448,7 +448,7 @@ function nextCollectionCard(collections) {
 function customerStoreActions() {
   const actions = [
     partnerFeatureEnabled("track_order") ? `<button type="button" class="customer-store-action" onclick="setScreen('track')"><span><strong>Track order</strong><small>Phone number or order number</small></span><span aria-hidden="true">→</span></button>` : "",
-    partnerFeatureEnabled("rewards") ? `<button type="button" class="customer-store-action" onclick="setScreen('loyalty')"><span><strong>Rewards</strong><small>Use phone number</small></span><span aria-hidden="true">→</span></button>` : "",
+    partnerFeatureEnabled("rewards") ? `<button type="button" class="customer-store-action" onclick="setScreen('loyalty')"><span><strong>Rewards & referrals</strong><small>Use phone number</small></span><span aria-hidden="true">→</span></button>` : "",
   ].filter(Boolean);
   return actions.length ? `<nav class="customer-store-actions" aria-label="Customer tools">${actions.join("")}</nav>` : "";
 }
@@ -1135,17 +1135,30 @@ async function loadCustomerStockLevels() {
   }
   state.stockLevels = Object.fromEntries((data || []).map((row) => [String(row.product_id), Number(row.available_quantity)]));
 }
+let customerMenuRefreshInFlight = false;
+async function refreshCustomerMenuData() {
+  if (customerMenuRefreshInFlight) return;
+  customerMenuRefreshInFlight = true;
+  try {
+    await loadCustomerStockLevels();
+    // Product order can change in Admin while this customer tab remains open.
+    if (state.screen === "menu") await loadProducts();
+    if (["menu", "options", "bundle", "cart"].includes(state.screen)) render();
+  } catch (error) {
+    console.warn("Could not refresh the customer menu:", error?.message || error);
+  } finally {
+    customerMenuRefreshInFlight = false;
+  }
+}
 function startStockRefresh() {
   if (stockRefreshTimer || !IS_CONFIGURED) return;
-  stockRefreshTimer = setInterval(async () => {
+  stockRefreshTimer = setInterval(() => {
     if (document.visibilityState !== "visible") return;
-    await loadCustomerStockLevels();
-    if (state.screen === "menu" || state.screen === "options" || state.screen === "bundle" || state.screen === "cart") render();
+    refreshCustomerMenuData();
   }, 30000);
-  document.addEventListener("visibilitychange", async () => {
+  document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
-    await loadCustomerStockLevels();
-    if (state.screen === "menu" || state.screen === "options" || state.screen === "bundle" || state.screen === "cart") render();
+    refreshCustomerMenuData();
   });
 }
 async function loadProductGroups() {
