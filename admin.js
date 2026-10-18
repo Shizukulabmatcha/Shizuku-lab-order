@@ -57,6 +57,7 @@ const astate = {
   expandedPromoCode: null,
   editingPromoId: null,
   customerNotes: {},
+  referralCodes: [],
   loyaltySettings: null,
   loyaltyDraft: null,
   customerLoyalty: {},
@@ -504,8 +505,12 @@ async function loadAll(options = {}) {
         const passResult = await db.rpc("admin_list_shizuku_matcha_passes", { p_search: "" });
         if (passResult.error && !/does not exist|schema cache|function/i.test(passResult.error.message || "")) console.warn("Could not load Matcha Passes:", passResult.error.message);
         astate.matchaPasses = Array.isArray(passResult.data) ? passResult.data : [];
+        const referralResult = await db.rpc("admin_list_shizuku_referrals");
+        if (referralResult.error && !/does not exist|schema cache|function/i.test(referralResult.error.message || "")) console.warn("Could not load referrals:", referralResult.error.message);
+        astate.referralCodes = Array.isArray(referralResult.data) ? referralResult.data : [];
       } else {
         astate.matchaPasses = [];
+        astate.referralCodes = [];
       }
       astate.notificationSettings = notificationSettings || { id: 1, recipient_email: "", webhook_url: "", enabled: false, alert_new_order: true, alert_payment_proof: true, alert_live_chat: true };
       astate.notificationDraft = { ...astate.notificationSettings };
@@ -1790,7 +1795,7 @@ function dashboardStats() {
   const allSales = paid.filter((order) => order.counts_as_sale !== false);
   const customerKeys = new Set(marketOrders.map((order) => String(order.customer_phone || order.instagram || order.customer_name || "").trim()).filter(Boolean));
   const missingRecipeProducts = new Map();
-  const foodCostFor = (orders) => orders.reduce((orderSum, order) => orderSum + (order.order_items || []).reduce((itemSum, item) => {
+  const foodCostFor = (orders) => orders.reduce((orderSum, order) => orderSum + (order.order_kind === "matcha_pass_redemption" ? 0 : (order.order_items || []).reduce((itemSum, item) => {
     const recipeRows = AdminMarketRules.recipesForProductMarket(astate.recipes, item.product_id, DASHBOARD_MARKET);
     const product = astate.menu.find((row) => String(row.id) === String(item.product_id))
       || astate.menu.find((row) => String(row.name) === String(item.product_name));
@@ -1799,7 +1804,7 @@ function dashboardStats() {
       if (id) missingRecipeProducts.set(String(id), { id, name: product?.name || item.product_name || "Unknown product" });
     }
     return itemSum + savedProductFoodCost(item.product_id, DASHBOARD_MARKET) * Number(item.quantity || 0);
-  }, 0), 0);
+  }, 0)), 0);
   const monthlyRevenue = monthlySales.reduce((sum, order) => sum + Number(order.total || 0), 0);
   const totalRevenue = allSales.reduce((sum, order) => sum + Number(order.total || 0), 0);
   const monthlyFoodCost = foodCostFor(monthlySales);
@@ -2231,7 +2236,7 @@ function analyticsSummary(orders,bounds) {
 }
 function analyticsProductRows(orders) {
   const rows=new Map();
-  orders.forEach(order=>(order.order_items||[]).forEach(item=>{const key=String(item.product_id||item.product_name||"unknown"),row=rows.get(key)||{name:item.product_name||"Unnamed product",quantity:0,sales:0,cost:0};const quantity=Number(item.quantity||0);row.quantity+=quantity;row.sales+=Number(item.subtotal||Number(item.unit_price||0)*quantity);row.cost+=savedProductFoodCost(item.product_id,DASHBOARD_MARKET)*quantity;rows.set(key,row);}));
+  orders.forEach(order=>(order.order_items||[]).forEach(item=>{const key=String(item.product_id||item.product_name||"unknown"),row=rows.get(key)||{name:item.product_name||"Unnamed product",quantity:0,sales:0,cost:0};const quantity=Number(item.quantity||0);row.quantity+=quantity;row.sales+=Number(item.subtotal||Number(item.unit_price||0)*quantity);if(order.order_kind!=="matcha_pass_redemption")row.cost+=savedProductFoodCost(item.product_id,DASHBOARD_MARKET)*quantity;rows.set(key,row);}));
   return [...rows.values()].map(row=>({...row,profit:row.sales-row.cost,margin:row.sales>0?(row.sales-row.cost)/row.sales*100:0})).sort((a,b)=>b.sales-a.sales);
 }
 function exportAnalyticsExcel() {
@@ -2515,8 +2520,8 @@ async function saveOfflineOrder() {
 function salesOrders() {
   return ordersForMarket(DASHBOARD_MARKET).filter((order)=>order.payment_status==="paid"&&order.order_status!=="cancelled"&&order.counts_as_sale!==false&&(!astate.salesFrom||String(order.collection_date||"")>=astate.salesFrom)&&(!astate.salesTo||String(order.collection_date||"")<=astate.salesTo));
 }
-function orderFoodCost(order) { return (order.order_items || []).reduce((sum, item) => sum + savedProductFoodCost(item.product_id, DASHBOARD_MARKET) * Number(item.quantity || 0), 0); }
-function salesReportRows() { return salesOrders().map((o)=>{const sales=Number(o.total||0),foodCost=orderFoodCost(o),profit=sales-foodCost,margin=sales>0?profit/sales*100:0;return [o.order_number,o.collection_date,o.collection_time,o.customer_name,o.is_offline?"Offline":"Online",o.is_offline?offlineReasonLabel(o.offline_reason):"Customer order",sales.toFixed(2),foodCost.toFixed(2),profit.toFixed(2),`${margin.toFixed(1)}%`,ORDER_LABEL[o.order_status]||o.order_status];}); }
+function orderFoodCost(order) { return order.order_kind === "matcha_pass_redemption" ? 0 : (order.order_items || []).reduce((sum, item) => sum + savedProductFoodCost(item.product_id, DASHBOARD_MARKET) * Number(item.quantity || 0), 0); }
+function salesReportRows() { return salesOrders().map((o)=>{const sales=Number(o.total||0),foodCost=orderFoodCost(o),profit=sales-foodCost,margin=sales>0?profit/sales*100:0;const type=o.order_kind==="matcha_pass_redemption"?"Matcha Pass redemption · cost covered by Pass":o.order_kind==="matcha_pass_purchase"?"Matcha Pass purchase":o.is_offline?offlineReasonLabel(o.offline_reason):"Customer order";return [o.order_number,o.collection_date,o.collection_time,o.customer_name,o.is_offline?"Offline":"Online",type,sales.toFixed(2),foodCost.toFixed(2),profit.toFixed(2),`${margin.toFixed(1)}%`,ORDER_LABEL[o.order_status]||o.order_status];}); }
 function salesFileName(ext){return `shizuku-sales-${astate.salesFrom||"all"}-to-${astate.salesTo||"today"}.${ext}`;}
 function salesReportHeadings(){const currency=DASHBOARD_MARKET==="MY"?"MYR":"SGD";return ["Order","Date","Time","Customer","Channel","Type",`Sales (${currency})`, `Food cost (${currency})`, `Gross profit (${currency})`,"Margin","Status"];}
 function downloadSalesExcel(){const headings=salesReportHeadings();const orders=salesOrders(),sales=orders.reduce((sum,o)=>sum+Number(o.total||0),0),cost=orders.reduce((sum,o)=>sum+orderFoodCost(o),0),profit=sales-cost,margin=sales>0?profit/sales*100:0;const table=`<table><tr>${headings.map(x=>`<th>${x}</th>`).join("")}</tr>${salesReportRows().map(row=>`<tr>${row.map(x=>`<td>${escapeHtml(x)}</td>`).join("")}</tr>`).join("")}<tr><th colspan="6">TOTAL</th><th>${sales.toFixed(2)}</th><th>${cost.toFixed(2)}</th><th>${profit.toFixed(2)}</th><th>${margin.toFixed(1)}%</th><th></th></tr></table>`;const blob=new Blob([`<html><head><meta charset="utf-8"></head><body>${table}</body></html>`],{type:"application/vnd.ms-excel"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=salesFileName("xls");a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
@@ -4755,6 +4760,48 @@ renderCustomersTab = function () {
   return `<div class="customers-page">${AdminSection("Customers",`<div class="ui-toolbar"><input type="search" placeholder="Search name or phone" value="${escapeHtml(astate.customerSearch||"")}" oninput="astate.customerSearch=this.value" onchange="render()"></div><div class="customer-list">${rows||EmptyState("No customers match this search.")}</div>`,`${list.length} of ${all.length} customers · tap a customer to view details`)}${drawer}</div>`;
 };
 
+function customerReferralEditor(customer) {
+  if (DASHBOARD_MARKET !== "SG") return "";
+  const phone = canonicalCustomerPhone(customer.phone, "SG");
+  if (!phone) return "";
+  const referral = (astate.referralCodes || []).find((item) => item.owner_phone === phone);
+  const paid = customer.orders.some((order) => order.payment_status === "paid" && order.order_status !== "cancelled" && order.deleted_at == null);
+  return `<div class="divider" style="margin:20px 0 12px"></div><b>Refer a friend · SGD $1</b>
+    <div class="hint" style="text-align:left;margin:8px 0 14px">Choose what this customer shares. Both their system code and Instagram name will work at checkout; the selected one appears in Rewards.</div>
+    ${referral ? `<div class="ref-note">System code: <b>${escapeHtml(referral.code)}</b></div>` : ""}
+    <div class="field"><label>Instagram referral name</label><input id="customer-referral-alias" value="${escapeHtml(referral?.instagram_alias || customer.instagram || "")}" placeholder="e.g. shizukulab.matcha" autocomplete="off"></div>
+    <div class="field"><label>Share as</label><select id="customer-referral-mode"><option value="code" ${referral?.share_mode !== "instagram" ? "selected" : ""}>System code (SHZ…)</option><option value="instagram" ${referral?.share_mode === "instagram" ? "selected" : ""}>Instagram name (@…)</option></select></div>
+    <button class="btn-secondary" style="width:100%" data-phone="${escapeHtml(phone)}" onclick="saveCustomerReferral(this.dataset.phone)" ${paid ? "" : "disabled"}>Save referral setting</button>
+    ${paid ? "" : `<div class="hint" style="text-align:left;margin-top:7px">Available after this customer's first Singapore order is paid.</div>`}`;
+}
+
+async function saveCustomerReferral(phone) {
+  if (!db || !phone || DASHBOARD_MARKET !== "SG") return;
+  const alias = String(document.getElementById("customer-referral-alias")?.value || "").trim();
+  const mode = document.getElementById("customer-referral-mode")?.value || "code";
+  const button = document.querySelector('button[data-phone="' + phone + '"]');
+  if (button) { button.disabled = true; button.textContent = "Saving…"; }
+  const { data, error } = await db.rpc("admin_set_shizuku_referral", {
+    p_phone: phone, p_instagram_alias: alias, p_share_mode: mode,
+  });
+  if (error) {
+    if (button) { button.disabled = false; button.textContent = "Save referral setting"; }
+    alert("Could not save referral: " + error.message);
+    return;
+  }
+  astate.referralCodes = [...(astate.referralCodes || []).filter((item) => item.owner_phone !== phone), data];
+  render();
+  alert("Referral setting saved. The customer will see it in Rewards.");
+}
+
+const renderCustomersTabWithoutReferral = renderCustomersTab;
+renderCustomersTab = function () {
+  const html = renderCustomersTabWithoutReferral();
+  const selected = customers().find((customer) => String(customer.key) === String(astate.customerDetailKey || ""));
+  if (!selected) return html;
+  return html.replace('<div class="field"><label>Private remark', `${customerReferralEditor(selected)}<div class="field"><label>Private remark`);
+};
+
 const renderMarketingTabBeforeSimplification = renderMarketingTab;
 renderMarketingTab = function () {
   const section = astate.marketingSection || "contacts";
@@ -4882,7 +4929,7 @@ renderAnalyticsReportTab = function () {
   const summary=`<div class="analytics-kpi-grid">${AdminCard("Total collected",money(financials.collected),`${periodOrders.length} paid sale${periodOrders.length===1?"":"s"}`)}${AdminCard("Product sales",money(financials.sales),"Delivery excluded")}${AdminCard("Gross profit",money(financials.profit),"Sales minus direct cost")}${AdminCard("Gross margin",`${financials.margin.toFixed(1)}%`,periodLabel)}</div>`;
   const topRows=top.map((product,index)=>`<div class="analytics-rank-row"><span class="analytics-rank">${index+1}</span><div><b>${escapeHtml(product.name)}</b><small>${product.quantity} sold · ${product.margin.toFixed(1)}% margin</small></div><strong>${money(product.sales)}</strong></div>`).join("")||EmptyState("No paid product sales yet.");
   const trend=`<div class="analytics-chart-head" style="padding:14px 0"><div><b>${escapeHtml(periodLabel)} sales</b><div class="hint" style="margin:4px 0 0">Normal store paid revenue only</div></div><div class="analytics-chart-range"><div class="field"><label>From</label><input type="date" value="${escapeHtml(period==="custom"?astate.analyticsFrom:(bounds.from?localDateKey(bounds.from):""))}" onchange="setAnalyticsRangeField('analyticsFrom',this.value)"></div><div class="field"><label>To</label><input type="date" value="${escapeHtml(period==="custom"?astate.analyticsTo:(bounds.to?localDateKey(bounds.to):""))}" onchange="setAnalyticsRangeField('analyticsTo',this.value)"></div></div></div><div class="analytics-bars">${days.map((day)=>`<div class="analytics-bar-column"><div class="analytics-bar-value">${day.total?money(day.total):"—"}</div><div class="analytics-bar-track"><i style="height:${day.total?Math.max(8,Math.round(day.total/highest*100)):2}%"></i></div><b>${day.label}</b></div>`).join("")}</div>`;
-  const details=`<div class="ui-kpi-grid">${AdminCard("Direct product cost",money(financials.cost),"Saved recipe + packaging")}${AdminCard("Average order",money(average),"Paid normal orders")}${AdminCard("Inventory purchases",money(financials.cashExpenses),"Shown separately")}${AdminCard("Cash after purchases",money(financials.cashAfterPurchases),"Collected minus purchases")}${AdminCard("Delivery fees",money(financials.delivery),"Collected from customers")}${AdminCard("Repeat customers",`${repeatRate.toFixed(1)}%`,`${insights.repeat.length} customers`)}</div>${stats.missingRecipeProducts.length?`<div class="ref-note"><b>${stats.missingRecipeProducts.length} product cost warning(s)</b><br>${stats.missingRecipeProducts.map((product)=>escapeHtml(product.name)).join(", ")}</div>`:""}`;
+  const details=`<div class="ui-kpi-grid">${AdminCard("Direct product cost",money(financials.cost),"Saved recipe + packaging")}${AdminCard("Average order",money(average),"Paid normal orders")}${AdminCard("Inventory purchases",money(financials.cashExpenses),"Shown separately")}${AdminCard("Cash after purchases",money(financials.cashAfterPurchases),"Collected minus purchases")}${AdminCard("Delivery fees",money(financials.delivery),"Collected from customers")}${AdminCard("Repeat customers",`${repeatRate.toFixed(1)}%`,`${insights.repeat.length} customers`)}</div><div class="ref-note">Matcha Pass recipe cost is counted when the Pass is sold. Its $0 redemption drinks are fulfilment of that Pass, so their recipe cost is not charged a second time in profit. Inventory usage is still tracked when the drinks are prepared.</div>${stats.missingRecipeProducts.length?`<div class="ref-note"><b>${stats.missingRecipeProducts.length} product cost warning(s)</b><br>${stats.missingRecipeProducts.map((product)=>escapeHtml(product.name)).join(", ")}</div>`:""}`;
   const productTable=AdminTable(["Product","Units","Sales","Direct cost","Gross profit","Margin"],products.map((product)=>`<tr><td><b>${escapeHtml(product.name)}</b></td><td>${product.quantity}</td><td>${money(product.sales)}</td><td>${money(product.cost)}</td><td><b>${money(product.profit)}</b></td><td>${product.margin.toFixed(1)}%</td></tr>`).join(""),"No paid product sales in this date range.");
   return `<div class="analytics-compact-page">${toolbar}${summary}<div class="ui-two-column">${AdminSection("Top drinks",topRows,`${periodLabel} · ranked by sales`)}${AdminSection("Customer snapshot",`<div class="analytics-breakdown"><div><span>Total customers</span><b>${stats.customers}</b></div><div><span>Repeat customers</span><b>${insights.repeat.length}</b></div><div><span>New this month</span><b>${insights.newThisMonth.length}</b></div><div><span>Top customer</span><b>${escapeHtml(insights.top?.name||"—")}</b></div></div>`,"Normal store customers")}</div>${Accordion("Sales trend & date range",trend,false,`${periodLabel} · ${periodOrders.length} paid sales`)}${Accordion("Cost, cash and customer details",details,false,"Open for the full breakdown")}${Accordion("Product profitability",productTable,false,`${products.length} products in this period`)}</div>`;
 };
