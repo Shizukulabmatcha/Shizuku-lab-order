@@ -69,6 +69,9 @@ const astate = {
   matchaPassSearch: "",
   selectedMatchaPassId: null,
   matchaPassSaving: false,
+  matchaPassAdminProductId: "",
+  matchaPassAdminTopUpPaid: false,
+  matchaPassAdminRequestKey: "",
   notificationSettings: null,
   notificationDraft: null,
   promoDraft: { code: "", discount_type: "fixed", discount_value: "", minimum_spend: "", usage_limit: "", valid_until: "", applicable_product_ids: [] },
@@ -3239,7 +3242,7 @@ function sendOrderWhatsApp(orderId) {
 function matchaPassRemaining(pass) { return Math.max(0, Number(pass?.remaining_credits ?? (Number(pass?.total_drinks || 4) - Number(pass?.redeemed_drinks || 0)))); }
 function matchaPassReserved(pass) { return Math.max(0, Number(pass?.reserved_credits || 0)); }
 function matchaPassDate(value) { return value ? new Date(value).toLocaleDateString("en-SG", { day:"numeric", month:"short", year:"numeric" }) : "—"; }
-function selectMatchaPass(id) { astate.selectedMatchaPassId = String(id); render(); }
+function selectMatchaPass(id) { astate.selectedMatchaPassId = String(id); astate.matchaPassAdminProductId = ""; astate.matchaPassAdminTopUpPaid = false; astate.matchaPassAdminRequestKey = ""; render(); }
 async function refreshMatchaPasses(search = astate.matchaPassSearch) {
   if (DASHBOARD_MARKET !== "SG" || !IS_CONFIGURED) return;
   astate.matchaPassSearch = String(search || "");
@@ -3284,6 +3287,52 @@ async function resendMatchaPassEmail(passId) {
   if (error || data?.ok === false) return alert("Could not queue Matcha Pass email: " + (error?.message || data?.error || "Unknown error"));
   alert(data?.queued ? "Matcha Pass email queued. Check Notification delivery log for the Gmail result." : "Email was not queued. Check Notification delivery log.");
 }
+function matchaPassAdminDrinkChoices(pass) {
+  const passProduct = astate.menu.find((item) => String(item.id) === String(pass?.product_id));
+  const allowed = Array.isArray(passProduct?.bundle_product_ids) ? passProduct.bundle_product_ids.map(String) : [];
+  return astate.menu.filter((item) => item.is_available === true && !item.is_bundle && !item.is_b2b
+    && Number(item.ritual_validity_weeks || 0) <= 0 && (!allowed.length || allowed.includes(String(item.id))));
+}
+function matchaPassAdminTopUp(pass, drink) {
+  const passProduct = astate.menu.find((item) => String(item.id) === String(pass?.product_id));
+  const overrides = passProduct?.bundle_option_prices || {};
+  return Object.prototype.hasOwnProperty.call(overrides, String(drink?.id))
+    ? Math.max(0, Number(overrides[String(drink.id)]) || 0) : defaultMatchaPassTopUpAdmin(drink);
+}
+async function adminRedeemMatchaPass(passId) {
+  if (astate.matchaPassSaving) return;
+  const pass = astate.matchaPasses.find((row) => String(row.id) === String(passId));
+  const productId = document.getElementById("matcha-pass-admin-drink")?.value;
+  const drink = matchaPassAdminDrinkChoices(pass).find((item) => String(item.id) === String(productId));
+  if (!pass || !drink) return alert("Choose an eligible drink first.");
+  const topUp = matchaPassAdminTopUp(pass, drink);
+  const topUpPaid = Boolean(document.getElementById("matcha-pass-admin-topup-paid")?.checked);
+  if (topUp > 0 && !topUpPaid) return alert(`Confirm the ${money(topUp)} top-up has been paid first.`);
+  if (!confirm(`Redeem ${drink.name} for ${pass.customer_name || "this customer"} now? One Pass credit will be deducted. No customer email will be sent unless you click Send email notification afterwards.`)) return;
+  astate.matchaPassAdminRequestKey ||= crypto.randomUUID();
+  astate.matchaPassSaving = true; render();
+  const { data, error } = await db.rpc("admin_redeem_shizuku_matcha_pass", {
+    p_pass_id: passId, p_product_id: String(drink.id),
+    p_idempotency_key: astate.matchaPassAdminRequestKey, p_top_up_paid: topUpPaid
+  });
+  astate.matchaPassSaving = false;
+  if (error || data?.ok === false) { render(); return alert("Could not redeem this drink: " + (error?.message || data?.error || "Unknown error")); }
+  astate.matchaPassAdminRequestKey = "";
+  astate.matchaPassAdminProductId = "";
+  astate.matchaPassAdminTopUpPaid = false;
+  await refreshMatchaPasses();
+  alert(`${data?.duplicate ? "Already redeemed" : "Redeemed"}: ${drink.name}. ${data?.remaining ?? "—"} credit(s) remain. No customer email was sent. Use Send email notification beside this drink if needed.`);
+}
+async function sendMatchaPassRedemptionEmail(orderId) {
+  if (astate.matchaPassSaving) return;
+  if (!confirm("Send the Matcha Pass redemption email to this customer now?")) return;
+  astate.matchaPassSaving = true; render();
+  const { data, error } = await db.rpc("admin_send_matcha_pass_redemption_email", { p_order_id: Number(orderId) });
+  astate.matchaPassSaving = false;
+  if (error || data?.ok === false) { render(); return alert("Could not queue customer email: " + (error?.message || data?.error || "Unknown error")); }
+  await refreshMatchaPasses();
+  alert(data?.queued ? "Customer email queued. Check Notifications → Delivery Log for delivery status." : `Email status: ${data?.status || "unknown"}. Check Notifications → Delivery Log.`);
+}
 function renderMatchaPassesTab() {
   if (DASHBOARD_MARKET !== "SG") return `<div class="empty">Matcha Pass is available only in the Singapore store.</div>`;
   const ritual = astate.menu.find((item) => Number(item.ritual_validity_weeks || 0) > 0) || null;
@@ -3292,17 +3341,23 @@ function renderMatchaPassesTab() {
   if (selected && !astate.selectedMatchaPassId) astate.selectedMatchaPassId = String(selected.id);
   const list = passes.map((pass) => `<button class="queue-row queue-row-button" onclick="selectMatchaPass('${escapeHtml(pass.id)}')"><div class="queue-top"><div><b>${escapeHtml(pass.customer_name || "Customer")}</b><div class="queue-name">${escapeHtml(pass.customer_phone || "—")} · ${escapeHtml(pass.pass_code || "")}</div></div><span class="queue-status">${escapeHtml(pass.status || "active")}</span></div><div class="queue-top"><span>${matchaPassRemaining(pass)} / ${Number(pass.total_drinks || 4)} remaining${matchaPassReserved(pass) ? ` · ${matchaPassReserved(pass)} reserved` : ""}</span><span>Expires ${escapeHtml(matchaPassDate(pass.expires_at))}</span></div></button>`).join("");
   const redemptions = selected?.redemptions || [];
+  const adminChoices = selected ? matchaPassAdminDrinkChoices(selected) : [];
+  const selectedAdminDrink = adminChoices.find((item) => String(item.id) === String(astate.matchaPassAdminProductId)) || adminChoices[0];
+  const selectedTopUp = selectedAdminDrink ? matchaPassAdminTopUp(selected, selectedAdminDrink) : 0;
   const positions = selected ? Array.from({length:Number(selected.total_drinks || 4)}, (_, index) => {
     const item = redemptions.find((row) => Number(row.redemption_number || row.credit_position) === index + 1);
     const suffix = index === 0 ? "st" : index === 1 ? "nd" : index === 2 ? "rd" : "th";
     const itemStatus = String(item?.status || "");
     const statusLabel = itemStatus === "collected" ? "Collected" : itemStatus === "ready" ? "Ready · credit reserved" : item ? "Reserved · deducts on collection" : "Available";
-    return `<div class="row" style="padding:11px 0"><span><b>${index + 1}${suffix} drink</b>${item ? `<br><small>${escapeHtml(item.product_name || "Drink")} · ${escapeHtml(item.collection_date || "")} ${escapeHtml(item.collection_time || "")}<br>${item.order_id ? `Order ${escapeHtml(item.order_id)} · ` : ""}${escapeHtml(statusLabel)}</small>` : `<br><small>Available</small>`}</span><b>${itemStatus === "collected" ? (Number(item.pass_top_up || 0) ? `✓ +${money(item.pass_top_up)}` : "✓ Claimed") : item ? "Reserved" : "○"}</b></div>`;
+    return `<div class="row" style="padding:11px 0"><span><b>${index + 1}${suffix} drink</b>${item ? `<br><small>${escapeHtml(item.product_name || "Drink")} · ${escapeHtml(item.collection_date || "")} ${escapeHtml(item.collection_time || "")}<br>${item.order_id ? `Order ${escapeHtml(item.order_id)} · ` : ""}${escapeHtml(statusLabel)}</small>${item.admin_redeemed && itemStatus === "collected" ? `<br><small>Redeemed in Admin · Customer email: ${escapeHtml(item.notification_status || "not sent")}</small><br><button class="btn-secondary" style="margin-top:7px" ${astate.matchaPassSaving || !selected.customer_email || item.notification_status ? "disabled" : ""} onclick="sendMatchaPassRedemptionEmail('${escapeHtml(item.order_id)}')">Send email notification</button>` : ""}` : `<br><small>Available</small>`}</span><b>${itemStatus === "collected" ? (Number(item.pass_top_up || 0) ? `✓ +${money(item.pass_top_up)}` : "✓ Claimed") : item ? "Reserved" : "○"}</b></div>`;
   }).join("") : "";
+  const adminRedeemCard = selected && selected.status === "active" && Number(selected.available_credits ?? (matchaPassRemaining(selected) - matchaPassReserved(selected))) > 0
+    ? `<div class="ref-note" style="margin:16px 0;text-align:left"><b>Redeem for customer in Admin</b><br>Choose one drink to collect now. One credit is deducted immediately. Customer email is not sent automatically.</div><div class="field"><label>Drink</label><select id="matcha-pass-admin-drink" onchange="astate.matchaPassAdminProductId=this.value;astate.matchaPassAdminTopUpPaid=false;render()">${adminChoices.map((drink) => `<option value="${escapeHtml(drink.id)}" ${String(drink.id) === String(selectedAdminDrink?.id) ? "selected" : ""}>${escapeHtml(drink.name)} · ${money(matchaPassAdminTopUp(selected, drink))} top-up</option>`).join("")}</select></div>${selectedTopUp > 0 ? `<label class="slot" style="margin:10px 0"><input id="matcha-pass-admin-topup-paid" type="checkbox" style="width:auto" ${astate.matchaPassAdminTopUpPaid ? "checked" : ""} onchange="astate.matchaPassAdminTopUpPaid=this.checked"><span>SGD ${selectedTopUp.toFixed(2)} top-up received</span></label>` : ""}<button class="btn-primary" ${astate.matchaPassSaving || !adminChoices.length ? "disabled" : ""} onclick="adminRedeemMatchaPass('${escapeHtml(selected.id)}')">Redeem 1 drink in store</button>`
+    : "";
   const settingsCard = `<section class="dashboard-card" style="padding:18px 20px;margin-bottom:18px"><div class="dashboard-card-head" style="padding:0 0 15px"><div><h2>Matcha Pass setup</h2><span>Customer banner and purchase rules</span></div>${ritual?`<button class="btn-primary" data-edit-matcha-pass="${escapeHtml(String(ritual.id))}">Edit Matcha Pass</button>`:""}</div>${ritual?`<div class="matcha-pass-admin-summary"><img src="${escapeHtml(ritual.image_url||"matcha-latte.jpg")}" alt=""><div><b>${escapeHtml(ritual.name||"Matcha Pass")}</b><p>${escapeHtml(ritual.description||"")}</p><div class="btn-row" style="justify-content:flex-start"><span class="queue-status">${money(ritual.price)}</span><span class="queue-status">${Number(ritual.bundle_selection_count||4)} drinks</span><span class="queue-status">${Number(ritual.ritual_validity_weeks||3)} weeks</span><span class="queue-status">${ritual.is_available!==false?"Shown on customer store":"Hidden from customer store"}</span></div></div></div>`:`<div class="dashboard-empty">The existing Matcha Pass setup could not be found. Existing customer Pass records are unchanged.</div>`}<div class="hint" style="text-align:left;margin-top:12px">Manage the Pass name, price, drink count, validity, eligible drinks, banner image, title, description and store visibility here. Redemption records and validity logic remain unchanged.</div></section>`;
   return `${settingsCard}<section class="dashboard-card" style="padding:18px 20px;margin-bottom:18px"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><input aria-label="Search Matcha Passes" placeholder="Search customer, phone or Pass ID" value="${escapeHtml(astate.matchaPassSearch)}" oninput="astate.matchaPassSearch=this.value" onkeydown="if(event.key==='Enter')refreshMatchaPasses()" style="flex:1 1 320px;margin:0"><button class="btn-primary" onclick="refreshMatchaPasses()">Search</button><span class="hint" style="margin:0">${passes.length} pass${passes.length===1?"":"es"}</span></div></section>
   <div class="dashboard-grid"><section class="dashboard-card"><div class="dashboard-card-head"><h2>Matcha Passes</h2><span>Singapore only</span></div>${list || `<div class="dashboard-empty">No Matcha Passes found.</div>`}</section>
-  <section class="dashboard-card"><div class="dashboard-card-head"><h2>Pass detail</h2>${selected ? `<span>${escapeHtml(selected.pass_code || "")}</span>` : ""}</div>${selected ? `<div style="padding:20px"><div class="row"><span>Customer</span><b>${escapeHtml(selected.customer_name || "—")}</b></div><div class="row"><span>Phone</span><b>${escapeHtml(selected.customer_phone || "—")}</b></div><div class="row"><span>Email</span><b>${escapeHtml(selected.customer_email || "—")}</b></div><div class="divider"></div><div class="row"><span>Purchase order</span><b>${escapeHtml(selected.order_number || selected.order_id || "—")}</b></div><div class="row"><span>Purchase date</span><b>${escapeHtml(matchaPassDate(selected.purchased_at))}</b></div><div class="row"><span>Status</span><b>${escapeHtml(selected.status || "active")}</b></div><div class="row"><span>Credit balance</span><b>${matchaPassRemaining(selected)} of ${Number(selected.total_drinks || 4)} remaining${matchaPassReserved(selected) ? ` · ${matchaPassReserved(selected)} reserved` : ""}</b></div><div class="hint" style="text-align:left;margin:7px 0 0">Reserved credits are deducted only after the redemption order is marked Collected.</div><div class="divider"></div>${positions}<div class="divider"></div><div class="field"><label>Expiry date</label><input id="matcha-pass-expiry" type="date" value="${escapeHtml(String(selected.expires_at || "").slice(0,10))}"></div><button class="btn-secondary" ${astate.matchaPassSaving?"disabled":""} onclick="saveMatchaPassExpiry('${escapeHtml(selected.id)}')">Save expiry date</button><div class="field" style="margin-top:18px"><label>Remaining credits</label><input id="matcha-pass-credits" type="number" min="0" max="${Number(selected.total_drinks || 4)}" value="${matchaPassRemaining(selected)}"></div><div class="field"><label>Adjustment reason</label><input id="matcha-pass-reason" placeholder="Required for the audit log"></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn-secondary" ${astate.matchaPassSaving?"disabled":""} onclick="adjustMatchaPassCredits('${escapeHtml(selected.id)}')">Adjust credits</button><button class="btn-secondary" ${astate.matchaPassSaving||!selected.customer_email?"disabled":""} onclick="resendMatchaPassEmail('${escapeHtml(selected.id)}')">Resend pass email</button>${selected.status!=="cancelled"?`<button class="link-danger" ${astate.matchaPassSaving?"disabled":""} onclick="cancelMatchaPass('${escapeHtml(selected.id)}')">Cancel Pass</button>`:""}</div></div>` : `<div class="dashboard-empty">Choose a Matcha Pass to view it.</div>`}</section></div>`;
+  <section class="dashboard-card"><div class="dashboard-card-head"><h2>Pass detail</h2>${selected ? `<span>${escapeHtml(selected.pass_code || "")}</span>` : ""}</div>${selected ? `<div style="padding:20px"><div class="row"><span>Customer</span><b>${escapeHtml(selected.customer_name || "—")}</b></div><div class="row"><span>Phone</span><b>${escapeHtml(selected.customer_phone || "—")}</b></div><div class="row"><span>Email</span><b>${escapeHtml(selected.customer_email || "—")}</b></div><div class="divider"></div><div class="row"><span>Purchase order</span><b>${escapeHtml(selected.order_number || selected.order_id || "—")}</b></div><div class="row"><span>Purchase date</span><b>${escapeHtml(matchaPassDate(selected.purchased_at))}</b></div><div class="row"><span>Status</span><b>${escapeHtml(selected.status || "active")}</b></div><div class="row"><span>Credit balance</span><b>${matchaPassRemaining(selected)} of ${Number(selected.total_drinks || 4)} remaining${matchaPassReserved(selected) ? ` · ${matchaPassReserved(selected)} reserved` : ""}</b></div><div class="hint" style="text-align:left;margin:7px 0 0">Reserved credits are deducted only after the redemption order is marked Collected.</div><div class="divider"></div>${positions}<div class="divider"></div>${adminRedeemCard}<div class="divider"></div><div class="field"><label>Expiry date</label><input id="matcha-pass-expiry" type="date" value="${escapeHtml(String(selected.expires_at || "").slice(0,10))}"></div><button class="btn-secondary" ${astate.matchaPassSaving?"disabled":""} onclick="saveMatchaPassExpiry('${escapeHtml(selected.id)}')">Save expiry date</button><div class="field" style="margin-top:18px"><label>Remaining credits</label><input id="matcha-pass-credits" type="number" min="0" max="${Number(selected.total_drinks || 4)}" value="${matchaPassRemaining(selected)}"></div><div class="field"><label>Adjustment reason</label><input id="matcha-pass-reason" placeholder="Required for the audit log"></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn-secondary" ${astate.matchaPassSaving?"disabled":""} onclick="adjustMatchaPassCredits('${escapeHtml(selected.id)}')">Adjust credits</button><button class="btn-secondary" ${astate.matchaPassSaving||!selected.customer_email?"disabled":""} onclick="resendMatchaPassEmail('${escapeHtml(selected.id)}')">Resend pass email</button>${selected.status!=="cancelled"?`<button class="link-danger" ${astate.matchaPassSaving?"disabled":""} onclick="cancelMatchaPass('${escapeHtml(selected.id)}')">Cancel Pass</button>`:""}</div></div>` : `<div class="dashboard-empty">Choose a Matcha Pass to view it.</div>`}</section></div>`;
 }
 
 async function sendCustomerConfirmationEmail(orderId) {
