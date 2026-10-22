@@ -523,6 +523,9 @@ img{display:block;max-width:100%;}
 #app .pill:not(.active){background:color-mix(in srgb,var(--ink) 9%,var(--cream));color:var(--ink)}
 #app .pill.active,#app .primary-btn,#app .add-btn,#app .header-market-switch button.active{background:var(--matcha);color:var(--cream)}
 #app .stock-badge:not(.sold-out),#app .receipt-bundle-drink{background:var(--matcha-bg)}
+.welcome-page{background:radial-gradient(circle at 50% 10%,color-mix(in srgb,var(--card) 55%,var(--cream)),var(--cream) 68%)!important;color:var(--ink)!important}
+.welcome-page .welcome-logo-frame,.welcome-page .welcome-website,.welcome-page .welcome-tool{background:var(--card);color:var(--ink);border-color:var(--line)}
+.welcome-page .welcome-enter{background:var(--matcha);color:var(--cream)}
 .shop-admin .ui-theme-presets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 .shop-admin .ui-theme-preset{min-width:0;padding:8px;border:1px solid var(--admin-line);border-radius:12px;background:var(--admin-card);color:var(--admin-text);text-align:left;cursor:pointer}
 .shop-admin .ui-theme-preset.selected{border-color:var(--admin-primary);box-shadow:0 0 0 2px color-mix(in srgb,var(--admin-primary) 16%,transparent)}
