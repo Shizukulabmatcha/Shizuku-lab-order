@@ -537,7 +537,7 @@ img{display:block;max-width:100%;}
 .shop-admin .ui-theme-preset>strong,.shop-admin .ui-theme-preset>small{display:block;margin:8px 2px 0;line-height:1.3}
 .shop-admin .ui-theme-preset>small{margin-top:3px;color:var(--admin-muted)}
 .shop-admin{background:var(--admin-bg)!important;color:var(--admin-text)}
-.shop-admin .admin-side{background:color-mix(in srgb,var(--admin-card) 86%,var(--admin-bg))!important}
+.shop-admin.shop-admin .admin-side{background:color-mix(in srgb,var(--admin-card) 86%,var(--admin-bg))!important;color:var(--admin-text)!important}
 .shop-admin .admin-main,.shop-admin .ui-mini-card,.shop-admin .ui-form-section{color:var(--admin-text)}
 .shop-admin .ui-mini-preview button,.shop-admin .btn-primary{color:var(--admin-on-primary)}
 @media(max-width:780px){.shop-admin .ui-theme-presets{grid-template-columns:repeat(2,minmax(0,1fr))}}
