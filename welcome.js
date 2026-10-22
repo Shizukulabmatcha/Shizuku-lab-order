@@ -30,6 +30,13 @@
   try {
     const { data, error } = await db.from("store_settings").select("*").limit(1).maybeSingle();
     if (error || !data) return;
+    const palette = {
+      "--matcha": data.theme_primary_color || "#4B5D3A",
+      "--cream": data.theme_background_color || "#F3EEE3",
+      "--card": data.theme_card_color || "#FFFFFF",
+      "--ink": data.theme_text_color || "#2A2A22"
+    };
+    Object.entries(palette).forEach(([token, value]) => document.documentElement.style.setProperty(token, value));
     if (data.website_visibility === "hidden") {
       const safe = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
       document.body.className = "";
