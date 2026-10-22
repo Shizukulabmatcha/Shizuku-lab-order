@@ -513,3 +513,28 @@ img{display:block;max-width:100%;}
 #app .ordering-home-panel .customer-store-action small{font-size:11px;line-height:1.35}
 #app .ordering-home-panel .customer-store-action>span:last-child{font-size:17px}
 @media(max-width:390px){#app .ordering-home-panel .ritual-pass-banner{grid-template-columns:82px minmax(0,1fr)}#app .ordering-home-panel .ritual-pass-copy{padding:11px}#app .ordering-home-panel .ritual-pass-copy h2{font-size:21px}#app .ordering-home-panel .customer-store-action{min-height:68px;padding:10px}#app .ordering-home-panel .customer-store-action strong{font-size:14px}#app .ordering-home-panel .customer-store-action small{font-size:10px}}
+
+/* Complete colour themes: keep every surface readable when a palette is changed. */
+:root{--muted:color-mix(in srgb,var(--ink) 68%,var(--card));--faint:color-mix(in srgb,var(--ink) 48%,var(--cream));--line:color-mix(in srgb,var(--ink) 20%,var(--card));--matcha-bg:color-mix(in srgb,var(--matcha) 9%,var(--card))}
+#app .item-card,#app .gallery-card,#app .summary-card,#app .product-detail-card,#app .store-panel,#app .slot,#app .faq-section,#app .code-box,#app .review-write-card,#app .receipt-card{background-color:var(--card);color:var(--ink);border-color:var(--line)}
+#app .item-name,#app .item-name span,#app .gallery-card h3,#app .gallery-card p,#app .product-detail-card h2,#app .product-detail-card p{color:var(--ink)!important}
+#app .field input,#app .field textarea,#app .field select,#app .stepper,#app .code-box,#app .customer-store-action{background-color:var(--card);color:var(--ink);border-color:var(--line)}
+#app .sticky-bar:not(.floating-cart-bar){background:color-mix(in srgb,var(--cream) 95%,transparent)}
+#app .pill:not(.active){background:color-mix(in srgb,var(--ink) 9%,var(--cream));color:var(--ink)}
+#app .pill.active,#app .primary-btn,#app .add-btn,#app .header-market-switch button.active{background:var(--matcha);color:var(--cream)}
+#app .stock-badge:not(.sold-out),#app .receipt-bundle-drink{background:var(--matcha-bg)}
+.shop-admin .ui-theme-presets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.shop-admin .ui-theme-preset{min-width:0;padding:8px;border:1px solid var(--admin-line);border-radius:12px;background:var(--admin-card);color:var(--admin-text);text-align:left;cursor:pointer}
+.shop-admin .ui-theme-preset.selected{border-color:var(--admin-primary);box-shadow:0 0 0 2px color-mix(in srgb,var(--admin-primary) 16%,transparent)}
+.shop-admin .ui-theme-preset-sample{display:grid;gap:5px;min-height:112px;padding:10px;border-radius:8px;background:var(--preset-bg);color:var(--preset-text)}
+.shop-admin .ui-theme-preset-sample i{display:block;width:20px;height:5px;border-radius:4px;background:var(--preset-primary)}
+.shop-admin .ui-theme-preset-sample b{display:block;padding:5px;background:var(--preset-card);font-size:11px;font-style:normal}
+.shop-admin .ui-theme-preset-sample small{font-size:11px}
+.shop-admin .ui-theme-preset-sample em{justify-self:start;padding:4px 10px;border-radius:99px;background:var(--preset-primary);color:var(--preset-bg);font-size:10px;font-style:normal}
+.shop-admin .ui-theme-preset>strong,.shop-admin .ui-theme-preset>small{display:block;margin:8px 2px 0;line-height:1.3}
+.shop-admin .ui-theme-preset>small{margin-top:3px;color:var(--admin-muted)}
+.shop-admin{background:var(--admin-bg)!important;color:var(--admin-text)}
+.shop-admin .admin-side{background:color-mix(in srgb,var(--admin-card) 86%,var(--admin-bg))!important}
+.shop-admin .admin-main,.shop-admin .ui-mini-card,.shop-admin .ui-form-section{color:var(--admin-text)}
+.shop-admin .ui-mini-preview button,.shop-admin .btn-primary{color:var(--admin-on-primary)}
+@media(max-width:780px){.shop-admin .ui-theme-presets{grid-template-columns:repeat(2,minmax(0,1fr))}}
