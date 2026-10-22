@@ -4885,8 +4885,8 @@ function applyShizukuColourTheme(name) {
 }
 function shizukuColourThemePicker() {
   return FormSection("Complete themes", `<div class="ui-theme-presets">${Object.entries(SHIZUKU_COLOUR_THEMES).map(([key,theme]) => {
-    const selected = ["theme_primary_color","theme_background_color","theme_card_color","theme_text_color"].every((field,index) =>
-      String(astate.settingsDraft?.[field] || "").toLowerCase() === [theme.primary,theme.background,theme.card,theme.text][index].toLowerCase());
+    const selected = ["theme_primary_color","theme_background_color","theme_card_color","theme_text_color","admin_theme_primary","admin_theme_background","admin_theme_card","admin_theme_text"].every((field,index) =>
+      String(astate.settingsDraft?.[field] || "").toLowerCase() === [theme.primary,theme.background,theme.card,theme.text][index % 4].toLowerCase());
     return `<button type="button" class="ui-theme-preset ${selected ? "selected" : ""}" onclick="applyShizukuColourTheme('${key}')" aria-label="Preview ${escapeHtml(theme.label)} theme"><span class="ui-theme-preset-sample" style="--preset-bg:${theme.background};--preset-card:${theme.card};--preset-text:${theme.text};--preset-primary:${theme.primary}"><i></i><b>Matcha Latte</b><small>$5.90</small><em>Order</em></span><strong>${escapeHtml(theme.label)}${selected ? " ✓" : ""}</strong><small>${escapeHtml(theme.note)}</small></button>`;
   }).join("")}</div><p class="hint" style="text-align:left;margin:10px 0 0">A theme changes the customer shop and admin together: page, cards, words and buttons. Review the preview, then save.</p>`);
 }
