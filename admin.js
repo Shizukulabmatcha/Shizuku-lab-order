@@ -2454,8 +2454,11 @@ function adminMarketCollectionPoints(settings = astate.settings) {
 function adminMarketProductPrice(product) {
   return Number(ADMIN_WORKSPACE_MARKET === "MY" ? (product?.myr_discount_price ?? product?.myr_price ?? 0) : (product?.discount_price ?? product?.price ?? 0));
 }
+function offlineOrderProducts() {
+  return astate.menu.filter((item) => ADMIN_WORKSPACE_MARKET === "MY" ? item.malaysia_available === true : item.is_available !== false);
+}
 function openOfflineOrder() {
-  const firstProduct = astate.menu.find((item) => ADMIN_WORKSPACE_MARKET === "MY" ? item.malaysia_available === true : item.is_available !== false) || astate.menu[0];
+  const firstProduct = offlineOrderProducts()[0];
   astate.offlineOrderDraft = {
     customer_name: "", customer_phone: "", customer_email: "", collection_date: localDateText(new Date()), collection_time: "",
     collection_point: adminMarketCollectionPoints()[0] || "", offline_reason: "influencer_tasting", counts_as_sale: false,
@@ -2473,7 +2476,7 @@ function offlineOrderField(key, value) {
   render();
 }
 function clearOfflinePromo() { if (astate.offlineOrderDraft) { astate.offlineOrderDraft.promo = null; astate.offlineOrderDraft.promo_message = ""; } }
-function addOfflineOrderItem() { const p = astate.menu.find((item) => ADMIN_WORKSPACE_MARKET === "MY" ? item.malaysia_available === true : item.is_available !== false) || astate.menu[0]; if (p) { astate.offlineOrderDraft.items.push({ product_id:p.id,product_name:p.name,quantity:1,unit_price:adminMarketProductPrice(p) }); clearOfflinePromo(); render(); } }
+function addOfflineOrderItem() { const p = offlineOrderProducts()[0]; if (p) { astate.offlineOrderDraft.items.push({ product_id:p.id,product_name:p.name,quantity:1,unit_price:adminMarketProductPrice(p) }); clearOfflinePromo(); render(); } }
 function chooseOfflineProduct(index, id) { const p=astate.menu.find((item)=>String(item.id)===String(id)); const row=astate.offlineOrderDraft?.items?.[index]; if(p&&row){row.product_id=p.id;row.product_name=p.name;row.unit_price=adminMarketProductPrice(p);clearOfflinePromo();render();} }
 function offlineItemField(index,key,value) { const row=astate.offlineOrderDraft?.items?.[index]; if(row){row[key]=Math.max(0,Number(value||0));clearOfflinePromo();render();} }
 function removeOfflineItem(index) { astate.offlineOrderDraft?.items?.splice(index,1); clearOfflinePromo(); render(); }
@@ -2531,6 +2534,8 @@ async function saveOfflineOrder() {
   const customerEmail=String(d.customer_email||"").trim().toLowerCase();
   if(customerEmail&&!/^\S+@\S+\.\S+$/.test(customerEmail)) return alert("Enter a valid customer email address, or leave it blank.");
   const items=(d.items||[]).filter((row)=>Number(row.quantity)>0); if(!items.length) return alert("Add at least one product.");
+  const availableIds = new Set(offlineOrderProducts().map((item) => String(item.id)));
+  if (items.some((row) => !availableIds.has(String(row.product_id)))) return alert("Choose products available in this store.");
   if (String(d.promo_code || "").trim() && !d.promo) return alert("Apply the promo code first, or clear the code to continue without a discount.");
   let promo = null;
   if (d.promo) {
@@ -2538,7 +2543,7 @@ async function saveOfflineOrder() {
     catch (error) { clearOfflinePromo(); d.promo_message = error?.message || String(error); render(); return; }
   }
   const total=d.counts_as_sale ? Math.max(0, offlineOrderSubtotal(d) - Number(promo?.discount || 0)) : 0;
-  const payload={order_number:offlineOrderCode(),customer_name:String(d.customer_name).trim(),customer_phone:String(d.customer_phone||"").trim(),customer_email:customerEmail||null,instagram:"",collection_date:d.collection_date||null,collection_time:String(d.collection_time||"").trim()||null,collection_point:String(d.collection_point||"").trim()||null,total,payment_status:"paid",order_status:"confirmed",notes:String(d.notes||"").trim()||null,payment_method:"Offline",payment_reference:null,is_offline:true,offline_reason:d.offline_reason,counts_as_sale:!!d.counts_as_sale};
+  const payload={market_code:ADMIN_WORKSPACE_MARKET,currency_code:ADMIN_WORKSPACE_MARKET==="MY"?"MYR":"SGD",order_number:offlineOrderCode(),customer_name:String(d.customer_name).trim(),customer_phone:String(d.customer_phone||"").trim(),customer_email:customerEmail||null,instagram:"",collection_date:d.collection_date||null,collection_time:String(d.collection_time||"").trim()||null,collection_point:String(d.collection_point||"").trim()||null,total,payment_status:"paid",order_status:"confirmed",notes:String(d.notes||"").trim()||null,payment_method:"Offline",payment_reference:null,is_offline:true,offline_reason:d.offline_reason,counts_as_sale:!!d.counts_as_sale};
   const button=document.getElementById("save-offline-order"); if(button){button.disabled=true;button.textContent="Saving…";}
   let order=null;
   try {
@@ -4406,7 +4411,6 @@ const SYSTEM_THEMES = {
   editorial:{label:"Editorial Café",note:"Magazine-style monochrome menu",primary:"#111111",background:"#FFFFFF",card:"#FFFFFF",text:"#111111",heading:"georgia",body:"work_sans",menu:"list"},
   retro:{label:"Retro Menu Board",note:"Cream, brick red and printed edges",primary:"#9A3E2F",background:"#F4E1B8",card:"#FFF8E8",text:"#3D2B20",heading:"georgia",body:"work_sans",menu:"list"},
   threed:{label:"3D Bento",note:"Lavender tiles and raised controls",primary:"#6254A3",background:"#EEEAFB",card:"#FFFFFF",text:"#292638",heading:"work_sans",body:"work_sans",menu:"gallery"},
-  sakura:{label:"Sakura Wash",note:"Dusty rose, warm paper and soft rounded cards",primary:"#A75568",background:"#F8EEF0",card:"#FFF9F7",text:"#402F34",heading:"fraunces",body:"work_sans",menu:"gallery"},
   coastal:{label:"Coastal Glass",note:"Airy blue panels with crisp navy details",primary:"#326A7C",background:"#EAF4F5",card:"#F9FFFF",text:"#20383F",heading:"work_sans",body:"work_sans",menu:"gallery"},
   cocoa:{label:"Cocoa Atelier",note:"Espresso lines, oat paper and crafted warmth",primary:"#6B4636",background:"#EFE2D2",card:"#FFF9EF",text:"#33251F",heading:"georgia",body:"work_sans",menu:"list"},
   matcha_modern:{label:"Matcha Modern",note:"Deep matcha green, warm cream and clean premium spacing",primary:"#173F32",background:"#F4F0E4",card:"#FFFCF5",text:"#17342B",heading:"fraunces",body:"work_sans",menu:"gallery"},
@@ -4772,7 +4776,7 @@ function renderOfflineOrderEditor() {
     </div>
     <label class="slot" style="margin:4px 0 16px"><input type="checkbox" style="width:auto" ${d.counts_as_sale ? "checked" : ""} onchange="offlineOrderField('counts_as_sale',this.checked)"><span><b>Count as sales revenue</b><br><span class="hint" style="margin:0">Leave off for free tasting, complimentary or replacement orders.</span></span></label>
     <div class="order-top"><b>Products</b><button class="link-btn" onclick="addOfflineOrderItem()">+ Add product</button></div>
-    ${(d.items || []).map((row,index) => `<div class="offline-order-item"><div><label>Product</label><select onchange="chooseOfflineProduct(${index},this.value)">${astate.menu.map((product) => `<option value="${product.id}" ${String(product.id) === String(row.product_id) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div><div><label>Qty</label><input type="number" min="1" value="${row.quantity}" oninput="offlineItemField(${index},'quantity',this.value)"></div><div><label>Price</label><input type="number" min="0" step=".01" value="${row.unit_price}" oninput="offlineItemField(${index},'unit_price',this.value)"></div><button class="link-danger" onclick="removeOfflineItem(${index})">Remove</button></div>`).join("")}
+    ${(d.items || []).map((row,index) => `<div class="offline-order-item"><div><label>Product</label><select onchange="chooseOfflineProduct(${index},this.value)">${offlineOrderProducts().map((product) => `<option value="${product.id}" ${String(product.id) === String(row.product_id) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div><div><label>Qty</label><input type="number" min="1" value="${row.quantity}" oninput="offlineItemField(${index},'quantity',this.value)"></div><div><label>Price</label><input type="number" min="0" step=".01" value="${row.unit_price}" oninput="offlineItemField(${index},'unit_price',this.value)"></div><button class="link-danger" onclick="removeOfflineItem(${index})">Remove</button></div>`).join("")}
     ${d.counts_as_sale ? `<div class="field"><label>Promo code (optional)</label><div class="offline-promo-row"><input value="${escapeHtml(d.promo_code || "")}" placeholder="Enter a code" oninput="astate.offlineOrderDraft.promo_code=this.value.toUpperCase();this.value=this.value.toUpperCase();clearOfflinePromo()"><button class="btn-secondary" onclick="applyOfflinePromoCode()">Apply</button></div>${d.promo_message ? `<div class="hint" role="status" style="text-align:left;margin-top:5px">${escapeHtml(d.promo_message)}</div>` : ""}<div class="hint" style="text-align:left;margin-top:5px">Uses the promo rules for this store; a customer phone number is required to check one-time use.</div></div>` : ""}
     <div class="field"><label>Internal notes</label><textarea rows="2" oninput="astate.offlineOrderDraft.notes=this.value">${escapeHtml(d.notes)}</textarea></div>
     ${d.counts_as_sale && discount ? `<div class="row"><span>Subtotal</span><span>${money(subtotal)}</span></div><div class="row"><span>Promo · ${escapeHtml(visiblePromoCode(d.promo.code))}</span><span>−${money(discount)}</span></div>` : ""}
@@ -4869,15 +4873,12 @@ function resetBrandColours() {
 const SHIZUKU_COLOUR_THEMES = {
   classic: { label:"Shizuku Classic", note:"Matcha · warm paper", primary:"#4B5D3A", background:"#F3EEE3", card:"#FFFFFF", text:"#2A2A22" },
   hojicha: { label:"Hojicha Atelier", note:"Roasted tea · oat cream", primary:"#674937", background:"#F1E7D9", card:"#FFFAF2", text:"#302721" },
-  sakura: { label:"Sakura Ink", note:"Muted berry · pale blush", primary:"#8D4C60", background:"#F8ECEF", card:"#FFFAFB", text:"#3E2830" },
   night: { label:"Night Matcha", note:"Deep forest · soft jade", primary:"#C8D99C", background:"#17241E", card:"#27382D", text:"#F7F4E9" }
 };
 function applyShizukuColourTheme(name) {
   const theme = SHIZUKU_COLOUR_THEMES[name];
   if (!theme) return;
   Object.assign(astate.settingsDraft, {
-    theme_primary_color:theme.primary, theme_background_color:theme.background,
-    theme_card_color:theme.card, theme_text_color:theme.text,
     admin_theme_primary:theme.primary, admin_theme_background:theme.background,
     admin_theme_card:theme.card, admin_theme_text:theme.text
   });
@@ -4885,10 +4886,10 @@ function applyShizukuColourTheme(name) {
 }
 function shizukuColourThemePicker() {
   return FormSection("Complete themes", `<div class="ui-theme-presets">${Object.entries(SHIZUKU_COLOUR_THEMES).map(([key,theme]) => {
-    const selected = ["theme_primary_color","theme_background_color","theme_card_color","theme_text_color","admin_theme_primary","admin_theme_background","admin_theme_card","admin_theme_text"].every((field,index) =>
-      String(astate.settingsDraft?.[field] || "").toLowerCase() === [theme.primary,theme.background,theme.card,theme.text][index % 4].toLowerCase());
+    const selected = ["admin_theme_primary","admin_theme_background","admin_theme_card","admin_theme_text"].every((field,index) =>
+      String(astate.settingsDraft?.[field] || "").toLowerCase() === [theme.primary,theme.background,theme.card,theme.text][index].toLowerCase());
     return `<button type="button" class="ui-theme-preset ${selected ? "selected" : ""}" onclick="applyShizukuColourTheme('${key}')" aria-label="Preview ${escapeHtml(theme.label)} theme"><span class="ui-theme-preset-sample" style="--preset-bg:${theme.background};--preset-card:${theme.card};--preset-text:${theme.text};--preset-primary:${theme.primary}"><i></i><b>Matcha Latte</b><small>$5.90</small><em>Order</em></span><strong>${escapeHtml(theme.label)}${selected ? " ✓" : ""}</strong><small>${escapeHtml(theme.note)}</small></button>`;
-  }).join("")}</div><p class="hint" style="text-align:left;margin:10px 0 0">A theme changes the customer shop and admin together: page, cards, words and buttons. Review the preview, then save.</p>`);
+  }).join("")}</div><p class="hint" style="text-align:left;margin:10px 0 0">Admin only: page, cards, words and buttons. Customer ordering colours stay as they are. Review the preview, then save.</p>`);
 }
 
 function adminRedesignStyles() {
@@ -5036,11 +5037,42 @@ renderCustomersTab = function () {
 };
 
 const renderMarketingTabBeforeSimplification = renderMarketingTab;
+function cartUpsellCampaignProducts() {
+  return astate.menu.filter((product) => (DASHBOARD_MARKET === "MY" ? product.malaysia_available === true : product.is_available !== false) && product.sold_out !== true && !product.is_b2b && !product.is_bundle && Number(product.ritual_validity_weeks || 0) <= 0);
+}
+function renderCartUpsellCampaign() {
+  const s = astate.settingsDraft || {}, prefix = `cart_upsell_${DASHBOARD_MARKET.toLowerCase()}`;
+  const products = cartUpsellCampaignProducts();
+  const selected = products.find((product) => String(product.id) === String(s[`${prefix}_product_id`]));
+  const regularPrice = selected ? adminMarketProductPrice(selected) : 0;
+  return AdminSection("Smart add-on campaign", `<div class="hint" style="text-align:left;margin-bottom:14px">When a customer has the required number of drinks, the cart asks whether they want one add-on at your special price. Singapore and Malaysia are configured separately.</div>
+    ${Toggle(s[`${prefix}_enabled`] === true,"Offer active",`onSettingsField('${prefix}_enabled',this.checked);render()`,DASHBOARD_MARKET === "MY" ? "Malaysia · MYR" : "Singapore · SGD")}
+    <div class="product-editor-grid"><div class="field"><label>After how many drinks?</label><input type="number" min="1" max="20" value="${Number(s[`${prefix}_min_drinks`] || 2)}" oninput="onSettingsField('${prefix}_min_drinks',Number(this.value))"></div>
+    <div class="field"><label>Offer one add-on product</label><select onchange="onSettingsField('${prefix}_product_id',this.value?Number(this.value):null);render()"><option value="">Choose a drink</option>${products.map((product) => `<option value="${product.id}" ${selected && String(selected.id) === String(product.id) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div>
+    <div class="field"><label>Special add-on price (${DASHBOARD_MARKET === "MY" ? "MYR" : "SGD"})</label><input type="number" min="0" step="0.01" value="${s[`${prefix}_price`] ?? ""}" placeholder="1.00" oninput="onSettingsField('${prefix}_price',this.value)"></div></div>
+    ${selected ? `<div class="ref-note">${escapeHtml(selected.name)} normally ${money(regularPrice)}. Customers can add one at your campaign price after qualifying.</div>` : ""}
+    <button class="btn-primary" onclick="saveCartUpsellCampaign()">Save add-on campaign</button>`, `This store only · ${DASHBOARD_MARKET}`);
+}
+async function saveCartUpsellCampaign() {
+  if (!astate.settings) return alert("Store settings are unavailable.");
+  const prefix = `cart_upsell_${DASHBOARD_MARKET.toLowerCase()}`, s = astate.settingsDraft || {};
+  const enabled = s[`${prefix}_enabled`] === true, minDrinks = Number(s[`${prefix}_min_drinks`] || 2);
+  const product = cartUpsellCampaignProducts().find((item) => String(item.id) === String(s[`${prefix}_product_id`]));
+  const price = s[`${prefix}_price`] === "" || s[`${prefix}_price`] == null ? null : Number(s[`${prefix}_price`]);
+  if (!Number.isInteger(minDrinks) || minDrinks < 1 || minDrinks > 20) return alert("Choose a drink count from 1 to 20.");
+  if (enabled && (!product || price == null || !Number.isFinite(price) || price < 0 || price >= adminMarketProductPrice(product))) return alert("Choose an available add-on and a special price below its normal price.");
+  const fields = { [`${prefix}_enabled`]: enabled, [`${prefix}_min_drinks`]: minDrinks, [`${prefix}_product_id`]: product?.id || null, [`${prefix}_price`]: price };
+  if (window.SLOW_STUDIO_DEMO_MODE) { Object.assign(astate.settings, fields); Object.assign(astate.settingsDraft, fields); render(); return alert("Demo campaign saved in this browser only."); }
+  const { data, error } = await db.from("store_settings").update(fields).eq("id", astate.settings.id).select().single();
+  if (error) return alert("Could not save add-on campaign: " + error.message);
+  astate.settings = data; astate.settingsDraft = { ...data }; render();
+  alert(`${DASHBOARD_MARKET} add-on campaign ${enabled ? "is active" : "is off"}.`);
+}
 renderMarketingTab = function () {
   const section = astate.marketingSection || "contacts";
   const tabs = `<div class="ui-tabs"><button class="${section==="contacts"?"active":""}" onclick="setAdminViewState('marketingSection','contacts')">Contacts</button><button class="${section==="campaigns"?"active":""}" onclick="setAdminViewState('marketingSection','campaigns')">Campaigns</button><button class="${section==="consent"?"active":""}" onclick="setAdminViewState('marketingSection','consent')">Consent</button></div>`;
   if (section === "contacts") return tabs + renderMarketingContactManager();
-  if (section === "campaigns") return tabs + renderMarketingCampaigns();
+  if (section === "campaigns") return tabs + renderCartUpsellCampaign() + renderMarketingCampaigns();
   return tabs + Accordion("Checkout marketing consent",renderMembershipSettings(),true,"Customer opt-in settings");
 };
 
@@ -5060,7 +5092,7 @@ renderThemeDesignTab = function () {
   const scope=astate.designColourScope||"admin",admin=scope==="admin";
   const colourFields=admin?`${ColourPicker("Primary","admin_theme_primary","#4B5D3A")}${ColourPicker("Background","admin_theme_background","#F3EEE3")}${ColourPicker("Cards","admin_theme_card","#FFFFFF")}${ColourPicker("Text","admin_theme_text","#2A2A22")}`:`${ColourPicker("Primary","theme_primary_color","#4B5D3A")}${ColourPicker("Background","theme_background_color","#F3EEE3")}${ColourPicker("Cards","theme_card_color","#FFFFFF")}${ColourPicker("Text","theme_text_color","#2A2A22")}`;
   const tabs=`<div class="ui-tabs"><button class="${admin?"active":""}" onclick="setAdminViewState('designColourScope','admin')">Admin</button><button class="${!admin?"active":""}" onclick="setAdminViewState('designColourScope','customer')">Customer Store</button></div>`;
-  return shizukuColourThemePicker()+tabs+AdminSection(admin?"Admin colours":"Customer Store colours",`<div class="ui-two-column"><div><div class="ui-colour-grid">${colourFields}</div>${!admin?`<div class="divider"></div>${FormSection("Fonts",`<div class="field"><label>Heading</label><select onchange="onSettingsField('theme_heading_font',this.value)">${[["fraunces","Elegant serif"],["noto_serif_jp","Japanese serif"],["work_sans","Clean sans"],["georgia","Classic serif"]].map(([v,l])=>`<option value="${v}" ${(astate.settingsDraft?.theme_heading_font||"fraunces")===v?"selected":""}>${l}</option>`).join("")}</select></div><div class="field"><label>Body / UI</label><select onchange="onSettingsField('theme_body_font',this.value)">${[["work_sans","Clean sans"],["noto_sans_jp","Japanese sans"],["georgia","Classic serif"]].map(([v,l])=>`<option value="${v}" ${(astate.settingsDraft?.theme_body_font||"work_sans")===v?"selected":""}>${l}</option>`).join("")}</select></div>`,"Only the three useful font roles are shown.")}`:""}<div class="ui-toolbar"><button class="btn-secondary" onclick="resetBrandColours()">Reset</button><button class="btn-primary" onclick="saveSettings()">Save colours</button></div></div>${MiniStorePreview(scope)}</div>`,"Theme presets update both surfaces; individual colours can still be tuned separately.");
+  return (admin?shizukuColourThemePicker():"")+tabs+AdminSection(admin?"Admin colours":"Customer Store colours",`<div class="ui-two-column"><div><div class="ui-colour-grid">${colourFields}</div>${!admin?`<div class="divider"></div>${FormSection("Fonts",`<div class="field"><label>Heading</label><select onchange="onSettingsField('theme_heading_font',this.value)">${[["fraunces","Elegant serif"],["noto_serif_jp","Japanese serif"],["work_sans","Clean sans"],["georgia","Classic serif"]].map(([v,l])=>`<option value="${v}" ${(astate.settingsDraft?.theme_heading_font||"fraunces")===v?"selected":""}>${l}</option>`).join("")}</select></div><div class="field"><label>Body / UI</label><select onchange="onSettingsField('theme_body_font',this.value)">${[["work_sans","Clean sans"],["noto_sans_jp","Japanese sans"],["georgia","Classic serif"]].map(([v,l])=>`<option value="${v}" ${(astate.settingsDraft?.theme_body_font||"work_sans")===v?"selected":""}>${l}</option>`).join("")}</select></div>`,"Only the three useful font roles are shown.")}`:""}<div class="ui-toolbar"><button class="btn-secondary" onclick="resetBrandColours()">Reset</button><button class="btn-primary" onclick="saveSettings()">Save colours</button></div></div>${MiniStorePreview(scope)}</div>`,admin?"Theme presets change only the admin dashboard.":"Customer ordering colours are managed separately and are not affected by admin themes.");
 };
 
 function renderPartnerReportTab() {

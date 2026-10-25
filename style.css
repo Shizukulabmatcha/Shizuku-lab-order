@@ -517,6 +517,14 @@ img{display:block;max-width:100%;}
 /* Complete colour themes: keep every surface readable when a palette is changed. */
 :root{--muted:color-mix(in srgb,var(--ink) 68%,var(--card));--faint:color-mix(in srgb,var(--ink) 48%,var(--cream));--line:color-mix(in srgb,var(--ink) 20%,var(--card));--matcha-bg:color-mix(in srgb,var(--matcha) 9%,var(--card))}
 #app .item-card,#app .gallery-card,#app .summary-card,#app .product-detail-card,#app .store-panel,#app .slot,#app .faq-section,#app .code-box,#app .review-write-card,#app .receipt-card{background-color:var(--card);color:var(--ink);border-color:var(--line)}
+#app .product-configuration-screen .product-option-group .slot.option-choice.active{background-color:var(--matcha);border-color:var(--matcha);color:var(--cream)}
+.cart-upsell{display:grid;grid-template-columns:96px minmax(0,1fr);gap:16px;align-items:center;margin:20px 0;padding:17px;border:1px solid var(--matcha);border-radius:15px;background:color-mix(in srgb,var(--matcha) 8%,var(--card));color:var(--ink)}
+.cart-upsell img{width:96px;height:116px;object-fit:cover;border-radius:9px;background:var(--card)}
+.cart-upsell small,.cart-campaign-tag{font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--matcha)}
+.cart-upsell h3{margin:5px 0 6px;font-size:21px;line-height:1.2}.cart-upsell p{margin:0 0 12px;font-size:13px;line-height:1.5;color:var(--muted)}
+.cart-upsell .primary-btn{width:auto;min-height:40px;padding:9px 15px;font-size:12px}.cart-campaign-tag{margin-top:4px;letter-spacing:.03em}
+.cart-campaign-remove{align-self:center;padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);font:inherit;font-size:12px;cursor:pointer}
+@media(max-width:480px){.cart-upsell{grid-template-columns:70px minmax(0,1fr);gap:11px;padding:12px}.cart-upsell img{width:70px;height:96px}.cart-upsell h3{font-size:17px}}
 #app .item-name,#app .item-name span,#app .gallery-card h3,#app .gallery-card p,#app .product-detail-card h2,#app .product-detail-card p{color:var(--ink)!important}
 #app .field input,#app .field textarea,#app .field select,#app .stepper,#app .code-box,#app .customer-store-action{background-color:var(--card);color:var(--ink);border-color:var(--line)}
 #app .sticky-bar:not(.floating-cart-bar){background:color-mix(in srgb,var(--cream) 95%,transparent)}

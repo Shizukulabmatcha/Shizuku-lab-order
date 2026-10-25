@@ -90,6 +90,7 @@ const state = {
   productOptionGroups: [],
   selectedProduct: null,
   selectedOptions: {},
+  campaignOfferActive: false,
   productQuantity: 1,
   expandedOptionSteps: { product: null, bundle1: null, bundle2: null },
   bundle: { drink1: null, drink2: null, drink1Options: {}, drink2Options: {} },
@@ -846,7 +847,7 @@ function sanitizeCartOptionsForStore() {
 function repriceCartForPartner() {
   Object.values(state.cart).forEach((line) => {
     const product = state.menu.find((item) => String(item.id) === String(line?.productId));
-    if (!product || line?.isRitualRedemption) return;
+    if (!product || line?.isRitualRedemption || line?.isCampaignUpsell) return;
     const regular = normalCartLinePrice(line, product);
     line.regularUnitPrice = regular;
     line.unitPrice = partnerAdjustedUnitPrice(product, regular);
@@ -1227,6 +1228,7 @@ async function init() {
     sanitizeCartOptionsForStore();
     repriceCartForPartner();
     removeUnavailableCartItems();
+    reconcileCartUpsell();
     startStockRefresh();
   } catch (error) {
     console.error(error);
@@ -1241,6 +1243,48 @@ async function init() {
 /* ---------- cart ---------- */
 function cartLines() {
   return Object.entries(state.cart).filter(([, item]) => item && item.qty > 0).map(([key, item]) => ({ key, ...item }));
+}
+function cartUpsellConfig() {
+  const prefix = `cart_upsell_${state.market.toLowerCase()}`;
+  const product = state.menu.find((item) => String(item.id) === String(state.store[`${prefix}_product_id`]));
+  const price = Number(state.store[`${prefix}_price`]);
+  const normalPrice = product ? Number(state.market === "MY" ? (product.myr_discount_price ?? product.myr_price ?? 0) : (product.discount_price ?? product.price ?? 0)) : 0;
+  if (state.store[`${prefix}_enabled`] !== true || state.store[`${prefix}_price`] == null || !product || !Number.isFinite(price) || price < 0 || price >= normalPrice || isSoldOut(product) || product.is_b2b || isBundle(product) || Number(product.ritual_validity_weeks || 0) > 0 || partnerModeActive() || isRitualRedemptionMode()) return null;
+  return { product, price, minDrinks: Math.max(1, Number(state.store[`${prefix}_min_drinks`] || 2)) };
+}
+function qualifyingCartDrinkCount() {
+  return cartLines().reduce((count, line) => {
+    if (line.isCampaignUpsell || line.isRitualRedemption) return count;
+    const product = state.menu.find((item) => String(item.id) === String(line.productId));
+    if (!product || product.is_b2b || Number(product.ritual_validity_weeks || 0) > 0) return count;
+    return count + Number(line.qty || 0) * (isBundle(product) ? 2 : 1);
+  }, 0);
+}
+function availableCartUpsell() {
+  const offer = cartUpsellConfig();
+  return offer && qualifyingCartDrinkCount() >= offer.minDrinks ? offer : null;
+}
+function reconcileCartUpsell() {
+  const offer = availableCartUpsell();
+  let changed = false;
+  Object.entries(state.cart).forEach(([key, line]) => {
+    if (!line?.isCampaignUpsell) return;
+    if (!offer || String(line.productId) !== String(offer.product.id)) {
+      delete state.cart[key]; changed = true; return;
+    }
+    const optionsPrice = (line.options || []).reduce((sum, option) => sum + Number(option.price || 0), 0);
+    const nextPrice = Math.round((offer.price + optionsPrice) * 100) / 100;
+    if (Number(line.unitPrice) !== nextPrice || Number(line.qty) !== 1) {
+      line.unitPrice = nextPrice; line.qty = 1; changed = true;
+    }
+  });
+  if (changed) saveCart();
+  return changed;
+}
+function openCartUpsellProduct() {
+  const offer = availableCartUpsell();
+  if (!offer || cartLines().some((line) => line.isCampaignUpsell)) return;
+  openProductOptions(offer.product.id, true);
 }
 function removeUnavailableCartItems(availableProductIds = null) {
   const available = availableProductIds || new Set(state.menu.map((product) => String(product.id)));
@@ -1424,16 +1468,18 @@ function getSelectedOptionsForProduct(productId) {
   return Object.values(state.selectedOptions).filter((selected) => !selected.skipped && String(selected.productId) === String(productId));
 }
 function calculateProductPrice(product) {
-  let price = partnerMemberBasePrice(product);
+  const offer = state.campaignOfferActive ? availableCartUpsell() : null;
+  let price = offer && String(offer.product.id) === String(product.id) ? offer.price : partnerMemberBasePrice(product);
   getSelectedOptionsForProduct(product.id).forEach((selected) => { price += Number(selected.price || 0); });
   return Math.max(0, Math.round(price * 100) / 100);
 }
 
 /* ---------- normal product ---------- */
-function openProductOptions(productId) {
+function openProductOptions(productId, campaignOffer = false) {
   const product = state.menu.find((item) => String(item.id) === String(productId));
   if (!product) return;
   if (isSoldOut(product)) { alert("Sorry, this item is sold out."); return; }
+  state.campaignOfferActive = campaignOffer === true && String(availableCartUpsell()?.product.id) === String(product.id);
   state.selectedProduct = product;
   state.selectedOptions = defaultOptionSelections(product);
   state.productQuantity = 1;
@@ -1447,6 +1493,7 @@ function openProductOptions(productId) {
   render();
 }
 function changeProductQuantity(change) {
+  if (state.campaignOfferActive) { state.productQuantity = 1; render(); return; }
   const stock = productStock(state.selectedProduct);
   const passLimit = isRitualRedemptionMode() ? Math.max(1, ritualAvailable() - ritualCreditsInCart()) : 20;
   const maximum = Math.max(1, Math.min(20, stock == null ? 20 : stock, passLimit));
@@ -1459,24 +1506,28 @@ function addConfiguredProductToCart() {
   if (isSoldOut(product)) { alert("Sorry, this item is sold out."); return; }
   if (!validateRequiredOptions()) return;
   if(isRitualRedemptionMode()&&!ritualEligibleProduct(product))return alert("This item is not eligible for Matcha Pass credits.");
-  const addQuantity = Math.max(1, Math.min(20, Number(state.productQuantity) || 1));
+  const campaignOffer = state.campaignOfferActive && String(availableCartUpsell()?.product.id) === String(product.id);
+  if (state.campaignOfferActive && !campaignOffer) { state.campaignOfferActive = false; state.screen = "cart"; render(); return alert("The add-on offer is no longer available. Please review your cart."); }
+  const addQuantity = campaignOffer ? 1 : Math.max(1, Math.min(20, Number(state.productQuantity) || 1));
   if(isRitualRedemptionMode()&&ritualCreditsInCart()+addQuantity>ritualAvailable())return alert(`You only have ${ritualAvailable()} unreserved Matcha Pass drinks available.`);
   const selectedOptions = getSelectedOptionsForProduct(product.id);
   const optionsKey = selectedOptions.map((option) => String(option.optionId)).sort().join("-");
-  const key = `${product.id}__${optionsKey}`;
+  const key = `${campaignOffer ? "campaign_" : ""}${product.id}__${optionsKey}`;
+  if (campaignOffer && cartLines().some((line) => line.isCampaignUpsell)) { state.screen = "cart"; render(); return; }
   const unitPrice = isRitualRedemptionMode() ? Math.round((Number(ritualDrinkTopUp(product)||0)+selectedOptions.reduce((sum,option)=>sum+Number(option.price||0),0))*100)/100 : calculateProductPrice(product);
   const available = productStock(product);
   if (available != null) {
-    const existingQty = state.cart[key]?.qty || 0;
+    const existingQty = cartLines().filter((line) => String(line.productId) === String(product.id)).reduce((sum, line) => sum + Number(line.qty || 0), 0);
     if (existingQty + addQuantity > available) { alert("Sorry, there is not enough stock for that quantity."); return; }
   }
   state.cart[key] = {
     productId: product.id, productName: product.name, imageUrl: product.image_url || "",
-    unitPrice, regularUnitPrice: isRitualRedemptionMode() ? unitPrice : Math.max(0, Math.round((salePrice(product) + selectedOptions.reduce((sum, option) => sum + Number(option.price || 0), 0)) * 100) / 100), basePrice: isRitualRedemptionMode()?Number(ritualDrinkTopUp(product)||0):salePrice(product), qty: (state.cart[key]?.qty || 0) + addQuantity, options: selectedOptions, isRitualRedemption:isRitualRedemptionMode(),
+    unitPrice, regularUnitPrice: isRitualRedemptionMode() ? unitPrice : Math.max(0, Math.round((salePrice(product) + selectedOptions.reduce((sum, option) => sum + Number(option.price || 0), 0)) * 100) / 100), basePrice: isRitualRedemptionMode()?Number(ritualDrinkTopUp(product)||0):salePrice(product), qty: (state.cart[key]?.qty || 0) + addQuantity, options: selectedOptions, isRitualRedemption:isRitualRedemptionMode(), isCampaignUpsell:campaignOffer,
   };
   state.selectedProduct = null;
   state.selectedOptions = {};
-  state.screen = "menu";
+  state.campaignOfferActive = false;
+  state.screen = campaignOffer ? "cart" : "menu";
   saveCart();
   render();
 }
@@ -1550,15 +1601,18 @@ function addBundleToCart() {
 function changeCartQty(key, delta) {
   const item = state.cart[key];
   if (!item) return;
+  if (item.isCampaignUpsell && delta > 0) return;
   const product = state.menu.find((p) => String(p.id) === String(item.productId));
   if (!product) return;
   const nextQty = Number(item.qty || 0) + delta;
   if(delta>0&&isRitualRedemptionMode()&&ritualCreditsInCart()>=ritualAvailable()){alert(`You only have ${ritualAvailable()} unreserved Matcha Pass drinks available.`);return;}
   if (delta > 0 && isSoldOut(product)) { alert("Sorry, this item is sold out."); return; }
   const available = productStock(product);
-  if (available != null && nextQty > available) { alert("Sorry, this item is sold out."); return; }
+  const otherQty = cartLines().filter((line) => line.key !== key && String(line.productId) === String(item.productId)).reduce((sum, line) => sum + Number(line.qty || 0), 0);
+  if (available != null && nextQty + otherQty > available) { alert("Sorry, this item is sold out."); return; }
   item.qty = Math.max(0, nextQty);
   if (item.qty === 0) delete state.cart[key];
+  if (reconcileCartUpsell()) state.cartNotice = "The add-on offer was removed because the cart no longer qualifies.";
   saveCart();
   render();
 }
@@ -1766,6 +1820,10 @@ async function submitOrder() {
   if (IS_CONFIGURED) {
     try { await loadOptions(); }
     catch (error) { alert("Unable to check the latest store options. Please try again."); return; }
+    const { data: latestSettings, error: settingsError } = await db.from("store_settings").select("*").limit(1).maybeSingle();
+    if (settingsError || !latestSettings) { alert("Unable to check the latest offer. Please try again."); return; }
+    state.store = { ...state.store, ...latestSettings };
+    if (reconcileCartUpsell()) { state.screen = "cart"; render(); alert("The add-on offer changed. Please review your cart before checkout."); return; }
   }
   if (sanitizeCartOptionsForStore() > 0) {
     repriceCartForPartner();
@@ -1776,12 +1834,13 @@ async function submitOrder() {
   }
   if (IS_CONFIGURED) {
     const ids = [...new Set(cartLines().map(line => line.productId))];
-    const {data: products, error} = await db.from("products").select("id,is_available,is_b2b").in("id", ids);
+    const {data: products, error} = await db.from("products").select("id,is_available,malaysia_available,is_b2b,sold_out,price,discount_price,myr_price,myr_discount_price").in("id", ids);
     if (error) { alert("Unable to check the latest product availability. Please try again."); return; }
-    const available = new Set((products || []).filter(p => p.is_available !== false).map(p => String(p.id)));
+    const available = new Set((products || []).filter(p => p.sold_out !== true && (state.market === "MY" ? p.malaysia_available === true : p.is_available !== false)).map(p => String(p.id)));
     if (removeUnavailableCartItems(available).length) { setScreen("cart"); alert("An unavailable item was removed. Please check your cart."); return; }
     const previousType = cartB2BType();
-    state.menu.forEach(p => { const latest = (products || []).find(x => String(x.id) === String(p.id)); if (latest) p.is_b2b = latest.is_b2b === true; });
+    state.menu.forEach(p => { const latest = (products || []).find(x => String(x.id) === String(p.id)); if (latest) Object.assign(p, latest); });
+    if (reconcileCartUpsell()) { state.screen = "cart"; render(); alert("The add-on offer changed. Please review your cart before checkout."); return; }
     if (previousType !== cartB2BType()) { render(); alert("The product fulfilment has been updated. Please review your checkout details before continuing."); return; }
   }
   const type=cartB2BType(),isB2B=type==='b2b',isRitualPass=cartIsRitualPassOnly();
@@ -2465,6 +2524,13 @@ function stepper(key, qty) {
 }
 
 /* ---------- cart ---------- */
+function cartUpsellMarkup() {
+  const offer = availableCartUpsell();
+  if (!offer || cartLines().some((line) => line.isCampaignUpsell)) return "";
+  const original = state.market === "MY" ? Number(offer.product.myr_discount_price ?? offer.product.myr_price ?? 0) : Number(offer.product.discount_price ?? offer.product.price ?? 0);
+  if (offer.price >= original) return "";
+  return `<section class="cart-upsell" aria-label="Add-on offer"><img src="${escapeHtml(offer.product.image_url || "matcha-lab.jpg")}" alt=""><div><small>JUST FOR YOUR ORDER</small><h3>Want to add ${escapeHtml(offer.product.name)}?</h3><p>You picked ${qualifyingCartDrinkCount()} drinks. Add one ${escapeHtml(offer.product.name)} for <b>${money(offer.price)}</b> instead of ${money(original)}.</p><button type="button" class="primary-btn" onclick="openCartUpsellProduct()">Choose your add-on · ${money(offer.price)}</button></div></section>`;
+}
 function renderCart() {
   const lines = cartLines();
   return `
@@ -2479,6 +2545,7 @@ function renderCart() {
           <img class="item-thumb" src="${escapeHtml(line.imageUrl || "matcha-lab.jpg")}" alt="${escapeHtml(line.productName)}">
           <div class="item-info">
             <div class="item-name">${escapeHtml(line.productName)}</div>
+            ${line.isCampaignUpsell ? `<div class="cart-campaign-tag">Add-on offer · one per order</div>` : ""}
             ${line.options?.length ? `<div class="item-desc">${
               isBundle(state.menu.find((p) => String(p.id) === String(line.productId)))
                 ? line.options.map((drink) => `<div>Drink ${drink.drinkNumber}: ${escapeHtml(drink.productName)}${drink.options?.length ? ` · ${drink.options.map((o) => escapeHtml(o.optionName)).join(" · ")}` : ""}</div>`).join("")
@@ -2486,9 +2553,10 @@ function renderCart() {
             }</div>` : ""}
             <div class="item-price">${isRitualRedemptionMode()?(line.unitPrice?`+${money(line.unitPrice)}`:"Included"):money(line.unitPrice)}</div>
           </div>
-          ${stepper(line.key, line.qty)}
+          ${line.isCampaignUpsell ? `<button type="button" class="cart-campaign-remove" onclick="changeCartQty('${escapeHtml(line.key)}',-1)">Remove</button>` : stepper(line.key, line.qty)}
         </div>
       `).join("")}
+      ${cartUpsellMarkup()}
     </div>
     ${lines.length > 0 ? `
     <div class="sticky-bar"><div class="sticky-bar-inner">
