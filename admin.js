@@ -5045,9 +5045,11 @@ function renderCartUpsellCampaign() {
   const products = cartUpsellCampaignProducts();
   const selected = products.find((product) => String(product.id) === String(s[`${prefix}_product_id`]));
   const regularPrice = selected ? adminMarketProductPrice(selected) : 0;
-  return AdminSection("Smart add-on campaign", `<div class="hint" style="text-align:left;margin-bottom:14px">When a customer has the required number of drinks, the cart asks whether they want one add-on at your special price. Singapore and Malaysia are configured separately.</div>
+  const triggerType = s[`${prefix}_trigger_type`] === "spend" ? "spend" : "drinks";
+  return AdminSection("Smart add-on campaign", `<div class="hint" style="text-align:left;margin-bottom:14px">Offer one drink at a special add-on price when the cart reaches your chosen drink count or drink subtotal. Singapore and Malaysia are configured separately.</div>
     ${Toggle(s[`${prefix}_enabled`] === true,"Offer active",`onSettingsField('${prefix}_enabled',this.checked);render()`,DASHBOARD_MARKET === "MY" ? "Malaysia · MYR" : "Singapore · SGD")}
-    <div class="product-editor-grid"><div class="field"><label>After how many drinks?</label><input type="number" min="1" max="20" value="${Number(s[`${prefix}_min_drinks`] || 2)}" oninput="onSettingsField('${prefix}_min_drinks',Number(this.value))"></div>
+    <div class="product-editor-grid"><div class="field"><label>Offer starts when</label><select onchange="onSettingsField('${prefix}_trigger_type',this.value);render()"><option value="drinks" ${triggerType === "drinks" ? "selected" : ""}>Customer buys a number of drinks</option><option value="spend" ${triggerType === "spend" ? "selected" : ""}>Drink subtotal reaches an amount</option></select></div>
+    ${triggerType === "spend" ? `<div class="field"><label>Minimum drink subtotal (${DASHBOARD_MARKET === "MY" ? "MYR" : "SGD"})</label><input type="number" min="0.01" step="0.01" value="${s[`${prefix}_min_spend`] ?? 10}" oninput="onSettingsField('${prefix}_min_spend',this.value)"><div class="hint">Before promo discounts; the add-on itself does not count.</div></div>` : `<div class="field"><label>After how many drinks?</label><input type="number" min="1" max="20" value="${Number(s[`${prefix}_min_drinks`] || 2)}" oninput="onSettingsField('${prefix}_min_drinks',Number(this.value))"></div>`}
     <div class="field"><label>Offer one add-on product</label><select onchange="onSettingsField('${prefix}_product_id',this.value?Number(this.value):null);render()"><option value="">Choose a drink</option>${products.map((product) => `<option value="${product.id}" ${selected && String(selected.id) === String(product.id) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select></div>
     <div class="field"><label>Special add-on price (${DASHBOARD_MARKET === "MY" ? "MYR" : "SGD"})</label><input type="number" min="0" step="0.01" value="${s[`${prefix}_price`] ?? ""}" placeholder="1.00" oninput="onSettingsField('${prefix}_price',this.value)"></div></div>
     ${selected ? `<div class="ref-note">${escapeHtml(selected.name)} normally ${money(regularPrice)}. Customers can add one at your campaign price after qualifying.</div>` : ""}
@@ -5057,11 +5059,14 @@ async function saveCartUpsellCampaign() {
   if (!astate.settings) return alert("Store settings are unavailable.");
   const prefix = `cart_upsell_${DASHBOARD_MARKET.toLowerCase()}`, s = astate.settingsDraft || {};
   const enabled = s[`${prefix}_enabled`] === true, minDrinks = Number(s[`${prefix}_min_drinks`] || 2);
+  const triggerType = s[`${prefix}_trigger_type`] === "spend" ? "spend" : "drinks";
+  const minSpend = Number(s[`${prefix}_min_spend`] ?? 10);
   const product = cartUpsellCampaignProducts().find((item) => String(item.id) === String(s[`${prefix}_product_id`]));
   const price = s[`${prefix}_price`] === "" || s[`${prefix}_price`] == null ? null : Number(s[`${prefix}_price`]);
-  if (!Number.isInteger(minDrinks) || minDrinks < 1 || minDrinks > 20) return alert("Choose a drink count from 1 to 20.");
+  if (triggerType === "drinks" && (!Number.isInteger(minDrinks) || minDrinks < 1 || minDrinks > 20)) return alert("Choose a drink count from 1 to 20.");
+  if (triggerType === "spend" && (!Number.isFinite(minSpend) || minSpend < 0.01 || Math.abs(Math.round(minSpend * 100) - minSpend * 100) > 1e-7)) return alert("Enter a minimum spend of at least 0.01 with no more than two decimal places.");
   if (enabled && (!product || price == null || !Number.isFinite(price) || price < 0 || price >= adminMarketProductPrice(product))) return alert("Choose an available add-on and a special price below its normal price.");
-  const fields = { [`${prefix}_enabled`]: enabled, [`${prefix}_min_drinks`]: minDrinks, [`${prefix}_product_id`]: product?.id || null, [`${prefix}_price`]: price };
+  const fields = { [`${prefix}_enabled`]: enabled, [`${prefix}_trigger_type`]: triggerType, [`${prefix}_min_drinks`]: minDrinks, [`${prefix}_min_spend`]: minSpend, [`${prefix}_product_id`]: product?.id || null, [`${prefix}_price`]: price };
   if (window.SLOW_STUDIO_DEMO_MODE) { Object.assign(astate.settings, fields); Object.assign(astate.settingsDraft, fields); render(); return alert("Demo campaign saved in this browser only."); }
   const { data, error } = await db.from("store_settings").update(fields).eq("id", astate.settings.id).select().single();
   if (error) return alert("Could not save add-on campaign: " + error.message);

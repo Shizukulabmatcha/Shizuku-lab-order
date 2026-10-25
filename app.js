@@ -1250,19 +1250,31 @@ function cartUpsellConfig() {
   const price = Number(state.store[`${prefix}_price`]);
   const normalPrice = product ? Number(state.market === "MY" ? (product.myr_discount_price ?? product.myr_price ?? 0) : (product.discount_price ?? product.price ?? 0)) : 0;
   if (state.store[`${prefix}_enabled`] !== true || state.store[`${prefix}_price`] == null || !product || !Number.isFinite(price) || price < 0 || price >= normalPrice || isSoldOut(product) || product.is_b2b || isBundle(product) || Number(product.ritual_validity_weeks || 0) > 0 || partnerModeActive() || isRitualRedemptionMode()) return null;
-  return { product, price, minDrinks: Math.max(1, Number(state.store[`${prefix}_min_drinks`] || 2)) };
+  const triggerType = state.store[`${prefix}_trigger_type`] === "spend" ? "spend" : "drinks";
+  const minSpend = Number(state.store[`${prefix}_min_spend`]);
+  if (triggerType === "spend" && (!Number.isFinite(minSpend) || minSpend <= 0)) return null;
+  return { product, price, triggerType, minSpend, minDrinks: Math.max(1, Number(state.store[`${prefix}_min_drinks`] || 2)) };
+}
+function qualifyingCartDrinkLines() {
+  return cartLines().filter((line) => {
+    if (line.isCampaignUpsell || line.isRitualRedemption) return false;
+    const product = state.menu.find((item) => String(item.id) === String(line.productId));
+    return product && !product.is_b2b && Number(product.ritual_validity_weeks || 0) <= 0;
+  });
 }
 function qualifyingCartDrinkCount() {
-  return cartLines().reduce((count, line) => {
-    if (line.isCampaignUpsell || line.isRitualRedemption) return count;
+  return qualifyingCartDrinkLines().reduce((count, line) => {
     const product = state.menu.find((item) => String(item.id) === String(line.productId));
-    if (!product || product.is_b2b || Number(product.ritual_validity_weeks || 0) > 0) return count;
     return count + Number(line.qty || 0) * (isBundle(product) ? 2 : 1);
   }, 0);
 }
+function qualifyingCartDrinkSubtotal() {
+  return qualifyingCartDrinkLines().reduce((sum, line) => sum + Number(line.unitPrice || 0) * Number(line.qty || 0), 0);
+}
 function availableCartUpsell() {
   const offer = cartUpsellConfig();
-  return offer && qualifyingCartDrinkCount() >= offer.minDrinks ? offer : null;
+  if (!offer) return null;
+  return (offer.triggerType === "spend" ? qualifyingCartDrinkSubtotal() >= offer.minSpend : qualifyingCartDrinkCount() >= offer.minDrinks) ? offer : null;
 }
 function reconcileCartUpsell() {
   const offer = availableCartUpsell();
@@ -2529,7 +2541,8 @@ function cartUpsellMarkup() {
   if (!offer || cartLines().some((line) => line.isCampaignUpsell)) return "";
   const original = state.market === "MY" ? Number(offer.product.myr_discount_price ?? offer.product.myr_price ?? 0) : Number(offer.product.discount_price ?? offer.product.price ?? 0);
   if (offer.price >= original) return "";
-  return `<section class="cart-upsell" aria-label="Add-on offer"><img src="${escapeHtml(offer.product.image_url || "matcha-lab.jpg")}" alt=""><div><small>JUST FOR YOUR ORDER</small><h3>Want to add ${escapeHtml(offer.product.name)}?</h3><p>You picked ${qualifyingCartDrinkCount()} drinks. Add one ${escapeHtml(offer.product.name)} for <b>${money(offer.price)}</b> instead of ${money(original)}.</p><button type="button" class="primary-btn" onclick="openCartUpsellProduct()">Choose your add-on · ${money(offer.price)}</button></div></section>`;
+  const qualification = offer.triggerType === "spend" ? `Your drinks total ${money(qualifyingCartDrinkSubtotal())}.` : `You picked ${qualifyingCartDrinkCount()} drinks.`;
+  return `<section class="cart-upsell" aria-label="Add-on offer"><img src="${escapeHtml(offer.product.image_url || "matcha-lab.jpg")}" alt=""><div><small>JUST FOR YOUR ORDER</small><h3>Want to add ${escapeHtml(offer.product.name)}?</h3><p>${qualification} Add one ${escapeHtml(offer.product.name)} for <b>${money(offer.price)}</b> instead of ${money(original)}.</p><button type="button" class="primary-btn" onclick="openCartUpsellProduct()">Choose your add-on · ${money(offer.price)}</button></div></section>`;
 }
 function renderCart() {
   const lines = cartLines();
