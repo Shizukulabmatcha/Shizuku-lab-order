@@ -461,6 +461,7 @@ function customerStoreActions() {
 }
 
 function ritualPassBanner() {
+  if (POPUP_LINK_PRODUCT_IDS) return "";
   const pass = ritualProduct();
   if (!pass || state.market !== "SG" || isRitualRedemptionMode()) return "";
   if (partnerModeActive() && state.store.show_matcha_pass_in_partner_referral !== true) return "";
@@ -596,6 +597,7 @@ function setStorefrontSessionValue(key, value) {
 function canonicalStoreUrl() { return `${window.location.origin}${state.market === "MY" ? "/my" : "/"}`; }
 function activeStorefrontOverlay() {
   if (state.screen !== "menu") return "";
+  if (POPUP_LINK_PRODUCT_IDS) return "";
   const browserDismissed = storefrontSessionValue(storefrontSessionKey("inapp-notice-dismissed")) === "1";
   if (isInstagramOrFacebookBrowser() && state.store.show_instagram_browser_notice !== false && !browserDismissed) return "browser";
   // Partner Mode uses the quiet inline member-perk banner only. Do not layer
