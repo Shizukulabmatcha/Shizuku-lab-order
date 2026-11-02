@@ -85,3 +85,44 @@ function renderPopupTab() {
   const recent=ordersForMarket(DASHBOARD_MARKET).filter(order=>order.offline_reason==="popup_sale").slice(0,8);
   return `<style>.popup-layout{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,1fr);gap:18px}.popup-products{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.popup-product{border:1px solid var(--admin-line);border-radius:14px;background:var(--admin-card);color:var(--admin-text);padding:14px;text-align:left;cursor:pointer}.popup-product b,.popup-product span{display:block}.popup-product span{margin-top:8px;color:var(--admin-primary)}.popup-cart-row{border-bottom:1px solid var(--admin-line);padding:12px 0}.popup-cart-row-head{display:flex;justify-content:space-between;gap:8px;align-items:center}.popup-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px;margin-top:10px}.popup-options label{font-size:.85rem}.popup-options select{width:100%;margin-top:4px}.popup-payment-qr{display:block;width:min(280px,100%);height:auto;max-height:280px;object-fit:contain;margin:18px auto;background:white;padding:10px;border:1px solid var(--admin-line);border-radius:14px}.popup-payment-qr svg{display:block;width:100%;height:auto}@media(max-width:800px){.popup-layout{grid-template-columns:1fr}}</style><div class="popup-layout"><section class="dashboard-card" style="padding:20px"><div class="dashboard-card-head"><div><h2>Pop-up counter · ${DASHBOARD_MARKET==="MY"?"MYR":"SGD"}</h2><span>Tap drinks to add them to this sale.</span></div><button class="btn-secondary" onclick="popupNewSale()">New sale</button></div><div class="popup-products">${products.map(product=>`<button class="popup-product" onclick="popupAddProduct('${product.id}')"><b>${escapeHtml(product.name)}</b><span>${money(adminMarketProductPrice(product))}</span></button>`).join("")||"No available products for this store."}</div></section><section class="dashboard-card" style="padding:20px"><h2 style="margin-top:0">${pending?"Awaiting QR payment":"Current sale"}</h2>${pending?`<p><b>${escapeHtml(pending.order_number)}</b> · ${money(pending.total)}</p><p>Let the customer scan. Check your account before confirming.</p>${popupQrHtml(pending)}<button class="btn-primary" style="width:100%" onclick="popupConfirmPayment()" ${astate.popupSaving?"disabled":""}>I received the payment</button><button class="btn-secondary" style="width:100%;margin-top:8px" onclick="astate.popupPaymentOrder=null;render()">Leave pending · check Orders later</button>`:draft?`${popupItems().map((item,index)=>`<div class="popup-cart-row"><div class="popup-cart-row-head"><b>${escapeHtml(item.product_name)}</b><button class="link-danger" onclick="popupRemoveItem(${index})">Remove</button></div><div class="popup-cart-row-head"><label>Qty <input type="number" min="1" step="1" value="${item.quantity}" style="width:75px" onchange="popupChangeQuantity(${index},this.value)"></label><strong>${money(popupLinePrice(item)*item.quantity)}</strong></div><div class="popup-options">${popupOptionGroups(item.product_id).map(group=>`<label>${escapeHtml(group.name)}${group.required?" *":""}<select onchange="popupSelectOption(${index},'${group.id}',this.value)"><option value="">Choose</option>${astate.options.filter(option=>String(option.option_group_id)===String(group.id)&&option.is_available!==false).map(option=>`<option value="${option.id}" ${(item.options||[]).some(row=>String(row.option_id)===String(option.id))?"selected":""}>${escapeHtml(option.name)}${Number(option.price)?` · +${money(option.price)}`:""}</option>`).join("")}</select></label>`).join("")}</div></div>`).join("")}<div class="row bold" style="margin:14px 0"><span>Total</span><span>${money(popupTotal())}</span></div><div class="field"><label>Customer (optional)</label><input value="${escapeHtml(draft.customer_name)}" oninput="astate.popupDraft.customer_name=this.value"></div><div class="field"><label>Payment</label><select onchange="astate.popupDraft.payment_method=this.value;render()"><option value="cash" ${draft.payment_method==="cash"?"selected":""}>Cash</option><option value="qr" ${draft.payment_method==="qr"?"selected":""}>${DASHBOARD_MARKET==="MY"?"Touch ’n Go QR":"PayNow QR"}</option></select></div><button class="btn-primary" style="width:100%" onclick="popupSaveSale()" ${astate.popupSaving||!popupItems().length?"disabled":""}>${draft.payment_method==="cash"?"Record cash sale":"Create QR payment"}</button>`:'<p>Start a new sale or tap a product.</p>'}</section></div><section class="dashboard-card" style="padding:20px;margin-top:18px"><h2>Recent pop-up sales</h2>${recent.map(order=>`<div class="row"><span>${escapeHtml(order.order_number)} · ${escapeHtml(order.payment_method||"")}</span><b>${money(order.total)} · ${order.payment_status==="paid"?"Paid":"Pending"}</b></div>`).join("")||"No pop-up sales yet."}</section>`;
 }
+
+/* A shareable pop-up menu is separate from the counter's current sale. */
+function popupLinkSelectedIds() {
+  const selected = astate.popupLinkProductIds?.[DASHBOARD_MARKET] || [];
+  const available = new Set(popupAvailableProducts().map(product => String(product.id)));
+  return selected.filter(id => available.has(String(id)));
+}
+function popupToggleLinkProduct(id, checked) {
+  if (!astate.popupLinkProductIds) astate.popupLinkProductIds = {};
+  const ids = new Set(popupLinkSelectedIds());
+  if (checked) ids.add(String(id)); else ids.delete(String(id));
+  astate.popupLinkProductIds[DASHBOARD_MARKET] = [...ids];
+  render();
+}
+function popupCustomerOrderLink() {
+  const ids = popupLinkSelectedIds();
+  if (!ids.length) return "";
+  const url = new URL("/", window.location.origin);
+  url.searchParams.set("market", DASHBOARD_MARKET);
+  url.searchParams.set("popup_items", ids.join(","));
+  return url.href;
+}
+async function popupCopyCustomerLink() {
+  const link = popupCustomerOrderLink();
+  if (!link) return;
+  try { await navigator.clipboard.writeText(link); alert("Customer ordering link copied."); }
+  catch (error) { window.prompt("Copy this customer ordering link:", link); }
+}
+function popupCustomerLinkSection() {
+  const products = popupAvailableProducts();
+  const selected = new Set(popupLinkSelectedIds());
+  const link = popupCustomerOrderLink();
+  let qr = "";
+  if (link) {
+    try { const code = qrcode(0, "M"); code.addData(link); code.make(); qr = `<div class="popup-payment-qr" aria-label="Customer ordering QR code">${code.createSvgTag({cellSize:5,margin:2})}</div>`; }
+    catch (error) { qr = `<p class="ref-note">Could not make QR: ${escapeHtml(error.message || String(error))}</p>`; }
+  }
+  return `<section class="dashboard-card" style="padding:20px;margin-top:18px"><h2>Customer order link & QR</h2><p class="ref-note">Choose the drinks to show. Customers scan this QR, choose their own options and quantity, then check out. This QR is an order link, not a payment QR.</p><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin:15px 0">${products.map(product => `<label style="display:flex;align-items:center;gap:8px;padding:11px;border:1px solid var(--admin-line);border-radius:10px;cursor:pointer"><input type="checkbox" value="${escapeHtml(String(product.id))}" ${selected.has(String(product.id)) ? "checked" : ""} onchange="popupToggleLinkProduct(this.value,this.checked)"><span>${escapeHtml(product.name)}</span></label>`).join("") || "No available drinks for this store."}</div>${link ? `<div class="field"><label>Selected-drink link · ${selected.size} item${selected.size === 1 ? "" : "s"}</label><input readonly value="${escapeHtml(link)}" onclick="this.select()"></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn-secondary" onclick="popupCopyCustomerLink()">Copy link</button><a class="btn-secondary" href="${escapeHtml(link)}" target="_blank" rel="noopener">Open customer view</a></div>${qr}` : '<p class="ref-note">Select at least one drink to generate the link and QR.</p>'}</section>`;
+}
+const renderPopupTabWithoutLink = renderPopupTab;
+renderPopupTab = function () { return renderPopupTabWithoutLink() + popupCustomerLinkSection(); };
