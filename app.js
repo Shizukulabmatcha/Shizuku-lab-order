@@ -1984,6 +1984,22 @@ async function submitOrder() {
     return;
   }
 
+  const simpleDrinkCheckout = !partnerModeActive() && !isB2B && !isRitualPass && !isSelfDelivery && !state.promo
+    && cartLines().every(line => {
+      const product=state.menu.find(item=>String(item.id)===String(line.productId));
+      return product && !product.is_bundle && !product.is_b2b && !line.isCampaignUpsell;
+    });
+  if (simpleDrinkCheckout) {
+    try {
+      const items=cartLines().map(line=>({product_id:line.productId,quantity:Number(line.qty),option_ids:(line.options||[]).map(option=>option.optionId)}));
+      const {data:saved,error}=await db.rpc("create_shizuku_popup_order",{p_order:{...orderPayload,regular_order:true},p_items:items});
+      if(error)throw error;
+      state.lastOrder={...saved,items:cartLines().map(line=>({...line})),slot};
+      state.screen="payment";savePendingPayment();render();
+    }catch(error){alert(`Could not place your order: ${error.message||error}`);}
+    return;
+  }
+
   if (partnerModeActive() && !isRitualPass) {
     try {
       const partnerOrderPayload = { ...orderPayload, customer_id: state.customerId || null };
