@@ -92,6 +92,8 @@ const astate = {
   availabilityDraft: null,
   offlineOrderDraft: null,
   popupDraft: null,
+  popupMenus: {},
+  popupMenuDrafts: {},
   popupPaymentOrder: null,
   salesFrom: "",
   salesTo: "",
@@ -471,6 +473,16 @@ async function loadAll(options = {}) {
       const { data: settingsRows } = await db.from("store_settings").select("*").limit(1);
       astate.settings = (settingsRows && settingsRows[0]) || null;
       astate.settingsDraft = astate.settings ? { ...astate.settings } : null;
+      const popupMenusResult = await db.from("popup_menus").select("*").eq("market_code", DASHBOARD_MARKET).eq("active", true).order("updated_at", {ascending:false}).limit(1);
+      if (!popupMenusResult.error) {
+        astate.popupMenus[DASHBOARD_MARKET] = popupMenusResult.data?.[0] || null;
+        if (!astate.popupMenuDrafts[DASHBOARD_MARKET]) {
+          const saved = astate.popupMenus[DASHBOARD_MARKET];
+          astate.popupMenuDrafts[DASHBOARD_MARKET] = saved ? {...saved} : {name:"Pop-up",collection_date:localDateText(new Date()),collection_time:new Date().toLocaleTimeString("en-SG",{hour:"2-digit",minute:"2-digit",hour12:false}),collection_point:"Pop-up counter"};
+          astate.popupLinkProductIds = astate.popupLinkProductIds || {};
+          astate.popupLinkProductIds[DASHBOARD_MARKET] = (saved?.product_ids || []).map(String);
+        }
+      }
       const { data: faq, error: faqError } = await db.from("store_faq").select("*").order("sort_order");
       if (faqError) console.warn("Could not load FAQ:", faqError.message);
       astate.faq = faq || [];
@@ -663,7 +675,7 @@ async function confirmPayment(id) {
       alert("Could not confirm payment: " + error.message);
       return;
     }
-    if (order.offline_reason === "popup_sale") {
+    if (["popup_sale","popup_qr"].includes(order.offline_reason)) {
       const stock = await db.rpc("reconcile_shizuku_order_inventory", { p_order_id: String(id) });
       if (stock.error) { alert("Payment was confirmed, but inventory could not be reconciled. Please review this order: " + stock.error.message); return; }
     }
@@ -2457,7 +2469,7 @@ function setOrderFilter(filter) { astate.orderFilter = filter; render(); }
 function setOrderSearch(value) { astate.orderSearch = value; render(); }
 
 function offlineReasonLabel(value) {
-  return ({ influencer_tasting: "Influencer tasting", complimentary: "Complimentary", replacement: "Replacement", manual_sale: "Offline paid sale", popup_sale: "Pop-up sale", other: "Other" })[value] || "Offline order";
+  return ({ influencer_tasting: "Influencer tasting", complimentary: "Complimentary", replacement: "Replacement", manual_sale: "Offline paid sale", popup_sale: "Pop-up counter sale", popup_qr: "Pop-up QR order", other: "Other" })[value] || "Offline order";
 }
 function adminMarketCollectionPoints(settings = astate.settings) {
   const key = ADMIN_WORKSPACE_MARKET === "MY" ? "malaysia_collection_points" : "collection_points";
@@ -5226,7 +5238,7 @@ renderAnalyticsReportTab = function () {
   const repeatRate=stats.customers?(insights.repeat.length/stats.customers)*100:0;
   const periodLabel=period==="daily"?"Today":period==="week"?"Last 7 days":period==="monthly"?"This month":period==="custom"?"Selected range":"All time";
   const toolbar=`<div class="analytics-toolbar"><div><div class="admin-eyebrow">Normal store analytics · ${DASHBOARD_MARKET==="MY"?"Malaysia · MYR":"Singapore · SGD"}</div><div class="btn-row">${[["daily","Today"],["week","7 days"],["monthly","This month"],["total","All time"]].map(([value,label])=>`<button class="${period===value?"btn-primary":"btn-secondary"}" onclick="setAnalyticsPeriod('${value}')">${label}</button>`).join("")}</div></div><div class="btn-row"><button class="btn-secondary" onclick="exportAnalyticsExcel()">Excel</button><button class="btn-secondary" onclick="exportAnalyticsPdf()">PDF</button><button class="btn-secondary" onclick="refreshDashboard()">Refresh</button></div></div>`;
-  const summary=`<div class="analytics-kpi-grid">${AdminCard("Total collected",money(financials.collected+eventCollected),"Shop + Event receipts")}${AdminCard("Pop-up sales",money(periodOrders.filter(order=>order.offline_reason==="popup_sale").reduce((sum,order)=>sum+Number(order.total||0),0)),"Included in shop sales")}${AdminCard("Event receipts",money(eventCollected),"Paid / part-paid events")}${AdminCard("Shop gross profit",money(financials.profit),"Events tracked separately")}</div>`;
+  const summary=`<div class="analytics-kpi-grid">${AdminCard("Total collected",money(financials.collected+eventCollected),"Shop + Event receipts")}${AdminCard("Pop-up sales",money(periodOrders.filter(order=>["popup_sale","popup_qr"].includes(order.offline_reason)).reduce((sum,order)=>sum+Number(order.total||0),0)),"Included in shop sales")}${AdminCard("Event receipts",money(eventCollected),"Paid / part-paid events")}${AdminCard("Shop gross profit",money(financials.profit),"Events tracked separately")}</div>`;
   const eventTable=AdminTable(["Date received","Event","Partner","Received","Payment"],eventEntries.map(entry=>`<tr><td>${escapeHtml(entry.date||"—")}</td><td>${escapeHtml(entry.event.event_name||entry.event.package_name)}</td><td>${escapeHtml(entry.event.partner_name||"—")}</td><td>${money(entry.amount)}</td><td>${escapeHtml(entry.event.payment_status||"—")}</td></tr>`).join(""),"No event payments in this period.");
   const topRows=top.map((product,index)=>`<div class="analytics-rank-row"><span class="analytics-rank">${index+1}</span><div><b>${escapeHtml(product.name)}</b><small>${product.quantity} sold · ${product.margin.toFixed(1)}% margin</small></div><strong>${money(product.sales)}</strong></div>`).join("")||EmptyState("No paid product sales yet.");
   const trend=`<div class="analytics-chart-head" style="padding:14px 0"><div><b>${escapeHtml(periodLabel)} sales</b><div class="hint" style="margin:4px 0 0">Normal store paid revenue only</div></div><div class="analytics-chart-range"><div class="field"><label>From</label><input type="date" value="${escapeHtml(period==="custom"?astate.analyticsFrom:(bounds.from?localDateKey(bounds.from):""))}" onchange="setAnalyticsRangeField('analyticsFrom',this.value)"></div><div class="field"><label>To</label><input type="date" value="${escapeHtml(period==="custom"?astate.analyticsTo:(bounds.to?localDateKey(bounds.to):""))}" onchange="setAnalyticsRangeField('analyticsTo',this.value)"></div></div></div><div class="analytics-bars">${days.map((day)=>`<div class="analytics-bar-column"><div class="analytics-bar-value">${day.total?money(day.total):"—"}</div><div class="analytics-bar-track"><i style="height:${day.total?Math.max(8,Math.round(day.total/highest*100)):2}%"></i></div><b>${day.label}</b></div>`).join("")}</div>`;

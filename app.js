@@ -12,7 +12,9 @@ const ICONS = {
 };
 
 const ORDERING_MARKET = new URLSearchParams(window.location.search).get("market") === "MY" || /(?:\/shop\/shizuku-lab-my|^\/my)(?:\/|$)/i.test(window.location.pathname) ? "MY" : "SG";
-const POPUP_LINK_PRODUCT_IDS = (() => {
+const POPUP_MENU_ID = new URLSearchParams(window.location.search).get("popup_menu");
+const POPUP_TEST_MODE = new URLSearchParams(window.location.search).get("popup_test") === "1";
+let POPUP_LINK_PRODUCT_IDS = (() => {
   const raw = new URLSearchParams(window.location.search).get("popup_items");
   if (!raw) return null;
   const ids = [...new Set(raw.split(",").map(id => id.trim()).filter(id => /^[a-zA-Z0-9-]{1,80}$/.test(id)))];
@@ -22,7 +24,7 @@ const LEGACY_CART_STORAGE_KEY = "shizuku-lab-cart-v1";
 const LEGACY_PENDING_PAYMENT_STORAGE_KEY = "shizuku-lab-pending-payment-v1";
 const PARTNER_SESSION_KEY = "shizuku-lab-partner-session-v1";
 const PARTNER_SESSION_TTL_MS = 4 * 60 * 60 * 1000;
-const cartStorageKey = (market = ORDERING_MARKET) => `shizuku-lab-cart-v1-${String(market || "SG").toLowerCase()}${POPUP_LINK_PRODUCT_IDS ? `-popup-${[...POPUP_LINK_PRODUCT_IDS].sort().join("-")}` : ""}`;
+const cartStorageKey = (market = ORDERING_MARKET) => `shizuku-lab-cart-v1-${String(market || "SG").toLowerCase()}${POPUP_MENU_ID ? `-popup-menu-${POPUP_MENU_ID}` : POPUP_LINK_PRODUCT_IDS ? `-popup-${[...POPUP_LINK_PRODUCT_IDS].sort().join("-")}` : ""}${POPUP_TEST_MODE ? "-test" : ""}`;
 const pendingPaymentStorageKey = (market = ORDERING_MARKET) => `shizuku-lab-pending-payment-v1-${String(market || "SG").toLowerCase()}`;
 function loadSavedCart() {
   try {
@@ -81,6 +83,7 @@ function savedStoreLanguage() {
 
 const state = {
   menu: [],
+  popupMenu: null,
   allMenu: [],
   market: ORDERING_MARKET,
   language: savedStoreLanguage(),
@@ -1226,6 +1229,16 @@ async function init() {
 
   try {
     await ensureCustomerSession();
+    if (POPUP_MENU_ID) {
+      const result = await db.from("popup_menus").select("*").eq("id", POPUP_MENU_ID).eq("market_code", state.market).eq("active", true).maybeSingle();
+      const menu = result.data;
+      const today = new Date().toLocaleDateString("en-CA", {timeZone:"Asia/Singapore"});
+      if (result.error || !menu || menu.collection_date < today) throw new Error("This Pop-up menu is no longer available. Please ask the counter for a new QR code.");
+      state.popupMenu = menu;
+      POPUP_LINK_PRODUCT_IDS = new Set((menu.product_ids || []).map(String));
+      state.cart = loadSavedCart();
+      state.form.collectionPoint = menu.collection_point;
+    }
     await loadPartnerReferral();
     await loadStoreSettings();
     await reconcilePendingPayment();
@@ -1280,6 +1293,7 @@ function qualifyingCartDrinkSubtotal() {
   return qualifyingCartDrinkLines().reduce((sum, line) => sum + Number(line.unitPrice || 0) * Number(line.qty || 0), 0);
 }
 function availableCartUpsell() {
+  if (POPUP_LINK_PRODUCT_IDS) return null;
   const offer = cartUpsellConfig();
   if (!offer) return null;
   return (offer.triggerType === "spend" ? qualifyingCartDrinkSubtotal() >= offer.minSpend : qualifyingCartDrinkCount() >= offer.minDrinks) ? offer : null;
@@ -1793,7 +1807,8 @@ function checkoutReady(){
   if (!state.form.name.trim() || !isValidPhone(state.form.phone)) return false;
   if (cartIsRitualPassOnly()) return /^\S+@\S+\.\S+$/.test(state.form.email.trim());
   if (cartB2BType()==='b2b') return !ShizukuB2B.addressError(b2bAddress(),state.market);
-  if (cartB2BType()!=='drinks' || !state.form.slotId) return false;
+  if (cartB2BType()!=='drinks' || (!state.form.slotId && !state.popupMenu)) return false;
+  if (state.popupMenu) return Boolean(state.popupMenu.collection_date && state.popupMenu.collection_time && state.popupMenu.collection_point);
   return isMalaysiaSelfDelivery() ? malaysiaDeliveryAddressValid() : Boolean(state.form.collectionPoint);
 }
 function b2bCheckoutFields(){const a=state.form.deliveryAddress||{};return '<div class="ref-note"><b>Fulfilment: Free Delivery</b><br>Delivery is included in the product price.</div>'+ShizukuB2B.fields.filter(([k])=>!['recipient_name','contact_number'].includes(k)).map(([k,label,required])=>`<div class="field"><label>${label}${required?' *':''}</label><input value="${escapeHtml(a[k]||'')}" ${k==='postal_code'?'inputmode="numeric"':''} oninput="state.form.deliveryAddress=state.form.deliveryAddress||{};state.form.deliveryAddress['${k}']=this.value;onFormInput('deliveryAddress',state.form.deliveryAddress)"></div>`).join('');}
@@ -1870,7 +1885,7 @@ async function submitOrder() {
   if (!isValidPhone(f.phone)) { alert(state.market === "MY" ? "Please enter a valid Malaysia mobile number (for example, 0121234567 or +60121234567)." : "Please enter a valid Singapore phone number (for example, 91234567)."); return; }
   if (isRitualPass && !/^\S+@\S+\.\S+$/.test(f.email.trim())) { alert("Please enter the email address for your Matcha Pass."); return; }
   if (state.store.show_checkout_email !== false && f.email && !/^\S+@\S+\.\S+$/.test(f.email.trim())) { alert("Please enter a valid email address, or leave it blank."); return; }
-  if (!isB2B && !isRitualPass && !f.slotId) { alert("Please select a pickup slot."); return; }
+  if (!isB2B && !isRitualPass && !f.slotId && !state.popupMenu) { alert("Please select a pickup slot."); return; }
   const isSelfDelivery = isMalaysiaSelfDelivery();
   if (!isB2B && !isRitualPass && !isSelfDelivery && !f.collectionPoint) { alert("Please select a collection point."); return; }
   if (isSelfDelivery && !malaysiaDeliveryAddressValid()) { alert("Please complete the delivery address, city, state and 5-digit postcode."); return; }
@@ -1898,7 +1913,7 @@ async function submitOrder() {
     }
   }
   const slot = state.slots.find((item) => item.id === f.slotId);
-  if (!isB2B && !isRitualPass && !slot) { alert("Please select a valid pickup slot."); return; }
+  if (!isB2B && !isRitualPass && !slot && !state.popupMenu) { alert("Please select a valid pickup slot."); return; }
 
   const orderNumber = uidCode();
   const total = orderTotal();
@@ -1911,9 +1926,9 @@ async function submitOrder() {
     customer_name: f.name.trim(),
     customer_phone: normalisePhone(f.phone),
     customer_email: POPUP_LINK_PRODUCT_IDS || state.store.show_checkout_email === false ? null : (f.email.trim() || null),
-    collection_date: isB2B || isRitualPass ? null : slot.date,
-    collection_time: isB2B || isRitualPass ? null : slot.time,
-    collection_point: isB2B || isRitualPass ? null : (isSelfDelivery ? "Self delivery" : f.collectionPoint),
+    collection_date: isB2B || isRitualPass ? null : (state.popupMenu?.collection_date || slot.date),
+    collection_time: isB2B || isRitualPass ? null : (state.popupMenu?.collection_time || slot.time),
+    collection_point: isB2B || isRitualPass ? null : (state.popupMenu?.collection_point || (isSelfDelivery ? "Self delivery" : f.collectionPoint)),
     is_b2b:isB2B,delivery_address:isB2B?b2bAddress():(isSelfDelivery?malaysiaDeliveryAddress():{}),
     instagram: f.instagram ? f.instagram.trim().replace(/^@/, "") : "",
     total,
@@ -1924,6 +1939,7 @@ async function submitOrder() {
     payment_reference: orderNumber,
     market_code: state.market,
     currency_code: state.market === "MY" ? "MYR" : "SGD",
+    ...(state.popupMenu ? {popup_menu_id:state.popupMenu.id,is_offline:true,offline_reason:"popup_qr"} : {}),
     order_kind: isRitualPass ? "matcha_pass_purchase" : "retail",
     fulfilment_method: isB2B ? "b2b_delivery" : (isSelfDelivery ? "self_delivery" : "collection"),
     delivery_fee: isSelfDelivery ? selfDeliveryFee() : 0,
@@ -1944,6 +1960,27 @@ async function submitOrder() {
     state.screen = "payment";
     savePendingPayment();
     render();
+    return;
+  }
+
+  if (POPUP_TEST_MODE && state.popupMenu) {
+    state.lastOrder = { ...orderPayload, id: null, items: cartLines().map(line => ({...line})), slot, order_number:`TEST-${orderNumber}` };
+    state.screen = "payment";
+    state.cart = {}; saveCart();
+    render();
+    return;
+  }
+
+  if (state.popupMenu) {
+    try {
+      const items = cartLines().map(line => ({product_id:line.productId,quantity:Number(line.qty),option_ids:(line.options||[]).map(option=>option.optionId)}));
+      const {data: saved, error} = await db.rpc("create_shizuku_popup_order",{p_order:{...orderPayload,popup_menu_id:state.popupMenu.id},p_items:items});
+      if (error) throw error;
+      state.lastOrder = {...saved,items:cartLines().map(line=>({...line})),slot:{date:saved.collection_date,time:saved.collection_time}};
+      state.screen = "payment";
+      savePendingPayment();
+      render();
+    } catch(error) { alert(`Could not place this Pop-up order: ${error.message||error}`); }
     return;
   }
 
@@ -2589,6 +2626,7 @@ function renderCart() {
 
 /* ---------- checkout ---------- */
 function renderCheckoutDiscount(canRefer, f) {
+  if (state.popupMenu) return "";
   if (partnerModeActive()) return "";
   const open = state.checkoutDiscountOpen;
   const choice = canRefer ? state.checkoutDiscountChoice : "promo";
@@ -2611,7 +2649,7 @@ function renderCheckout() {
   if(isRitualRedemptionMode())return renderRitualRedemptionCheckout();
   const isB2B=cartB2BType()==='b2b';
   const isRitualPass=cartIsRitualPassOnly();
-  const canRefer=!isB2B && !isRitualPass;
+  const canRefer=!isB2B && !isRitualPass && !state.popupMenu;
   const isSelfDelivery=isMalaysiaSelfDelivery();
   const canSubmit=checkoutReady();
   const collectionSettings = marketCollectionSettings();
@@ -2626,8 +2664,8 @@ function renderCheckout() {
       <div class="field"><label for="f-phone">${isB2B?"Contact Number *":tr("phone")} · ${state.market === "MY" ? "+60 Malaysia" : "+65 Singapore"}</label><input id="f-phone" value="${escapeHtml(f.phone)}" placeholder="${state.market === "MY" ? "e.g. 0121234567" : "e.g. 91234567"}" inputmode="tel" autocomplete="tel" oninput="this.value=cleanPhoneInput(this.value);onFormInput('phone', this.value)"></div>
       ${POPUP_LINK_PRODUCT_IDS || state.store.show_checkout_email === false ? "" : `<div class="field"><label>${tr("email")}</label><input id="f-email" type="email" value="${escapeHtml(f.email)}" placeholder="you@example.com" autocomplete="email" oninput="onFormInput('email', this.value)"></div>`}
       ${state.store.show_checkout_instagram === false ? "" : `<div class="field"><label>${tr("instagram")}</label><input id="f-instagram" value="${escapeHtml(f.instagram)}" placeholder="@yourhandle" oninput="onFormInput('instagram', this.value)"></div>`}
-      ${state.market === "MY" && state.store.malaysia_self_delivery_enabled === true && !isB2B && !isRitualPass ? `<div class="field"><label>Fulfilment</label><div class="fulfilment-choice"><button type="button" class="slot ${!isSelfDelivery ? "active" : ""}" onclick="onFormInput('fulfilmentMethod','collection')">${tr("collection")}</button><button type="button" class="slot ${isSelfDelivery ? "active" : ""}" onclick="onFormInput('fulfilmentMethod','delivery')">${tr("self_delivery")}</button></div>${state.store.malaysia_delivery_instructions ? `<div class="hint" style="text-align:left;margin-top:6px">${escapeHtml(state.store.malaysia_delivery_instructions)}</div>` : ""}${state.store.malaysia_delivery_areas ? `<div class="hint" style="text-align:left;margin-top:4px">Delivery area: ${escapeHtml(state.store.malaysia_delivery_areas)}</div>` : ""}</div>` : ""}
-      ${isRitualPass ? `<div class="ref-note"><b>Matcha Pass purchase</b><br>No collection booking is needed today. After payment is confirmed, return to the Matcha Pass banner and use this phone number to reserve each of your four drinks.</div>` : isB2B?b2bCheckoutFields():`${cartPreorderHours() > 0 ? `<div class="ref-note"><b>Pre-order · ${cartPreorderHours()} hours notice</b><br>Only available ${isSelfDelivery ? "delivery" : "collection"} times after this notice period are shown.</div>` : ""}      <div class="field"><label>${isSelfDelivery ? tr("delivery_date") : tr("collection_date")}</label>
+      ${state.market === "MY" && state.store.malaysia_self_delivery_enabled === true && !isB2B && !isRitualPass && !state.popupMenu ? `<div class="field"><label>Fulfilment</label><div class="fulfilment-choice"><button type="button" class="slot ${!isSelfDelivery ? "active" : ""}" onclick="onFormInput('fulfilmentMethod','collection')">${tr("collection")}</button><button type="button" class="slot ${isSelfDelivery ? "active" : ""}" onclick="onFormInput('fulfilmentMethod','delivery')">${tr("self_delivery")}</button></div>${state.store.malaysia_delivery_instructions ? `<div class="hint" style="text-align:left;margin-top:6px">${escapeHtml(state.store.malaysia_delivery_instructions)}</div>` : ""}${state.store.malaysia_delivery_areas ? `<div class="hint" style="text-align:left;margin-top:4px">Delivery area: ${escapeHtml(state.store.malaysia_delivery_areas)}</div>` : ""}</div>` : ""}
+      ${state.popupMenu ? `<div class="ref-note"><b>${escapeHtml(state.popupMenu.name)}${POPUP_TEST_MODE ? " · TEST MODE" : ""}</b><br>${escapeHtml(state.popupMenu.collection_date)} · ${escapeHtml(state.popupMenu.collection_time)}<br>${escapeHtml(state.popupMenu.collection_point)}</div>` : isRitualPass ? `<div class="ref-note"><b>Matcha Pass purchase</b><br>No collection booking is needed today. After payment is confirmed, return to the Matcha Pass banner and use this phone number to reserve each of your four drinks.</div>` : isB2B?b2bCheckoutFields():`${cartPreorderHours() > 0 ? `<div class="ref-note"><b>Pre-order · ${cartPreorderHours()} hours notice</b><br>Only available ${isSelfDelivery ? "delivery" : "collection"} times after this notice period are shown.</div>` : ""}      <div class="field"><label>${isSelfDelivery ? tr("delivery_date") : tr("collection_date")}</label>
         <select class="checkout-select" onchange="onPickupDateChange(this.value)">
           <option value="">${tr("select_date")}</option>
           ${pickupDates.map(([date, label]) => `<option value="${escapeHtml(date)}" ${f.pickupDate === date ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
@@ -2754,6 +2792,7 @@ function leavePaymentPage() {
 function renderPayment() {
   const order = state.lastOrder;
   if (!order) return renderMenu();
+  if (POPUP_TEST_MODE && state.popupMenu && !order.id) return `${header()}<div class="screen"><div class="summary-card"><h2>TEST ORDER · no payment</h2><p>This is a checkout rehearsal. No order, sale, stock movement or message will be created.</p><div class="row"><span>Order</span><b>${escapeHtml(order.order_number)}</b></div><div class="row"><span>Collection</span><b>${escapeHtml(order.collection_date)} · ${escapeHtml(order.collection_time)}</b></div><div class="row"><span>Location</span><b>${escapeHtml(order.collection_point)}</b></div><div class="row bold"><span>Would charge</span><b>${money(order.total)}</b></div><button class="primary-btn" onclick="state.screen='confirmation';render()">Simulate payment confirmation</button></div></div>`;
   if (order.order_status === "cancelled") {
     return `${header()}<div class="screen"><div class="summary-card" style="text-align:center;"><div class="display" style="font-size:22px;">This order was cancelled</div><div class="hint" style="margin:10px 0 18px;line-height:1.5;">Its stock reservation has been released, so it cannot accept payment.</div><button class="primary-btn" onclick="setScreen('menu')">Place a new order</button></div></div>`;
   }
@@ -2825,6 +2864,7 @@ function renderPayment() {
 function renderConfirmation() {
   const order = state.lastOrder;
   if (!order) return renderMenu();
+  if (POPUP_TEST_MODE && state.popupMenu && !order.id) return `${header()}<div class="screen center"><div class="check-circle">${ICONS.check}</div><div class="display" style="font-size:22px">TEST COMPLETE</div><p class="hint">The customer checkout screens worked. No order was saved, no payment was taken, and stock was not changed.</p><div class="code-box"><b>${escapeHtml(order.order_number)}</b><div class="row"><span>Would charge</span><b>${money(order.total)}</b></div><div class="row"><span>Collection</span><span>${escapeHtml(order.collection_date)} · ${escapeHtml(order.collection_time)}</span></div></div><button class="primary-btn" onclick="state.screen='menu';render()">Back to test menu</button></div>`;
   if(order.order_kind==="matcha_pass_redemption")return `${header()}<div class="screen center"><div class="check-circle">${ICONS.check}</div><div class="display" style="font-size:23px;margin-bottom:6px">${Number(order.total||0)>0?"Top-up submitted":"Matcha Pass redemption confirmed"} 🍵</div><div class="hint" style="margin-bottom:18px">${Number(order.total||0)>0?"We’ll confirm your payment screenshot shortly.":"Your drinks are reserved for collection."}</div><div class="code-box"><div class="mono code-text">${escapeHtml(order.order_number||"")}</div><div class="divider"></div><div class="row"><span class="label">Credits used</span><b>${Number(order.matcha_pass_credits_used||0)}</b></div><div class="row"><span class="label">Pass remaining</span><b>${Number(order.matcha_pass_remaining||0)} / 4</b></div><div class="row"><span class="label">Top-up</span><b>${money(order.total||0)}</b></div><div class="row"><span class="label">Collection</span><span>${escapeHtml(order.collection_date||"")} · ${escapeHtml(order.collection_time||"")}</span></div></div><button class="primary-btn" style="margin-top:20px" onclick="state.ritual.phone=state.lastOrder.customer_phone||state.ritual.phone;setScreen('menu');lookupRitualPasses()">View my Matcha Pass</button><button class="btn-secondary" style="width:100%;margin-top:9px" onclick="setScreen('menu')">Back to store</button></div>`;
   return `
     ${header()}
