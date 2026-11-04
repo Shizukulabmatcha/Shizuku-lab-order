@@ -1984,15 +1984,20 @@ async function submitOrder() {
     return;
   }
 
-  const simpleDrinkCheckout = !partnerModeActive() && !isB2B && !isRitualPass && !isSelfDelivery && !state.promo
+  const simpleDrinkCheckout = !partnerModeActive() && !isB2B && !isRitualPass && !isSelfDelivery
     && cartLines().every(line => {
       const product=state.menu.find(item=>String(item.id)===String(line.productId));
-      return product && !product.is_bundle && !product.is_b2b && !line.isCampaignUpsell;
+      return product && !product.is_b2b;
     });
   if (simpleDrinkCheckout) {
     try {
-      const items=cartLines().map(line=>({product_id:line.productId,quantity:Number(line.qty),option_ids:(line.options||[]).map(option=>option.optionId)}));
-      const {data:saved,error}=await db.rpc("create_shizuku_popup_order",{p_order:{...orderPayload,regular_order:true},p_items:items});
+      const items=cartLines().map(line=>{
+        const product=state.menu.find(item=>String(item.id)===String(line.productId));
+        return {product_id:line.productId,quantity:Number(line.qty),option_ids:isBundle(product)?[]:(line.options||[]).map(option=>option.optionId),
+          bundle_components:isBundle(product)?(line.options||[]).map((drink,index)=>({drink_number:drink.drinkNumber||index+1,product_id:drink.productId,option_ids:(drink.options||[]).map(option=>option.optionId)})):[],
+          is_campaign_upsell:Boolean(line.isCampaignUpsell)};
+      });
+      const {data:saved,error}=await db.rpc("create_shizuku_popup_order",{p_order:{...orderPayload,regular_order:true,promo_code:state.promo?.code||null,promo_kind:state.promo?.kind||"promo"},p_items:items});
       if(error)throw error;
       state.lastOrder={...saved,items:cartLines().map(line=>({...line})),slot};
       state.screen="payment";savePendingPayment();render();
@@ -2275,11 +2280,11 @@ function storeInfoPanel() {
       <div class="store-panel-body">
         <div class="store-identity"><span class="store-logo-inline" style="--logo-circle-size:${logoCircleSize}px;"><img src="${escapeHtml(logoUrl)}" style="transform:translate(${logoImageX}%,${logoImageY}%) scale(${Math.min(1, Math.max(.8, logoImageScale))});" alt="${escapeHtml(state.store.store_name)} logo"></span><div class="store-identity-copy"><a class="store-insta" href="https://instagram.com/${encodeURIComponent(igHandle)}" target="_blank" rel="noopener">@${escapeHtml(igHandle)}</a></div></div>${whatsappLink}
         ${state.store.reviews_enabled === false || !partnerFeatureEnabled("reviews") ? "" : `<button type="button" class="write-review-link" onclick="setScreen('reviews')">${escapeHtml(state.store.review_cta_label || "Share your Shizuku moment")}</button>`}
-        <div class="store-dropoff">${collectionAddress}</div>
+        <div class="store-dropoff">${state.popupMenu ? escapeHtml(state.popupMenu.collection_point) : collectionAddress}</div>
         <p class="store-desc">${storeDescription}</p>
-        ${homeCollectionMapCard()}
+        ${state.popupMenu ? "" : homeCollectionMapCard()}
         ${pendingPaymentMarkup()}
-        ${partnerFeatureEnabled("next_collection") ? nextCollectionCard(nextCollections) : ""}
+        ${!state.popupMenu && partnerFeatureEnabled("next_collection") ? nextCollectionCard(nextCollections) : ""}
         ${partnerMemberBanner()}
         ${ritualPassBanner()}
         ${customerStoreActions()}
@@ -2403,7 +2408,7 @@ function renderMenu() {
   return `
     ${header(true)}
     ${storeInfoPanel()}
-    ${POPUP_LINK_PRODUCT_IDS ? '<div style="margin:14px 20px;padding:12px 16px;border-radius:12px;background:var(--card);color:var(--matcha);font-size:13px">Pop-up menu · choose your drinks and options below.</div>' : ''}
+    ${state.popupMenu ? `<div style="margin:14px 20px;padding:12px 16px;border-radius:12px;background:var(--card);color:var(--matcha);font-size:13px"><b>${escapeHtml(state.popupMenu.name)}${POPUP_TEST_MODE?" · TEST MODE":""}</b><br>${escapeHtml(state.popupMenu.collection_date)} · ${escapeHtml(state.popupMenu.collection_time)} · ${escapeHtml(state.popupMenu.collection_point)}<br>Choose your drinks and options below.</div>` : POPUP_LINK_PRODUCT_IDS ? '<div style="margin:14px 20px;padding:12px 16px;border-radius:12px;background:var(--card);color:var(--matcha);font-size:13px">Pop-up menu · choose your drinks and options below.</div>' : ''}
     ${isRitualRedemptionMode()?`<div style="margin:14px 20px;padding:14px 16px;border-radius:15px;background:var(--matcha);color:var(--cream);display:flex;justify-content:space-between;gap:12px;align-items:center"><div><b>Using Matcha Pass</b><div style="font-size:11px;margin-top:3px">${ritualAvailable()} drink${ritualAvailable()===1?"":"s"} available · ${ritualRemaining()} remaining on Pass</div></div><button class="btn-secondary" style="width:auto;background:var(--card)" onclick="exitRitualRedemption()">Exit</button></div>`:""}
     ${cartNoticeMarkup()}
     ${state.loadError ? `<div class="setup-banner" style="border-color:#B33;background:#FBEAEA;color:#7a1f1f;">Could not load products: <code>${escapeHtml(state.loadError)}</code></div>` : ""}
